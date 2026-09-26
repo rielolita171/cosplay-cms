@@ -1,0 +1,106 @@
+// Prisma Schema for Cosplay Management System
+// SQLite database using file-based storage
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// USER MODEL - Handles authentication, OAuth, Telegram 2FA
+// ============================================================================
+model User {
+  id                 String    @id @default(uuid())
+  username           String    @unique
+  email              String    @unique
+  oauthProvider      String?   // google, github, etc.
+  oauthId            String?   @unique
+  telegramChatId     String?   @unique
+  telegram2FAEnabled Boolean   @default(true)
+  twoFactorSecret    String?   // TOTP secret (optional backup)
+  twoFactorExpiry    DateTime?
+  recoveryCodeHash   String?   // Hashed break-glass recovery key
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+}
+
+// ============================================================================
+// COSTUME MODEL - Main inventory tracking with completion milestones
+// ============================================================================
+model Costume {
+  id                 String        @id @default(uuid())
+  fandom             String        // Anime series, game, etc.
+  character          String        // Character name
+  brand              String?       // Maker/brand name
+  size               String?       // XS, S, M, L, XL, etc.
+  isFullset          Boolean       @default(false)
+  doneCostest        Boolean       @default(false)     // Competed at costest event
+  doneEvent          Boolean       @default(false)     // Worn at formal event
+  donePhotoSession   Boolean       @default(false)     // Professional photo session
+  status             CostumeStatus @default(IN_POSSESSION)
+  buyPrice           Float?
+  sellPrice          Float?
+  sellPriceMutual    Float?        // Mutual swap offer price
+  notes              String?
+  referenceUrl       String?
+  imageUrls          String        @default("[]")     // JSON array of image URLs
+  props              Prop[]
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+}
+
+enum CostumeStatus {
+  IN_POSSESSION
+  ON_RENT
+  TO_BE_SOLD
+  WISHLIST
+}
+
+// ============================================================================
+// PROP MODEL - Props, accessories, wigs linked to costumes
+// ============================================================================
+model Prop {
+  id        String    @id @default(uuid())
+  costumeId String?
+  costume   Costume?  @relation(fields: [costumeId], references: [id], onDelete: SetNull)
+  name      String    // e.g., "Raiden Shogun's Polearm"
+  category  String?   // Weapon, Armor, Headpiece, Wig, Accessory, Shoes
+  location  String?   // Storage location: "Box A - Hall Closet", "Shelf 2 - Bedroom"
+  condition String?   // Mint, Minor Wear, Needs Repair, Damaged
+  notes     String?
+  imageUrls String?   @default("[]")    // JSON array
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+// ============================================================================
+// CONTACT LENS MODEL - Colored/prescription lens inventory with expiry tracking
+// ============================================================================
+model ContactLens {
+  id           String     @id @default(uuid())
+  character    String?    // Character these lenses are for
+  color        String     // Purple, Red, Blue, etc.
+  brand        String?    // Sweety Spata, Pinkholic, etc.
+  prescription String?    // Degree: -1.50, 0.00, +2.00
+  purchaseDate DateTime?
+  openedDate   DateTime?  // Date lens vial was first opened
+  expiryDate   DateTime   // Factory expiration or calculated active expiry
+  isOpened     Boolean    @default(false)
+  status       LensStatus @default(UNOPENED)
+  notes        String?
+  imageUrl     String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+enum LensStatus {
+  UNOPENED      // Sealed, valid until factory expiration
+  ACTIVE        // Currently open, within safe lifespan (12 months from open date)
+  EXPIRING_SOON // Within 14-day warning threshold
+  EXPIRED       // Past safe usage date
+  DISPOSED      // Properly discarded
+}

@@ -1,0 +1,114 @@
+{
+  "name": "Cosplay CMS - Contact Lens Expiry Alerts",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 8,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger-1",
+      "name": "Daily at 08:00 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:4001/api/notifications/contact-lenses/expiring?days=14",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-CMS-API-KEY",
+              "value": "your_api_key_here"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-request-1",
+      "name": "Query Expiring Lenses",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.count }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "if-lenses-expiring",
+      "name": "Any Expiring?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "your_telegram_chat_id_here",
+        "text": "=⚠️ <b>Contact Lens Expiry Warning ({{ $json.thresholdDays }}-Day Window)</b>\n\nThe following colored lenses in your inventory are expiring soon:\n\n{{ $json.items.map(item => `• <b>${item.character}</b> (${item.color})\n  Brand: ${item.brand} | Degree: ${item.prescription}\n  Expiry: ${item.expiryDate.split('T')[0]} (<b>${item.daysRemaining} days left</b>)\n  Status: ${item.status}`).join('\n\n') }}\n\n🔍 <i>Please verify your inventory before event usage!</i>",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "telegram-alert",
+      "name": "Send Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [950, 200]
+    }
+  ],
+  "connections": {
+    "Daily at 08:00 AM": {
+      "main": [
+        [
+          {
+            "node": "Query Expiring Lenses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Expiring Lenses": {
+      "main": [
+        [
+          {
+            "node": "Any Expiring?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Expiring?": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

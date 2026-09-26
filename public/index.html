@@ -1,0 +1,1706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cosplay Management System (CMS)</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --card-bg: rgba(26, 31, 46, 0.85);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --primary: #8b5cf6;
+      --primary-hover: #7c3aed;
+      --accent: #ec4899;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --info: #3b82f6;
+      --radius: 12px;
+      --shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+      --transition: all 0.2s ease-in-out;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      background-image: radial-gradient(at 0% 0%, rgba(139, 92, 246, 0.15) 0px, transparent 50%),
+                        radial-gradient(at 100% 100%, rgba(236, 72, 153, 0.15) 0px, transparent 50%);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .container {
+      max-width: 1300px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .logo-group h1 {
+      font-size: 1.8rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #c084fc, #f472b6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.5px;
+    }
+
+    .logo-group p {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .btn {
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+      border: none;
+      transition: var(--transition);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+    }
+    .btn-primary:hover {
+      background: var(--primary-hover);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text);
+      border: 1px solid var(--card-border);
+    }
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.15);
+    }
+
+    /* Metrics Grid */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    .metric-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      backdrop-filter: blur(12px);
+      padding: 20px;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .metric-title {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .metric-value {
+      font-size: 2.2rem;
+      font-weight: 800;
+    }
+
+    .metric-sub {
+      font-size: 0.8rem;
+      margin-top: 6px;
+    }
+
+    /* Nav Tabs */
+    .tabs-nav {
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid var(--card-border);
+      margin-bottom: 24px;
+      padding-bottom: 8px;
+      overflow-x: auto;
+    }
+
+    .tab-btn {
+      padding: 10px 20px;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      border-radius: 8px;
+      transition: var(--transition);
+    }
+
+    .tab-btn:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .tab-btn.active {
+      color: white;
+      background: var(--primary);
+    }
+
+    /* Search & Filter Bar */
+    .filter-bar {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    .search-input {
+      flex: 1;
+      min-width: 250px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      color: white;
+      font-size: 0.95rem;
+    }
+    .search-input:focus {
+      outline: 2px solid var(--primary);
+    }
+
+    .select-input {
+      padding: 10px 16px;
+      border-radius: 8px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      color: white;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+
+    /* Card Grids */
+    .items-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 20px;
+    }
+
+    .item-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      backdrop-filter: blur(12px);
+      border-radius: var(--radius);
+      padding: 20px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: var(--transition);
+    }
+    .item-card:hover {
+      transform: translateY(-3px);
+      border-color: rgba(139, 92, 246, 0.4);
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .badge-in_possession { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+    .badge-on_rent { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
+    .badge-to_be_sold { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+    .badge-wishlist { background: rgba(236, 72, 153, 0.15); color: #f472b6; }
+    .badge-unopened { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+    .badge-active { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
+    .badge-expiring_soon { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+    .badge-expired { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+
+    /* Progress bar */
+    .progress-container {
+      margin: 14px 0;
+    }
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .progress-bar-bg {
+      height: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #8b5cf6, #ec4899);
+      border-radius: 999px;
+      transition: width 0.4s ease;
+    }
+
+    .tags-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 10px 0;
+    }
+
+    .tag-chip {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    .tag-chip.active {
+      background: rgba(139, 92, 246, 0.2);
+      border-color: rgba(139, 92, 246, 0.4);
+      color: #c084fc;
+    }
+
+    /* Modal Overlay */
+    dialog {
+      background: #1e2230;
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      color: var(--text);
+      padding: 24px;
+      max-width: 500px;
+      width: 90%;
+      margin: auto;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+    }
+    dialog::backdrop {
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(4px);
+    }
+
+    .form-group {
+      margin-bottom: 14px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--text-muted);
+    }
+    .form-control {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #141724;
+      border: 1px solid var(--card-border);
+      color: white;
+      font-size: 0.9rem;
+    }
+    .form-control:focus {
+      outline: 2px solid var(--primary);
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 48px 16px;
+      color: var(--text-muted);
+      grid-column: 1 / -1;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #1f2937;
+      color: white;
+      padding: 12px 20px;
+      border-radius: 8px;
+      border-left: 4px solid var(--primary);
+      box-shadow: 0 10px 15px -3px rgba(0,0,0,0.4);
+      display: none;
+      z-index: 9999;
+    }
+
+    /* Auth Screens */
+    .screen {
+      min-height: 100vh;
+    }
+
+    .auth-container {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .auth-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      backdrop-filter: blur(12px);
+      border-radius: var(--radius);
+      padding: 40px;
+      width: 100%;
+      max-width: 420px;
+      box-shadow: var(--shadow);
+    }
+
+    .auth-header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+
+    .auth-header h1 {
+      font-size: 1.8rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #c084fc, #f472b6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+    }
+
+    .auth-header p {
+      color: var(--text-muted);
+      font-size: 1rem;
+    }
+
+    .auth-error {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #f87171;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      margin-bottom: 16px;
+      text-align: center;
+    }
+
+    .btn-full {
+      width: 100%;
+      justify-content: center;
+      padding: 14px 24px;
+      font-size: 1rem;
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid transparent;
+      padding: 8px 16px;
+      font-size: 0.9rem;
+    }
+
+    .btn-ghost:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    /* Loading overlay */
+    .loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 17, 23, 0.9);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 9998;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .loading-overlay.active {
+      display: flex;
+    }
+
+    .spinner {
+      width: 48px;
+      height: 48px;
+      border: 4px solid rgba(139, 92, 246, 0.2);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Skeleton loading */
+    .skeleton {
+      background: linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0.05) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 8px;
+    }
+
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    .skeleton-card {
+      padding: 20px;
+    }
+
+    .skeleton-title {
+      height: 24px;
+      width: 60%;
+      margin-bottom: 12px;
+    }
+
+    .skeleton-text {
+      height: 16px;
+      width: 40%;
+      margin-bottom: 8px;
+    }
+
+    .skeleton-bar {
+      height: 8px;
+      width: 100%;
+      margin-top: 14px;
+    }
+
+    .skeleton-media {
+      height: 150px;
+      width: 100%;
+      border-radius: 10px;
+      margin-bottom: 14px;
+    }
+
+    /* Card media / thumbnails */
+    .item-media {
+      position: relative;
+      height: 150px;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 14px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--card-border);
+    }
+
+    .item-media img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .media-placeholder {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      text-align: center;
+      padding: 8px;
+    }
+
+    .media-placeholder .media-icon {
+      font-size: 1.8rem;
+    }
+
+    .media-count {
+      position: absolute;
+      bottom: 8px;
+      right: 8px;
+      background: rgba(15, 17, 23, 0.75);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      font-size: 0.7rem;
+      padding: 2px 8px;
+      border-radius: 9999px;
+    }
+
+    .media-upload-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: rgba(15, 17, 23, 0.75);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: var(--transition);
+    }
+
+    .media-upload-btn:hover {
+      background: var(--primary);
+      border-color: var(--primary);
+    }
+
+    .media-upload-btn:disabled {
+      opacity: 0.6;
+      cursor: progress;
+    }
+
+    .upload-input-hidden {
+      display: none;
+    }
+
+    .card-actions {
+      margin-top: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .btn-danger {
+      background: var(--danger);
+      color: #ffffff;
+    }
+
+    .btn-danger:hover {
+      background: #dc2626;
+      transform: translateY(-1px);
+    }
+
+    /* Empty state */
+    .empty-state-icon {
+      font-size: 2.5rem;
+      margin-bottom: 10px;
+    }
+
+    .empty-state-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+
+    .empty-state-text {
+      font-size: 0.9rem;
+      max-width: 420px;
+      margin: 0 auto 16px;
+    }
+
+    /* Inline form validation */
+    .field-error {
+      display: none;
+      color: var(--danger);
+      font-size: 0.78rem;
+      margin-top: 6px;
+    }
+
+    .form-control.is-invalid {
+      border-color: var(--danger);
+    }
+
+    .form-control.is-invalid:focus {
+      outline: 2px solid var(--danger);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- LOGIN SCREEN -->
+  <section id="screen-login" class="screen">
+    <div class="auth-container">
+      <div class="auth-card">
+        <div class="auth-header">
+          <h1>Cosplay CMS</h1>
+          <p>Sign in to access your inventory</p>
+        </div>
+        <form id="login-form" onsubmit="handleLogin(event)">
+          <div class="form-group">
+            <label for="login-username">Username</label>
+            <input type="text" id="login-username" class="form-control" name="username" required autocomplete="username" placeholder="Enter username">
+          </div>
+          <div class="form-group">
+            <label for="login-password">Password</label>
+            <input type="password" id="login-password" class="form-control" name="password" required autocomplete="current-password" placeholder="Enter password">
+          </div>
+          <div id="login-error" class="auth-error" style="display: none;"></div>
+          <button type="submit" class="btn btn-primary btn-full">Sign In</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- OTP SCREEN -->
+  <section id="screen-otp" class="screen" style="display: none;">
+    <div class="auth-container">
+      <div class="auth-card">
+        <div class="auth-header">
+          <h1>Two-Factor Authentication</h1>
+          <p>A 6-digit code has been sent to your Telegram</p>
+        </div>
+        <form id="otp-form" onsubmit="handleOtpVerify(event)">
+          <div class="form-group">
+            <label for="otp-code">Verification Code</label>
+            <input type="text" id="otp-code" class="form-control" name="otp" required maxlength="6" pattern="\d{6}" autocomplete="one-time-code" placeholder="123456" style="letter-spacing: 0.5rem; text-align: center; font-size: 1.5rem;">
+          </div>
+          <div id="otp-error" class="auth-error" style="display: none;"></div>
+          <button type="submit" class="btn btn-primary btn-full">Verify</button>
+          <div style="margin-top: 16px; text-align: center;">
+            <button type="button" class="btn btn-ghost" onclick="resendOtp()">Resend Code</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- DASHBOARD SCREEN -->
+  <section id="screen-dashboard" class="screen" style="display: none;">
+    <div class="container">
+      <!-- Header -->
+      <header>
+        <div class="logo-group">
+          <h1>Cosplay Management System</h1>
+          <p>Home Server Inventory, Milestones & 2FA Security</p>
+        </div>
+        <div class="header-actions">
+          <button class="btn btn-secondary" onclick="openModal('modal-add-lens')">+ Add Lens</button>
+          <button class="btn btn-secondary" onclick="openModal('modal-add-prop')">+ Add Prop</button>
+          <button class="btn btn-primary" onclick="openModal('modal-add-costume')">+ New Costume</button>
+          <button class="btn btn-secondary" onclick="logout()">Logout</button>
+        </div>
+      </header>
+
+      <!-- Metrics Cards -->
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-title">Total Costumes</div>
+          <div class="metric-value" id="metric-total-costumes">--</div>
+          <div class="metric-sub" style="color: var(--success);" id="metric-fullset-count">-- fullsets</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-title">Out On Loan / Rent</div>
+          <div class="metric-value" style="color: var(--info);" id="metric-rent-costumes">--</div>
+          <div class="metric-sub">Active loans</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-title">Active Contact Lenses</div>
+          <div class="metric-value" style="color: var(--success);" id="metric-active-lenses">--</div>
+          <div class="metric-sub">Currently opened vials</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-title">Lenses Expiring Soon</div>
+          <div class="metric-value" style="color: var(--warning);" id="metric-expiring-lenses">--</div>
+          <div class="metric-sub" style="color: var(--danger);" id="metric-expired-lenses">0 expired</div>
+        </div>
+      </div>
+
+      <!-- Tab Navigation -->
+      <div class="tabs-nav">
+        <button class="tab-btn active" onclick="switchTab('costumes')">👘 Costumes</button>
+        <button class="tab-btn" onclick="switchTab('props')">⚔️ Props & Accessories</button>
+        <button class="tab-btn" onclick="switchTab('lenses')">👁️ Contact Lenses</button>
+        <button class="tab-btn" onclick="switchTab('security')">🔐 Security & 2FA</button>
+      </div>
+
+      <!-- Filter Bar -->
+      <div class="filter-bar" id="filter-bar">
+        <input type="text" class="search-input" id="search-input" placeholder="Search by character or fandom..." oninput="filterItems()">
+        <select class="select-input" id="status-filter" onchange="filterItems()">
+          <option value="">All Statuses</option>
+          <option value="IN_POSSESSION">In Possession</option>
+          <option value="ON_RENT">On Rent</option>
+          <option value="TO_BE_SOLD">To Be Sold</option>
+          <option value="WISHLIST">Wishlist</option>
+        </select>
+      </div>
+
+      <!-- Costumes Tab Content -->
+      <section id="tab-costumes">
+        <div class="items-grid" id="costumes-grid"></div>
+      </section>
+
+      <!-- Props Tab Content -->
+      <section id="tab-props" style="display: none;">
+        <div class="items-grid" id="props-grid"></div>
+      </section>
+
+      <!-- Lenses Tab Content -->
+      <section id="tab-lenses" style="display: none;">
+        <div class="items-grid" id="lenses-grid"></div>
+      </section>
+
+      <!-- Security Tab Content -->
+      <section id="tab-security" style="display: none;">
+        <div class="metric-card" style="max-width: 600px; margin: 0 auto;">
+          <h2 style="font-size: 1.3rem; margin-bottom: 16px;">🔐 Security & Break-Glass Settings</h2>
+          <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px;">
+            Manage Telegram Two-Factor Authentication (2FA) and generate emergency single-use recovery keys.
+          </p>
+
+          <!-- User Profile -->
+          <div style="margin-bottom: 24px; padding: 16px; background: rgba(255,255,255,0.03); border-radius: 8px; border: 1px solid var(--card-border);">
+            <h3 style="font-size: 1rem; margin-bottom: 12px; color: var(--text);">👤 User Profile</h3>
+            <div style="display: grid; gap: 8px; font-size: 0.9rem;">
+              <div><strong>Username:</strong> <span id="sec-username">-</span></div>
+              <div><strong>Email:</strong> <span id="sec-email">-</span></div>
+              <div><strong>Telegram Chat ID:</strong> <span id="sec-telegram-id">-</span></div>
+              <div><strong>Role:</strong> <span id="sec-role">-</span></div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Telegram 2FA Status</label>
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <span class="badge badge-in_possession" id="2fa-status-badge">Enabled</span>
+              <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.8rem;" onclick="toggle2FA()">Toggle 2FA</button>
+            </div>
+          </div>
+
+          <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--card-border);">
+            <label style="font-weight: 600; display: block; margin-bottom: 6px;">Emergency Break-Glass Recovery</label>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
+              If you ever lose access to your Telegram device, use an emergency recovery key at <code>/api/auth/break-glass</code> to bypass 2FA.
+            </p>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+              <button class="btn btn-secondary" onclick="generateNewBreakGlassKey()">Regenerate Emergency Key</button>
+              <button class="btn btn-primary" onclick="showBreakGlassKey()">Show Current Key</button>
+            </div>
+            <div id="break-glass-display" style="margin-top: 12px; display: none;">
+              <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 6px;">Your Emergency Key (save securely!):</label>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <code id="break-glass-key" style="flex: 1; background: #141724; padding: 10px 12px; border-radius: 6px; font-size: 0.9rem; color: var(--warning); border: 1px solid var(--card-border);"></code>
+                <button class="btn btn-secondary" onclick="copyBreakGlassKey()">Copy</button>
+              </div>
+              <p style="font-size: 0.75rem; color: var(--danger); margin-top: 8px;">⚠️ This key is shown once. Save it in a password manager. It will be invalidated after use and a new one generated.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <!-- Modal: Add Costume -->
+  <dialog id="modal-add-costume">
+    <h3 style="margin-bottom: 16px;">Add New Costume</h3>
+    <form onsubmit="handleCreateCostume(event)" novalidate>
+      <div class="form-group">
+        <label>Character Name *</label>
+        <input type="text" class="form-control" name="character" required placeholder="e.g. Raiden Shogun">
+        <div class="field-error" data-error-for="character"></div>
+      </div>
+      <div class="form-group">
+        <label>Fandom / Series *</label>
+        <input type="text" class="form-control" name="fandom" required placeholder="e.g. Genshin Impact">
+        <div class="field-error" data-error-for="fandom"></div>
+      </div>
+      <div class="form-group">
+        <label>Brand / Maker</label>
+        <input type="text" class="form-control" name="brand" placeholder="e.g. Miaowu / Dokidoki">
+        <div class="field-error" data-error-for="brand"></div>
+      </div>
+      <div class="form-group">
+        <label>Size</label>
+        <input type="text" class="form-control" name="size" placeholder="e.g. M / L / Custom">
+        <div class="field-error" data-error-for="size"></div>
+      </div>
+      <div class="form-group">
+        <label>Reference / Taobao Link</label>
+        <input type="url" class="form-control" name="referenceUrl" placeholder="https://...">
+        <div class="field-error" data-error-for="referenceUrl"></div>
+      </div>
+      <div class="form-group">
+        <label>Notes</label>
+        <textarea class="form-control" name="notes" rows="2" placeholder="Wig styled, needs hem fix..."></textarea>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-add-costume')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Costume</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Modal: Add Prop -->
+  <dialog id="modal-add-prop">
+    <h3 style="margin-bottom: 16px;">Add Prop / Accessory</h3>
+    <form onsubmit="handleCreateProp(event)" novalidate>
+      <div class="form-group">
+        <label>Linked Costume</label>
+        <select class="form-control" name="costumeId" id="prop-costume-select">
+          <option value="">Standalone Prop</option>
+        </select>
+        <div class="field-error" data-error-for="costumeId"></div>
+      </div>
+      <div class="form-group">
+        <label>Prop Name *</label>
+        <input type="text" class="form-control" name="name" required placeholder="e.g. Engulfing Lightning Polearm">
+        <div class="field-error" data-error-for="name"></div>
+      </div>
+      <div class="form-group">
+        <label>Category *</label>
+        <select class="form-control" name="category" required>
+          <option value="Weapon">Weapon</option>
+          <option value="Armor">Armor</option>
+          <option value="Headpiece">Headpiece</option>
+          <option value="Wig">Wig</option>
+          <option value="Accessory">Accessory</option>
+          <option value="Shoes">Shoes</option>
+        </select>
+        <div class="field-error" data-error-for="category"></div>
+      </div>
+      <div class="form-group">
+        <label>Storage Location</label>
+        <input type="text" class="form-control" name="location" placeholder="e.g. Box A - Hall Closet">
+        <div class="field-error" data-error-for="location"></div>
+      </div>
+      <div class="form-group">
+        <label>Condition</label>
+        <select class="form-control" name="condition">
+          <option value="Mint">Mint</option>
+          <option value="Good">Good</option>
+          <option value="Minor Wear">Minor Wear</option>
+          <option value="Needs Repair">Needs Repair</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-add-prop')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Prop</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Modal: Add Lens -->
+  <dialog id="modal-add-lens">
+    <h3 style="margin-bottom: 16px;">Register Contact Lens</h3>
+    <form onsubmit="handleCreateLens(event)" novalidate>
+      <div class="form-group">
+        <label>Character *</label>
+        <input type="text" class="form-control" name="character" required placeholder="e.g. Fischl">
+        <div class="field-error" data-error-for="character"></div>
+      </div>
+      <div class="form-group">
+        <label>Color *</label>
+        <input type="text" class="form-control" name="color" required placeholder="e.g. Amber / Violet">
+        <div class="field-error" data-error-for="color"></div>
+      </div>
+      <div class="form-group">
+        <label>Brand</label>
+        <input type="text" class="form-control" name="brand" placeholder="e.g. Sweety Spata">
+        <div class="field-error" data-error-for="brand"></div>
+      </div>
+      <div class="form-group">
+        <label>Prescription / Power</label>
+        <input type="text" class="form-control" name="prescription" placeholder="e.g. -1.50">
+        <div class="field-error" data-error-for="prescription"></div>
+      </div>
+      <div class="form-group">
+        <label>Expiry Date *</label>
+        <input type="date" class="form-control" name="expiryDate" required>
+        <div class="field-error" data-error-for="expiryDate"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-add-lens')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Lens</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Hidden file input used by the costume card upload button -->
+  <input type="file" id="costume-image-input" class="upload-input-hidden" accept="image/*">
+
+  <!-- Confirm Dialog (replaces native confirm() for destructive actions) -->
+  <dialog id="modal-confirm">
+    <h3 style="margin-bottom: 8px;" id="confirm-title">Are you sure?</h3>
+    <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 4px;" id="confirm-message">This action cannot be undone.</p>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-secondary" id="confirm-cancel">Cancel</button>
+      <button type="button" class="btn btn-danger" id="confirm-accept">Delete</button>
+    </div>
+  </dialog>
+
+  <!-- Toast Notification -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    let state = {
+      // Auth
+      token: null,
+      user: null,
+      currentScreen: 'login',
+      tempToken: null,
+
+      // Data
+      costumes: [],
+      props: [],
+      lenses: [],
+
+      // UI
+      currentTab: 'costumes',
+      filterQuery: '',
+      filterStatus: 'all',
+      loading: false,
+      error: null,
+
+      // Client-side caches (see notes on imageUrls persistence in uploadCostumeImage)
+      imageUrlsCache: {},
+      imageUploadTargetId: null,
+      toastTimer: null
+    };
+
+    // Authenticated API helper
+    // NOTE: when body is FormData we must NOT set Content-Type so the browser
+    // can append the multipart boundary itself.
+    async function api(path, options = {}) {
+      const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+      const headers = {
+        ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+        ...(state.token ? { 'Authorization': `Bearer ${state.token}` } : {}),
+        ...(options.headers || {})
+      };
+      const res = await fetch(path, { ...options, headers });
+      if (res.status === 401) {
+        // Token expired or invalid → force logout
+        logout();
+        return null;
+      }
+      return res.json();
+    }
+
+    function showLoading(show) {
+      document.getElementById('loading-overlay').classList.toggle('active', show);
+    }
+
+    function showScreen(screen) {
+      state.currentScreen = screen;
+      document.getElementById('screen-login').style.display = screen === 'login' ? 'flex' : 'none';
+      document.getElementById('screen-otp').style.display = screen === 'otp' ? 'flex' : 'none';
+      document.getElementById('screen-dashboard').style.display = screen === 'dashboard' ? 'block' : 'none';
+    }
+
+    function showLogin() {
+      showScreen('login');
+      document.getElementById('login-form').reset();
+      document.getElementById('login-error').style.display = 'none';
+    }
+
+    function showOtp() {
+      showScreen('otp');
+      document.getElementById('otp-form').reset();
+      document.getElementById('otp-error').style.display = 'none';
+      document.getElementById('otp-code').focus();
+    }
+
+    function showDashboard() {
+      showScreen('dashboard');
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const data = Object.fromEntries(formData);
+
+      document.getElementById('login-error').style.display = 'none';
+      showLoading(true);
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        const result = await res.json();
+
+        if (!res.ok) {
+          throw new Error(result.error || 'Login failed');
+        }
+
+        if (result.require2FA) {
+          // 2FA required - store tempToken and show OTP screen
+          state.tempToken = result.tempToken;
+          showOtp();
+        } else {
+          // Direct login - store JWT and show dashboard
+          state.token = result.token;
+          state.user = result.user;
+          sessionStorage.setItem('cms_token', result.token);
+          await loadAllData();
+          showDashboard();
+        }
+      } catch (err) {
+        document.getElementById('login-error').textContent = err.message;
+        document.getElementById('login-error').style.display = 'block';
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    async function handleOtpVerify(e) {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const otp = formData.get('otp');
+
+      document.getElementById('otp-error').style.display = 'none';
+      showLoading(true);
+
+      try {
+        const res = await fetch('/api/auth/2fa/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tempToken: state.tempToken, otp })
+        });
+        const result = await res.json();
+
+        if (!res.ok) {
+          throw new Error(result.error || 'Invalid OTP');
+        }
+
+        // Success - store JWT and show dashboard
+        state.token = result.token;
+        state.user = result.user;
+        state.tempToken = null;
+        sessionStorage.setItem('cms_token', result.token);
+        await loadAllData();
+        showDashboard();
+      } catch (err) {
+        document.getElementById('otp-error').textContent = err.message;
+        document.getElementById('otp-error').style.display = 'block';
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    async function resendOtp() {
+      showLoading(true);
+      try {
+        const res = await fetch('/api/auth/2fa/resend', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tempToken: state.tempToken })
+        });
+        const result = await res.json();
+        if (res.ok) {
+          showToast('New code sent to Telegram');
+        } else {
+          showToast(result.error || 'Failed to resend code');
+        }
+      } catch (err) {
+        showToast('Error resending code');
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    function logout() {
+      state.token = null;
+      state.user = null;
+      state.tempToken = null;
+      state.costumes = [];
+      state.props = [];
+      state.lenses = [];
+      sessionStorage.removeItem('cms_token');
+      showLogin();
+    }
+
+    async function loadAllData() {
+      await Promise.all([
+        loadCostumes(),
+        loadProps(),
+        loadLenses()
+      ]);
+      updateMetrics();
+      populateCostumeSelects();
+      updateSecurityTab();
+    }
+
+    async function init() {
+      bindGridEvents();
+
+      // Check for existing session
+      const savedToken = sessionStorage.getItem('cms_token');
+      if (savedToken) {
+        state.token = savedToken;
+        showLoading(true);
+        try {
+          // Validate token by fetching profile
+          const res = await fetch('/api/auth/profile', {
+            headers: { 'Authorization': `Bearer ${savedToken}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            state.user = data.user;
+            await loadAllData();
+            showDashboard();
+          } else {
+            // Token invalid
+            sessionStorage.removeItem('cms_token');
+            state.token = null;
+            showLogin();
+          }
+        } catch (err) {
+          sessionStorage.removeItem('cms_token');
+          state.token = null;
+          showLogin();
+        } finally {
+          showLoading(false);
+        }
+      } else {
+        showLogin();
+      }
+    }
+
+    // ==========================================================================
+    // RENDER HELPERS (skeletons, empty states, safe element building)
+    // ==========================================================================
+
+    function makeEl(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined && text !== null && text !== '') {
+        node.textContent = String(text);
+      }
+      return node;
+    }
+
+    // Only allow safe URL schemes for href/src values coming from the database
+    function safeUrl(value) {
+      if (!value) return null;
+      const raw = String(value).trim();
+      if (/^https?:\/\//i.test(raw) || /^\/uploads\//.test(raw)) return raw;
+      return null;
+    }
+
+    // 6 shimmer cards while a grid is loading
+    function renderSkeletons(gridId, count = 6) {
+      const grid = document.getElementById(gridId);
+      if (!grid) return;
+      grid.innerHTML = '';
+      const frag = document.createDocumentFragment();
+      for (let i = 0; i < count; i++) {
+        const card = makeEl('div', 'item-card');
+        card.appendChild(makeEl('div', 'skeleton skeleton-media'));
+        card.appendChild(makeEl('div', 'skeleton skeleton-title'));
+        card.appendChild(makeEl('div', 'skeleton skeleton-text'));
+        card.appendChild(makeEl('div', 'skeleton skeleton-text'));
+        card.appendChild(makeEl('div', 'skeleton skeleton-bar'));
+        frag.appendChild(card);
+      }
+      grid.appendChild(frag);
+    }
+
+    function createEmptyState({ icon, title, text, ctaLabel, ctaAction }) {
+      const wrap = makeEl('div', 'empty-state');
+      wrap.appendChild(makeEl('div', 'empty-state-icon', icon));
+      wrap.appendChild(makeEl('div', 'empty-state-title', title));
+      wrap.appendChild(makeEl('div', 'empty-state-text', text));
+      if (ctaLabel && typeof ctaAction === 'function') {
+        const btn = makeEl('button', 'btn btn-primary', ctaLabel);
+        btn.type = 'button';
+        btn.addEventListener('click', ctaAction);
+        wrap.appendChild(btn);
+      }
+      return wrap;
+    }
+
+    function renderEmptyState(gridId, config) {
+      const grid = document.getElementById(gridId);
+      if (!grid) return;
+      grid.innerHTML = '';
+      grid.appendChild(createEmptyState(config));
+    }
+
+    // ==========================================================================
+    // LOADERS (skeleton -> content | empty state | error state)
+    // ==========================================================================
+
+    async function loadCostumes() {
+      renderSkeletons('costumes-grid');
+      try {
+        const data = await api('/api/costumes');
+        if (data === null) return; // 401 -> logged out
+        if (data.error) {
+          renderEmptyState('costumes-grid', {
+            icon: '⚠️',
+            title: 'Could not load costumes',
+            text: data.error,
+            ctaLabel: 'Retry',
+            ctaAction: loadCostumes
+          });
+          return;
+        }
+        state.costumes = data.costumes || [];
+        renderCostumes(getFilteredCostumes());
+      } catch (e) {
+        console.error('Failed to load costumes:', e);
+        renderEmptyState('costumes-grid', {
+          icon: '⚠️',
+          title: 'Could not load costumes',
+          text: 'The server did not respond. Check that it is running, then retry.'
+        });
+      }
+    }
+
+    async function loadProps() {
+      renderSkeletons('props-grid');
+      try {
+        const data = await api('/api/props');
+        if (data === null) return;
+        if (data.error) {
+          renderEmptyState('props-grid', {
+            icon: '⚠️',
+            title: 'Could not load props',
+            text: data.error,
+            ctaLabel: 'Retry',
+            ctaAction: loadProps
+          });
+          return;
+        }
+        state.props = data.props || [];
+        renderProps(getFilteredProps());
+      } catch (e) {
+        console.error('Failed to load props:', e);
+        renderEmptyState('props-grid', {
+          icon: '⚠️',
+          title: 'Could not load props',
+          text: 'The server did not respond. Check that it is running, then retry.'
+        });
+      }
+    }
+
+    async function loadLenses() {
+      renderSkeletons('lenses-grid');
+      try {
+        const data = await api('/api/lenses');
+        if (data === null) return;
+        if (data.error) {
+          renderEmptyState('lenses-grid', {
+            icon: '⚠️',
+            title: 'Could not load lenses',
+            text: data.error,
+            ctaLabel: 'Retry',
+            ctaAction: loadLenses
+          });
+          return;
+        }
+        state.lenses = data.lenses || [];
+        renderLenses(getFilteredLenses());
+      } catch (e) {
+        console.error('Failed to load lenses:', e);
+        renderEmptyState('lenses-grid', {
+          icon: '⚠️',
+          title: 'Could not load lenses',
+          text: 'The server did not respond. Check that it is running, then retry.'
+        });
+      }
+    }
+
+    function calculateCompletion(item) {
+      const fullset = item.isFullset === '1' || item.isFullset === 1 || item.isFullset === true ? 1 : 0;
+      const costest = item.doneCostest === '1' || item.doneCostest === 1 || item.doneCostest === true ? 1 : 0;
+      const event = item.doneEvent === '1' || item.doneEvent === 1 || item.doneEvent === true ? 1 : 0;
+      const photo = item.donePhotoSession === '1' || item.donePhotoSession === 1 || item.donePhotoSession === true ? 1 : 0;
+      return Math.round(((fullset + costest + event + photo) / 4) * 100);
+    }
+
+    function updateMetrics() {
+      document.getElementById('metric-total-costumes').textContent = state.costumes.length;
+      
+      const fullsets = state.costumes.filter(c => c.isFullset === '1' || c.isFullset === 1 || c.isFullset === true).length;
+      document.getElementById('metric-fullset-count').textContent = `${fullsets} fullset ready`;
+
+      const onRent = state.costumes.filter(c => c.status === 'ON_RENT').length;
+      document.getElementById('metric-rent-costumes').textContent = onRent;
+
+      const activeLenses = state.lenses.filter(l => l.status === 'ACTIVE').length;
+      document.getElementById('metric-active-lenses').textContent = activeLenses;
+
+      const expiringSoon = state.lenses.filter(l => l.status === 'EXPIRING_SOON').length;
+      document.getElementById('metric-expiring-lenses').textContent = expiringSoon;
+
+      const expired = state.lenses.filter(l => l.status === 'EXPIRED').length;
+      document.getElementById('metric-expired-lenses').textContent = `${expired} expired`;
+    }
+
+    function renderCostumes(items = state.costumes) {
+      const grid = document.getElementById('costumes-grid');
+      if (!items.length) {
+        grid.innerHTML = '<div class="empty-state">No costumes found matching criteria.</div>';
+        return;
+      }
+
+      grid.innerHTML = items.map(c => {
+        const pct = calculateCompletion(c);
+        const statusClass = `badge-${(c.status || 'IN_POSSESSION').toLowerCase()}`;
+        return `
+          <div class="item-card">
+            <div>
+              <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:8px;">
+                <h3 style="font-size:1.15rem; font-weight:700;">${c.character}</h3>
+                <span class="badge ${statusClass}">${(c.status || 'IN_POSSESSION').replace('_', ' ')}</span>
+              </div>
+              <div style="color:var(--text-muted); font-size:0.85rem; margin-bottom:12px;">${c.fandom}</div>
+              
+              <div class="tags-group">
+                ${c.brand ? `<span class="tag-chip">🏷️ ${c.brand}</span>` : ''}
+                ${c.size ? `<span class="tag-chip">📏 ${c.size}</span>` : ''}
+                ${c.buyPrice ? `<span class="tag-chip">💰 Rp ${Number(c.buyPrice).toLocaleString()}</span>` : ''}
+              </div>
+
+              <div class="progress-container">
+                <div class="progress-header">
+                  <span>Milestone Progress</span>
+                  <span>${pct}%</span>
+                </div>
+                <div class="progress-bar-bg">
+                  <div class="progress-bar-fill" style="width: ${pct}%;"></div>
+                </div>
+              </div>
+
+              <div class="tags-group">
+                <span class="tag-chip ${c.isFullset ? 'active' : ''}">Fullset</span>
+                <span class="tag-chip ${c.doneCostest ? 'active' : ''}">Costest</span>
+                <span class="tag-chip ${c.doneEvent ? 'active' : ''}">Event</span>
+                <span class="tag-chip ${c.donePhotoSession ? 'active' : ''}">Photoshoot</span>
+              </div>
+            </div>
+
+            <div style="margin-top:14px; display:flex; justify-content:space-between; align-items:center;">
+              ${c.referenceUrl ? `<a href="${c.referenceUrl}" target="_blank" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 12px;">Taobao / Link ↗</a>` : '<span></span>'}
+              <button class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" onclick="deleteCostume('${c.id}')">Delete</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderProps(items = state.props) {
+      const grid = document.getElementById('props-grid');
+      if (!items.length) {
+        grid.innerHTML = '<div class="empty-state">No props or accessories recorded yet.</div>';
+        return;
+      }
+
+      grid.innerHTML = items.map(p => `
+        <div class="item-card">
+          <div>
+            <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:8px;">
+              <h3 style="font-size:1.15rem; font-weight:700;">${p.name}</h3>
+              <span class="badge" style="background:rgba(139,92,246,0.15); color:#c084fc;">${p.category || 'Accessory'}</span>
+            </div>
+            
+            <div class="tags-group">
+              ${p.location ? `<span class="tag-chip">📍 ${p.location}</span>` : ''}
+              ${p.condition ? `<span class="tag-chip">✨ Condition: ${p.condition}</span>` : ''}
+            </div>
+
+            ${p.notes ? `<p style="font-size:0.85rem; color:var(--text-muted); margin-top:8px;">${p.notes}</p>` : ''}
+          </div>
+
+          <div style="margin-top:14px; text-align:right;">
+            <button class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" onclick="deleteProp('${p.id}')">Delete</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderLenses(items = state.lenses) {
+      const grid = document.getElementById('lenses-grid');
+      if (!items.length) {
+        grid.innerHTML = '<div class="empty-state">No contact lenses registered.</div>';
+        return;
+      }
+
+      grid.innerHTML = items.map(l => {
+        const statusClass = `badge-${(l.status || 'UNOPENED').toLowerCase()}`;
+        return `
+          <div class="item-card">
+            <div>
+              <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:8px;">
+                <h3 style="font-size:1.15rem; font-weight:700;">${l.character || 'Generic'} (${l.color})</h3>
+                <span class="badge ${statusClass}">${(l.status || 'UNOPENED').replace('_', ' ')}</span>
+              </div>
+
+              <div class="tags-group">
+                ${l.brand ? `<span class="tag-chip">🏷️ ${l.brand}</span>` : ''}
+                ${l.prescription ? `<span class="tag-chip">👓 Power: ${l.prescription}</span>` : ''}
+                <span class="tag-chip">📅 Exp: ${l.expiryDate ? l.expiryDate.split('T')[0] : 'N/A'}</span>
+              </div>
+            </div>
+
+            <div style="margin-top:14px; display:flex; justify-content:space-between; align-items:center;">
+              ${l.status === 'UNOPENED' ? `<button class="btn btn-primary" style="font-size:0.8rem; padding:6px 12px;" onclick="markLensOpened('${l.id}')">Open Vial</button>` : '<span></span>'}
+              <button class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" onclick="deleteLens('${l.id}')">Delete</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function filterItems() {
+      const q = document.getElementById('search-input').value.toLowerCase();
+      const status = document.getElementById('status-filter').value;
+
+      if (state.currentTab === 'costumes') {
+        const filtered = state.costumes.filter(c => {
+          const matchQ = (c.character && c.character.toLowerCase().includes(q)) || (c.fandom && c.fandom.toLowerCase().includes(q));
+          const matchStatus = !status || c.status === status;
+          return matchQ && matchStatus;
+        });
+        renderCostumes(filtered);
+      } else if (state.currentTab === 'props') {
+        const filtered = state.props.filter(p => p.name.toLowerCase().includes(q) || (p.category && p.category.toLowerCase().includes(q)));
+        renderProps(filtered);
+      } else if (state.currentTab === 'lenses') {
+        const filtered = state.lenses.filter(l => (l.character && l.character.toLowerCase().includes(q)) || (l.color && l.color.toLowerCase().includes(q)));
+        renderLenses(filtered);
+      }
+    }
+
+    function switchTab(tab) {
+      state.currentTab = tab;
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+
+      document.getElementById('tab-costumes').style.display = tab === 'costumes' ? 'block' : 'none';
+      document.getElementById('tab-props').style.display = tab === 'props' ? 'block' : 'none';
+      document.getElementById('tab-lenses').style.display = tab === 'lenses' ? 'block' : 'none';
+      document.getElementById('tab-security').style.display = tab === 'security' ? 'block' : 'none';
+
+      document.getElementById('filter-bar').style.display = tab === 'security' ? 'none' : 'flex';
+    }
+
+    function populateCostumeSelects() {
+      const select = document.getElementById('prop-costume-select');
+      select.innerHTML = '<option value="">Standalone Prop</option>' + 
+        state.costumes.map(c => `<option value="${c.id}">${c.character} (${c.fandom})</option>`).join('');
+    }
+
+    async function handleCreateCostume(e) {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const data = Object.fromEntries(formData);
+
+      try {
+        const res = await api('/api/costumes', {
+          method: 'POST',
+          body: JSON.stringify(data)
+        });
+        if (res) {
+          showToast('Costume added successfully!');
+          closeModal('modal-add-costume');
+          e.target.reset();
+          await loadCostumes();
+          updateMetrics();
+          populateCostumeSelects();
+        }
+      } catch (err) {
+        showToast('Error creating costume');
+      }
+    }
+
+    async function handleCreateProp(e) {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const data = Object.fromEntries(formData);
+
+      try {
+        const res = await api('/api/props', {
+          method: 'POST',
+          body: JSON.stringify(data)
+        });
+        if (res) {
+          showToast('Prop added successfully!');
+          closeModal('modal-add-prop');
+          e.target.reset();
+          await loadProps();
+        }
+      } catch (err) {
+        showToast('Error creating prop');
+      }
+    }
+
+    async function handleCreateLens(e) {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const data = Object.fromEntries(formData);
+
+      try {
+        const res = await api('/api/lenses', {
+          method: 'POST',
+          body: JSON.stringify(data)
+        });
+        if (res) {
+          showToast('Contact lens registered!');
+          closeModal('modal-add-lens');
+          e.target.reset();
+          await loadLenses();
+          updateMetrics();
+        }
+      } catch (err) {
+        showToast('Error creating lens');
+      }
+    }
+
+    async function deleteCostume(id) {
+      if (!confirm('Are you sure you want to delete this costume?')) return;
+      const res = await api(`/api/costumes/${id}`, { method: 'DELETE' });
+      if (res !== null) {
+        showToast('Costume deleted');
+        await loadCostumes();
+        updateMetrics();
+      }
+    }
+
+    async function deleteProp(id) {
+      if (!confirm('Delete this prop?')) return;
+      const res = await api(`/api/props/${id}`, { method: 'DELETE' });
+      if (res !== null) {
+        showToast('Prop deleted');
+        await loadProps();
+      }
+    }
+
+    async function deleteLens(id) {
+      if (!confirm('Delete this contact lens record?')) return;
+      const res = await api(`/api/lenses/${id}`, { method: 'DELETE' });
+      if (res !== null) {
+        showToast('Lens deleted');
+        await loadLenses();
+        updateMetrics();
+      }
+    }
+
+    async function markLensOpened(id) {
+      const res = await api(`/api/lenses/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          status: 'ACTIVE',
+          isOpened: 1,
+          openedDate: new Date().toISOString()
+        })
+      });
+      if (res !== null) {
+        showToast('Vial marked as OPEN & ACTIVE');
+        await loadLenses();
+        updateMetrics();
+      }
+    }
+
+    function openModal(id) {
+      document.getElementById(id).showModal();
+    }
+    function closeModal(id) {
+      document.getElementById(id).close();
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 3000);
+    }
+
+    function generateNewBreakGlassKey() {
+      alert('To generate a new key while logged in, call POST /api/auth/break-glass/generate with your auth token. The new key will be printed and returned securely.');
+    }
+
+    async function showBreakGlassKey() {
+      try {
+        const res = await api('/api/auth/break-glass/generate', { method: 'POST' });
+        if (res && res.recoveryKey) {
+          document.getElementById('break-glass-key').textContent = res.recoveryKey;
+          document.getElementById('break-glass-display').style.display = 'block';
+          showToast('New emergency key generated! Save it securely.');
+        }
+      } catch (err) {
+        showToast('Error generating key');
+      }
+    }
+
+    function copyBreakGlassKey() {
+      const key = document.getElementById('break-glass-key').textContent;
+      navigator.clipboard.writeText(key).then(() => {
+        showToast('Emergency key copied to clipboard!');
+      });
+    }
+
+    async function toggle2FA() {
+      try {
+        const res = await api('/api/auth/2fa/toggle', { method: 'POST' });
+        if (res) {
+          state.user = res.user;
+          updateSecurityTab();
+          showToast(res.message || '2FA status updated');
+        }
+      } catch (err) {
+        showToast('Error toggling 2FA');
+      }
+    }
+
+    async function updateSecurityTab() {
+      if (!state.user) return;
+      
+      const badge = document.getElementById('2fa-status-badge');
+      if (badge) {
+        if (state.user.telegram2FAEnabled) {
+          badge.textContent = 'Enabled';
+          badge.className = 'badge badge-in_possession';
+        } else {
+          badge.textContent = 'Disabled';
+          badge.className = 'badge badge-wishlist';
+        }
+      }
+
+      document.getElementById('sec-username').textContent = state.user.username || '-';
+      document.getElementById('sec-email').textContent = state.user.email || '-';
+      document.getElementById('sec-telegram-id').textContent = state.user.telegramChatId || 'Not linked';
+      document.getElementById('sec-role').textContent = state.user.role || 'user';
+    }
+
+    init();
+  </script>
+
+  <!-- Loading Overlay -->
+  <div class="loading-overlay" id="loading-overlay">
+    <div class="spinner"></div>
+    <span style="color: var(--text-muted);">Loading...</span>
+  </div>
+</body>
+</html>
