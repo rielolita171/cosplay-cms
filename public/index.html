@@ -336,6 +336,13 @@
       font-size: 0.75rem;
       margin: 8px 0 0;
     }
+    /* The per-list "nothing to show" line: one element per list, with its own id,
+       so Brand and Fandom each state their own reason independently. */
+    .ref-search-empty {
+      color: var(--text-muted);
+      font-size: 0.82rem;
+      margin: 0;
+    }
 
     /* Modal Overlay */
     dialog {
@@ -886,18 +893,24 @@
               </div>
               <button type="submit" class="btn btn-primary btn-full">Add Brand</button>
             </form>
-            <!-- Search box for the Brand list. These two live inside the
-                 Reference Lists tab rather than in the shared #filter-bar
-                 because that bar is deliberately hidden on the non-inventory
-                 tabs (see switchTab), and because the two lists are filtered
-                 independently — one query box for two separate tables would
-                 make it impossible to search one while the other stays full. -->
+            <!-- Search box for the Brand list. This box belongs to the Brand list
+                 alone: its own id, its own state key (state.brandQuery), its own
+                 count line, its own message line and its own grid. Typing in it
+                 re-reads and re-paints THIS list only, so the Fandom box, the
+                 Fandom query and the Fandom grid are never touched and the two
+                 lists can hold different queries at the same time. It lives
+                 inside the Reference Lists tab rather than in the shared
+                 #filter-bar because that bar is deliberately hidden on the
+                 non-inventory tabs (see switchTab), and because one query box for
+                 two separate tables would make it impossible to search one while
+                 the other stays full. -->
             <div class="form-group" style="margin-top: 16px; margin-bottom: 0;">
               <label for="brand-search-input">Search brands</label>
               <input type="search" class="form-control" id="brand-search-input"
-                     placeholder="Type to filter by name…" oninput="filterReferenceLists()">
+                     placeholder="Type to filter by name…" oninput="filterReferenceList('brands')">
               <p class="ref-search-count" id="brand-search-count"></p>
             </div>
+            <p class="ref-search-empty" id="brands-list-message" hidden></p>
             <div class="items-grid" id="brands-grid" style="margin-top: 16px;"></div>
           </div>
 
@@ -913,12 +926,16 @@
               </div>
               <button type="submit" class="btn btn-primary btn-full">Add Fandom</button>
             </form>
+            <!-- The Fandom list's own search box, wired to the 'fandoms' key of
+                 the same helper. Independent of the Brand box above in every
+                 respect: input id, state key, count id, message id, grid id. -->
             <div class="form-group" style="margin-top: 16px; margin-bottom: 0;">
               <label for="fandom-search-input">Search fandoms</label>
               <input type="search" class="form-control" id="fandom-search-input"
-                     placeholder="Type to filter by name…" oninput="filterReferenceLists()">
+                     placeholder="Type to filter by name…" oninput="filterReferenceList('fandoms')">
               <p class="ref-search-count" id="fandom-search-count"></p>
             </div>
+            <p class="ref-search-empty" id="fandoms-list-message" hidden></p>
             <div class="items-grid" id="fandoms-grid" style="margin-top: 16px;"></div>
           </div>
         </div>
@@ -1490,6 +1507,150 @@
       '<div class="media-placeholder"><span class="media-icon">🖼️</span><span>No image</span></div>';
 
     // ==========================================================================
+    // AUTHENTICATED IMAGE DELIVERY
+    // ==========================================================================
+    // WHY THIS EXISTS
+    // `/uploads` is a GUARDED static mount (src/middleware/uploadAccess.js): an
+    // anonymous `GET /uploads/<file>.webp` is denied with 401, because otherwise
+    // every costume photo would be world-readable to anyone who can guess the
+    // path. A plain `<img src="/uploads/x.webp">` would therefore stop working —
+    // an <img> element cannot attach an `Authorization: Bearer` header, and
+    // cookies were deliberately not used as a fallback (see below).
+    //
+    // THE APPROACH, AND WHY NOT THE OTHER TWO
+    //   * Signed/expiring URL tokens: keeps <img src> untouched, but puts a
+    //     capability in the URL, so it leaks into history, into the Referer
+    //     header of any outbound link, and into any server access log — and the
+    //     SPA is single-origin with no outbound links today, which is exactly the
+    //     property that would silently stop being true later. It also needs a
+    //     second secret with its own rotation story.
+    //   * Cookie-based session for the image path only: a cookie IS sent by
+    //     <img> automatically, which makes it the one option that also makes the
+    //     images CSRF-readable. A cross-site <img> on any page would then pull
+    //     the user's private photos into a third-party request.
+    //   * Authenticated fetch + object URL (this file): no secret in any URL, no
+    //     cookie, no new server secret, and the existing access token already
+    //     expires in 15 minutes and is already rotated. The cost is a fetch per
+    //     image and an object-URL lifecycle to manage — which is what the rest
+    //     of this block is.
+    //
+    // EXPIRY
+    // There is no separate image token, so there is no separate expiry to get
+    // wrong. When the access token expires, api() transparently refreshes it
+    // (see tryRefreshToken) and the request is retried once, and any fetch that
+    // fails after that logs the user out — after which every object URL is
+    // revoked (revokeAllImageObjectUrls). Signing in again re-fetches on demand,
+    // so a stale image can never be permanently broken.
+    //
+    // MEMORY
+    // Every URL.createObjectURL() is held in imageObjectUrls and is revoked on
+    // logout, on any screen change, and by the LRU cap below. Without the cap a
+    // long session that scrolls through many costumes would pin every decoded
+    // image in memory for the lifetime of the tab.
+
+    // 1x1 transparent GIF: the placeholder `src` a thumbnail carries until its
+    // authenticated fetch resolves, so the browser never shows a broken-image
+    // icon. `img-src` in the CSP already allows `data:`.
+    const IMAGE_LOADING_PIXEL =
+      'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+    // url -> { objectUrl, at } where `at` is the insertion order used by the LRU
+    // eviction below.
+    const imageObjectUrls = new Map();
+
+    // Cap: ~200 decoded photos is far more than any grid shows at once.
+    const MAX_CACHED_IMAGES = 200;
+
+    function isSameOriginImageUrl(url) {
+      return typeof url === 'string' && url.charAt(0) === '/' && url.charAt(1) !== '/';
+    }
+
+    function revokeAllImageObjectUrls() {
+      imageObjectUrls.forEach(entry => {
+        try { URL.revokeObjectURL(entry.objectUrl); } catch (_) { /* already gone */ }
+      });
+      imageObjectUrls.clear();
+    }
+
+    function cacheImageObjectUrl(url, objectUrl) {
+      imageObjectUrls.set(url, { objectUrl: objectUrl, at: Date.now() });
+      // Oldest-first eviction. Map preserves insertion order, so the first key is
+      // the least recently ADDED; re-setting an existing key is what moves it to
+      // the back, which keeps a thumbnail the user is looking at alive.
+      while (imageObjectUrls.size > MAX_CACHED_IMAGES) {
+        const oldestKey = imageObjectUrls.keys().next().value;
+        if (oldestKey === undefined) break;
+        const oldest = imageObjectUrls.get(oldestKey);
+        imageObjectUrls.delete(oldestKey);
+        if (oldest && oldest.objectUrl) {
+          try { URL.revokeObjectURL(oldest.objectUrl); } catch (_) { /* noop */ }
+        }
+      }
+    }
+
+    /**
+     * Fetch one image with the bearer header and resolve to an object URL.
+     * Cached, so re-rendering a grid (typing in the filter box) does not re-fetch.
+     * @returns {Promise<string|null>} the object URL, or null when it failed.
+     */
+    function loadImageObjectUrl(url) {
+      const cached = imageObjectUrls.get(url);
+      if (cached) {
+        // Refresh recency for the LRU, then move the key to the back.
+        imageObjectUrls.delete(url);
+        imageObjectUrls.set(url, { objectUrl: cached.objectUrl, at: Date.now() });
+        return Promise.resolve(cached.objectUrl);
+      }
+
+      return api(url, { binary: true })
+        .then(blob => {
+          if (!blob) return null;
+          const objectUrl = URL.createObjectURL(blob);
+          cacheImageObjectUrl(url, objectUrl);
+          return objectUrl;
+        })
+        .catch(err => {
+          // Deliberately NOT a toast: one missing photo must not interrupt the
+          // grid, and the 401 case has already been reported by api() itself.
+          console.warn('Could not load image', url, err.code || err.message);
+          return null;
+        });
+    }
+
+    /**
+     * Paint every `img[data-image-src]` inside `root`.
+     *
+     * The renderer emits the thumbnail with the LOADING PIXEL as `src` and the
+     * real URL in `data-image-src`, because the renderers are synchronous innerHTML
+     * builders and the fetch is not. This pass is the second half of that split.
+     *
+     * An ABSOLUTE http(s) URL is left to the browser: it is a third-party image
+     * that this server does not guard, and fetching it through api() would fail
+     * CORS rather than show the picture.
+     */
+    function hydrateAuthenticatedImages(root) {
+      if (!root || typeof root.querySelectorAll !== 'function') return;
+      const nodes = root.querySelectorAll('img[data-image-src]');
+      for (let i = 0; i < nodes.length; i++) {
+        const img = nodes[i];
+        const url = img.getAttribute('data-image-src');
+        if (!url) continue;
+
+        if (!isSameOriginImageUrl(url)) {
+          img.setAttribute('src', url);      // external image, no guard involved
+          continue;
+        }
+
+        loadImageObjectUrl(url).then(objectUrl => {
+          // The grid may have been re-rendered (filter keystroke, tab switch)
+          // while this was in flight; never touch a detached node.
+          if (!objectUrl || !img.isConnected) return;
+          img.setAttribute('src', objectUrl);
+        });
+      }
+    }
+
+    // ==========================================================================
     // LENS COLOUR PICKER
     // ==========================================================================
     // `ContactLens.color` keeps storing the NAME and `ContactLens.colorHex` the
@@ -1688,7 +1849,9 @@
       filterLocation: '',
       // The two Reference Lists search boxes. Separate keys, not one shared
       // query, because Brand and Fandom are two independent lists and the user
-      // filters one without narrowing the other. See filterReferenceLists().
+      // filters one without narrowing the other. Each key is written by
+      // filterReferenceList() for its own kind only, and is read by that kind's
+      // renderer only. See REFERENCE_LISTS.
       brandQuery: '',
       fandomQuery: '',
       loading: false,
@@ -1864,6 +2027,10 @@
       state.props = [];
       state.lenses = [];
       state.imageUrlsCache = {};
+      // Object URLs are scoped to this session. Revoking them here is what stops a
+      // signed-out tab — or the next person at a shared machine — from still
+      // holding every photo it paged into memory.
+      revokeAllImageObjectUrls();
       sessionStorage.removeItem(TOKEN_KEY);
       sessionStorage.removeItem(REFRESH_TOKEN_KEY);
       sessionStorage.removeItem(USER_KEY);
@@ -1927,6 +2094,11 @@
       const auth = opts.auth !== false;
       const isRetry = opts.__retry === true;
       const isFormData = typeof FormData !== 'undefined' && opts.body instanceof FormData;
+      // `binary: true` returns the response body as a Blob instead of parsed JSON.
+      // It exists so the image pipeline can still go through this single
+      // chokepoint (the suite asserts there are no bare fetch() calls anywhere
+      // else) while sending the Authorization header that <img> cannot send.
+      const wantBinary = opts.binary === true;
 
       const headers = Object.assign(
         {},
@@ -1938,12 +2110,28 @@
       const init = Object.assign({}, opts);
       delete init.auth;
       delete init.__retry;
+      delete init.binary;
 
       let res;
       try {
         res = await fetch(path, Object.assign({}, init, { headers: headers }));
       } catch (_networkError) {
         throw new ApiError('Network error — could not reach the server. Is it running?', 0, 'NETWORK_ERROR');
+      }
+
+      if (wantBinary) {
+        // Reached only on res.ok — a non-2xx body is the {error, code} JSON
+        // contract, so it is still parsed as JSON for a useful message.
+        if (!res.ok) {
+          const errBody = await readJsonSafely(res);
+          throw new ApiError(
+            (errBody && errBody.error) || ('Request failed (HTTP ' + res.status + ')'),
+            res.status,
+            (errBody && errBody.code) || null,
+            errBody
+          );
+        }
+        return res.blob();
       }
 
       const data = await readJsonSafely(res);
@@ -2116,6 +2304,12 @@
     }
 
     function showScreen(screen) {
+      // A screen change means the previous screen's DOM is going away, so this is
+      // the right place to drop the object URLs the old screen was displaying.
+      // Together with clearSession() this bounds the blob cache to "images the
+      // current screen is showing", so a long session cannot pin every decoded
+      // photo in memory and no object URL outlives the session that fetched it.
+      revokeAllImageObjectUrls();
       state.currentScreen = screen;
       document.getElementById('screen-login').style.display = screen === 'login' ? 'flex' : 'none';
       document.getElementById('screen-otp').style.display = screen === 'otp' ? 'flex' : 'none';
@@ -2646,6 +2840,37 @@
     // matching implementation to keep consistent for no user-visible gain.
 
     /**
+     * The identity of each management list, in ONE place.
+     *
+     * Brand and Fandom share this file's matching rule, its count-line wording
+     * and its "nothing to show" rule — but they share NO state and NO element.
+     * Every id the reference-list UI touches is looked up from this table by
+     * `kind`, so the two instances cannot drift apart: adding a fourth list
+     * means adding a row here, not writing a third near-identical renderer.
+     *
+     * `queryKey` is the state slot this list owns. filterReferenceList() writes
+     * only that slot, and only that list's renderer reads it.
+     */
+    const REFERENCE_LISTS = {
+      brands: {
+        noun: 'brand',
+        inputId: 'brand-search-input',
+        gridId: 'brands-grid',
+        countId: 'brand-search-count',
+        messageId: 'brands-list-message',
+        queryKey: 'brandQuery'
+      },
+      fandoms: {
+        noun: 'fandom',
+        inputId: 'fandom-search-input',
+        gridId: 'fandoms-grid',
+        countId: 'fandom-search-count',
+        messageId: 'fandoms-list-message',
+        queryKey: 'fandomQuery'
+      }
+    };
+
+    /**
      * The one matching rule, shared by both lists.
      *
      * It is deliberately the SAME normalisation the server applies when it
@@ -2676,20 +2901,25 @@
     }
 
     /**
-     * Re-render both management grids from their search boxes.
+     * Re-render ONE management grid from ITS OWN search box.
      *
-     * Bound to the `oninput` of both boxes, so it fires on every keystroke. It
-     * re-reads the inputs rather than trusting the event target, which keeps it
-     * correct when the two are driven programmatically (e.g. a future "clear
-     * filters" button) rather than by a human typing in one specific box.
+     * `kind` is the list identity ('brands' | 'fandoms') and is passed
+     * explicitly by each box's own inline `oninput`, so the box that fired
+     * selects which input, which state key and which grid are involved. The
+     * other list is never read and never re-rendered: typing in the Brand box
+     * cannot filter Fandom, and vice versa.
+     *
+     * It re-reads the input rather than trusting the event target, which keeps it
+     * correct when a box is driven programmatically (e.g. a future "clear
+     * filters" button) rather than by a human typing in it.
      */
-    function filterReferenceLists() {
-      const brandInput = document.getElementById('brand-search-input');
-      const fandomInput = document.getElementById('fandom-search-input');
-      state.brandQuery = brandInput ? brandInput.value : '';
-      state.fandomQuery = fandomInput ? fandomInput.value : '';
-      renderBrands();
-      renderFandoms();
+    function filterReferenceList(kind) {
+      const cfg = REFERENCE_LISTS[kind];
+      if (!cfg) return;
+      const input = document.getElementById(cfg.inputId);
+      state[cfg.queryKey] = input ? input.value : '';
+      if (kind === 'brands') renderBrands();
+      else renderFandoms();
     }
 
     /**
@@ -2712,29 +2942,55 @@
     }
 
     /**
-     * Render the two management grids. Every DB-derived string goes through
+     * Paint ONE management list: its count line, its message line and its grid.
+     *
+     * The shell is shared so the two lists cannot drift, but the STATE it reads
+     * is not shared: everything is looked up from REFERENCE_LISTS[kind] and from
+     * this list's own `items` / `visible` arguments, so a call for one kind
+     * cannot write the other's count, message, grid or query.
+     *
+     * The message line distinguishes the two reasons a list shows nothing: it has
+     * no entries at all, or this list's search excluded all of them. It is a
+     * dedicated element beside the grid rather than markup inside the grid, so
+     * "no match" is addressable and assertable per list.
+     *
+     * @param {string} kind     'brands' | 'fandoms'
+     * @param {Array}  items    every row in this list
+     * @param {Array}  visible  the subset this list's query matched
+     * @param {Function} card   row -> HTML for ONE card (list-specific)
+     */
+    function paintReferenceList(kind, items, visible, card) {
+      const cfg = REFERENCE_LISTS[kind];
+      if (!cfg) return;
+      renderReferenceCount(cfg.countId, visible.length, items.length, cfg.noun, state[cfg.queryKey]);
+
+      const message = document.getElementById(cfg.messageId);
+      if (message) {
+        const text = items.length === 0
+          ? 'No ' + cfg.noun + 's yet.'
+          : (visible.length === 0 ? 'No ' + cfg.noun + 's match your search.' : '');
+        message.textContent = text;
+        message.hidden = !text;
+      }
+
+      const grid = document.getElementById(cfg.gridId);
+      if (!grid) return;
+      grid.innerHTML = visible.length ? visible.map(card).join('\n') : '';
+    }
+
+    /**
+     * Render the Brand management list. Every DB-derived string goes through
      * escapeHtml and every URL through safeUrl — the same stored-XSS barrier the
      * costume/prop/lens renderers use.
      *
-     * Both take the FILTERED list rather than reading state directly, so the
-     * search box is the only thing that decides what is drawn. The "nothing to
-     * show" message distinguishes the two reasons a list can be empty: it has no
-     * entries at all, or the search excluded all of them.
+     * It passes the FILTERED list to the shared painter rather than reading
+     * state itself, so the Brand search box is the only thing that decides what
+     * is drawn. Only the CARD is Brand-specific (Rename / Store link / Delete);
+     * the count line, the message line and the grid all come from
+     * paintReferenceList() keyed by 'brands'.
      */
     function renderBrands() {
-      const grid = document.getElementById('brands-grid');
-      if (!grid) return;
-      renderReferenceCount('brand-search-count', getFilteredBrands().length, state.brands.length, 'brand', state.brandQuery);
-      if (state.brands.length === 0) {
-        grid.innerHTML = '<p style="color:var(--text-muted); font-size:0.82rem;">No brands yet.</p>';
-        return;
-      }
-      const visible = getFilteredBrands();
-      if (visible.length === 0) {
-        grid.innerHTML = '<p style="color:var(--text-muted); font-size:0.82rem;">No brands match your search.</p>';
-        return;
-      }
-      grid.innerHTML = visible.map(brand => {
+      paintReferenceList('brands', state.brands, getFilteredBrands(), brand => {
         const name = clean(brand.name);
         const store = safeUrl(brand.storeUrl);
         // data-url carries a URL too, so it goes through safeUrl as well —
@@ -2758,23 +3014,16 @@
           '      </div>',
           '    </div>'
         ].filter(Boolean).join('\n');
-      }).join('\n');
+      });
     }
 
+    /**
+     * Render the Fandom management list. Independent of renderBrands() in state:
+     * its own items, its own filtered subset, its own grid, count line and
+     * message line. Only the CARD differs, because only a brand has a store link.
+     */
     function renderFandoms() {
-      const grid = document.getElementById('fandoms-grid');
-      if (!grid) return;
-      renderReferenceCount('fandom-search-count', getFilteredFandoms().length, state.fandoms.length, 'fandom', state.fandomQuery);
-      if (state.fandoms.length === 0) {
-        grid.innerHTML = '<p style="color:var(--text-muted); font-size:0.82rem;">No fandoms yet.</p>';
-        return;
-      }
-      const visible = getFilteredFandoms();
-      if (visible.length === 0) {
-        grid.innerHTML = '<p style="color:var(--text-muted); font-size:0.82rem;">No fandoms match your search.</p>';
-        return;
-      }
-      grid.innerHTML = visible.map(fandom => {
+      paintReferenceList('fandoms', state.fandoms, getFilteredFandoms(), fandom => {
         const name = clean(fandom.name);
         const count = parseInt(clean(fandom.costumeCount), 10) || 0;
         return [
@@ -2789,7 +3038,7 @@
           '      </div>',
           '    </div>'
         ].filter(Boolean).join('\n');
-      }).join('\n');
+      });
     }
 
     async function loadAllData() {
@@ -2872,8 +3121,15 @@
         const status = clean(c.status).toUpperCase() || 'IN_POSSESSION';
         const statusClass = 'badge-' + status.toLowerCase();
         const images = costumeImages(c);
+        // The real URL goes in data-image-src, NOT in src: /uploads sits behind
+        // the authenticated static mount and an <img> cannot send a bearer
+        // header, so hydrateAuthenticatedImages() fetches the bytes through api()
+        // and swaps in an object URL. escapeHtml still guards the attribute, and
+        // safeUrl (applied inside parseImageUrls) has already rejected any URL
+        // that is not http(s) or a rooted path. See "Authenticated image
+        // delivery" above.
         const thumb = images.length
-          ? '<img src="' + escapeHtml(images[0]) + '" alt="' + escapeHtml(clean(c.character) || 'Costume') + '" loading="lazy">'
+          ? '<img src="' + IMAGE_LOADING_PIXEL + '" data-image-src="' + escapeHtml(images[0]) + '" alt="' + escapeHtml(clean(c.character) || 'Costume') + '" loading="lazy">'
           : MEDIA_PLACEHOLDER_HTML;
         const refUrl = safeUrl(c.referenceUrl);
         const price = formatMoney(c.buyPrice);
@@ -2924,6 +3180,8 @@
           '</div>'
         ].join('');
       }).join('');
+
+      hydrateAuthenticatedImages(grid);
     }
 
     function renderProps(items) {

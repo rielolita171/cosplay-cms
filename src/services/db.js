@@ -422,6 +422,28 @@ async function createUser({ id, username, email, passwordHash, role = 'user' }) 
   return getUserById(id);
 }
 
+/**
+ * How many accounts currently have Telegram 2FA switched on.
+ *
+ * Used by the startup check in src/server.js (reportTelegram2FAConfig) to warn
+ * that such accounts cannot receive an OTP while Telegram is unconfigured.
+ * `requireChatId` splits the count into "enabled AND has a chat id" vs "enabled
+ * with no chat id", because the second group is locked out for a different and
+ * more specific reason: even a correctly configured bot has nowhere to send.
+ *
+ * The comparison is on the TEXT form of the column because SQLite INTEGER values
+ * arrive as the string '1' over this CLI pipe transport and the string '0' is
+ * truthy in JavaScript — the exact trap toBool() exists to handle elsewhere.
+ */
+async function countUsersWith2FAEnabled(requireChatId) {
+  await initSchema();
+  const chatClause = requireChatId ? " AND telegramChatId IS NOT NULL AND TRIM(telegramChatId) <> ''" : '';
+  const output = await runSql(
+    `SELECT COUNT(*) FROM "User" WHERE telegram2FAEnabled = '1'${chatClause};`
+  );
+  return parseInt(String(output).trim(), 10) || 0;
+}
+
 async function updateUser(id, fields) {
   const keys = Object.keys(fields);
   if (keys.length === 0) return;
@@ -448,5 +470,6 @@ module.exports = {
   getUserByUsername,
   createUser,
   updateUser,
+  countUsersWith2FAEnabled,
   DB_FILE
 };

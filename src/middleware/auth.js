@@ -56,8 +56,28 @@ function validateJwtSecret(secret = JWT_SECRET) {
   if (secret.length < 32) {
     return { ok: false, level: 'fatal', reason: `JWT_SECRET is too short (${secret.length} chars, need >= 32)` };
   }
-  if (/^[a-f0-9]{16,}$/i.test(secret) || /^[a-z0-9]{16,}$/i.test(secret)) {
-    return { ok: true, level: 'warning', reason: 'JWT_SECRET has low entropy (single charset) — use openssl rand -hex 32' };
+  // ENTROPY, NOT CHARSET.
+  //
+  // This used to be a pair of charset regexes, and both branches were wrong in
+  // a way that made the check advisory noise:
+  //   /^[a-f0-9]{16,}$/i  fires on the output of `openssl rand -hex 32` — the
+  //                      very command the warning message tells you to run. A
+  //                      64-hex-char secret is 256 bits of entropy and was
+  //                      reported as low-entropy.
+  //   /^[a-z0-9]{16,}$/i  is a strict superset of the first (hex ⊂ alphanumeric),
+  //                      so it additionally fired on essentially EVERY real
+  //                      random secret that happened to contain no `-` or `_`,
+  //                      which is the common case for a base64url encoding.
+  // Character-set shape cannot distinguish "aaaaaaaa…", which is ~4 bits of
+  // entropy, from a 43-character base64url string, which is 256. What can is the
+  // observed diversity of the characters, so that is what is measured now.
+  //
+  // This does NOT weaken the check. A short secret is still FATAL above (which
+  // is what actually catches `openssl rand -hex 8` and a 16-hex-char value), the
+  // placeholder and known-weak-list checks above are untouched, and a long
+  // repeating pattern — the only shape this warning is for — is still surfaced.
+  if (new Set(secret).size < 8) {
+    return { ok: true, level: 'warning', reason: 'JWT_SECRET is built from fewer than 8 distinct characters and looks repetitive — replace it with 32+ bytes from a CSPRNG (openssl rand -hex 32)' };
   }
   return { ok: true, level: 'ok', reason: 'JWT_SECRET looks acceptable' };
 }

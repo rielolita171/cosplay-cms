@@ -596,3 +596,38 @@ router.delete('/:id', async (req, res) => {
 });
 
 module.exports = router;
+
+/**
+ * The write-path normalisers, exported so that non-HTTP writers reuse them
+ * instead of reimplementing them.
+ *
+ * WHY THIS EXPORT EXISTS
+ * The Excel backfill (scripts/import_excel.js) writes "Costume" rows directly.
+ * Before this, it applied none of the rules below: a spreadsheet cell with a
+ * double-spaced brand produced a costume whose brand matched no managed-list row
+ * (the UNIQUE index is built on the whitespace-collapsed nameLower), and a
+ * spreadsheet size went in unvalidated. Reimplementing these validators in the
+ * script would guarantee they drift; importing them cannot.
+ *
+ * They are attached to the router object rather than exported as a separate
+ * module so that this file keeps exactly one definition of each rule — the
+ * export is a re-publication, not a copy.
+ */
+module.exports.normalizers = {
+  normalizeImageUrls,
+  normalizeStatus,
+  normalizeNotes,
+  normalizePrice,
+  normalizeSize,
+  normalizeReferenceName,
+  ensureReferenceRow,
+  COSTUME_COLUMNS,
+  COSTUME_STATUSES,
+  COSTUME_SIZES,
+  MAX_REFERENCE_NAME_LENGTH,
+  MAX_CHARACTER_LENGTH,
+  MAX_REFERENCE_URL_LENGTH,
+  MAX_NOTES_LENGTH,
+  MAX_IMAGE_URLS,
+  MAX_IMAGE_URL_LENGTH
+};

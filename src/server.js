@@ -116,8 +116,37 @@ const apiLimiter = rateLimit({
 });
 app.use('/api', apiLimiter);
 
-// Static files for uploaded images
-app.use('/uploads', express.static(path.join(__dirname, '../data/uploads')));
+/**
+ * Static files for uploaded images — GUARDED.
+ *
+ * This used to be a bare `express.static` mount, which meant every uploaded
+ * costume photo was world-readable to anyone who could reach the server and
+ * guess (or enumerate) its path. An `<img src>` cannot send an
+ * `Authorization: Bearer` header, so the guard cannot simply be the data-route
+ * `verifyToken` used elsewhere: the frontend fetches each image through api()
+ * with the bearer header and paints it via an object URL instead (see
+ * "Authenticated image delivery" in public/index.html). That is a CLIENT-SIDE
+ * contract, so the server half of it is `requireUploadAccess` below, which
+ * accepts an access token (or the X-CMS-API-KEY header, for n8n) and denies
+ * everything else with 401/403 and a JSON body — never a redirect to the login
+ * page, and never a fall-through to the SPA mount.
+ *
+ * The trailing 404 handler is part of the guard, not decoration: with
+ * `fallthrough` left at its default, a request for a file that does not exist
+ * would fall out of this mount and be answered by the public SPA mount at the
+ * bottom of this file, handing the caller index.html with a 200.
+ */
+const { requireUploadAccess } = require('./middleware/uploadAccess');
+app.use(
+  '/uploads',
+  requireUploadAccess,
+  express.static(path.join(__dirname, '../data/uploads'), {
+    index: false,
+    dotfiles: 'deny',
+    redirect: false
+  }),
+  (req, res) => res.status(404).json({ error: 'Image not found', code: 'NOT_FOUND' })
+);
 
 // ============================================================================
 // ROUTES
@@ -298,9 +327,59 @@ app.use((err, req, res, next) => {
 // is idempotent and single-flight, so a DB that already has them is untouched;
 // a genuinely fresh one converges on init_db.sql's schema.
 const db = require('./services/db');
-db.initSchema().catch((error) => {
-  console.error('❌ Schema initialisation failed:', error.message);
-});
+db.initSchema()
+  .then(() => reportTelegram2FAConfig())
+  .catch((error) => {
+    console.error('❌ Schema initialisation failed:', error.message);
+  });
+
+/**
+ * Loud, non-fatal startup check for the one misconfiguration that can lock a
+ * real user out of their own account.
+ *
+ * THE MISCONFIGURATION
+ * "User".telegram2FAEnabled is a per-account flag. If it is set but Telegram is
+ * not configured, POST /api/auth/login answers 503 TELEGRAM_NOT_CONFIGURED
+ * (src/routes/auth.js telegramUnconfigured) — which is the correct fail-closed
+ * behaviour — but the account owner has no way to receive the OTP, and the only
+ * remaining way back in is the break-glass recovery key.
+ *
+ * WHY THIS ONLY WARNS
+ * The app is perfectly usable without 2FA, and this function runs against a
+ * database that may legitimately hold no 2FA users at all. Refusing to boot over
+ * a warning would take the whole CMS down to report a problem the operator can
+ * fix in their .env, so this mirrors validateJwtSecretAtBoot()'s development
+ * path: shout, then start.
+ *
+ * It never prints a chat id, a bot token, or any credential — only counts.
+ */
+async function reportTelegram2FAConfig() {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const configured = !!token && !token.includes('$(') && !token.includes('your_') && !token.includes('here');
+  if (configured) return;
+
+  try {
+    const withChatId = await db.countUsersWith2FAEnabled(true);
+    const withoutChatId = await db.countUsersWith2FAEnabled(false);
+    if (withChatId + withoutChatId === 0) return;
+
+    console.warn('\n' + '='.repeat(60));
+    console.warn('⚠️  2FA IS ENABLED FOR AT LEAST ONE ACCOUNT, BUT TELEGRAM IS NOT CONFIGURED.');
+    console.warn(`   Accounts with 2FA on: ${withChatId + withoutChatId}`
+      + (withoutChatId > 0 ? ` (${withoutChatId} of them have no telegramChatId at all)` : ''));
+    console.warn('   While TELEGRAM_BOT_TOKEN is a placeholder, POST /api/auth/login for those');
+    console.warn('   accounts returns 503 TELEGRAM_NOT_CONFIGURED and no OTP can be sent.');
+    console.warn('   Recovery: POST /api/auth/break-glass with { username, recoveryKey } —');
+    console.warn('   this does NOT depend on Telegram, so those users are not locked out as');
+    console.warn('   long as they still hold their emergency key.');
+    console.warn('   Fix: set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in .env, then set the');
+    console.warn('   telegramChatId column on your own "User" row before enabling 2FA.');
+    console.warn('='.repeat(60) + '\n');
+  } catch (error) {
+    // A missing "User" table is not this function's problem to report.
+    console.warn('⚠️  Could not verify the 2FA / Telegram configuration:', error.message);
+  }
+}
 
 app.listen(PORT, () => {
   console.log(`\n${'='.repeat(60)}`);
