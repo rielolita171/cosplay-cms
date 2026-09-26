@@ -260,6 +260,31 @@ async function initSchema() {
       });
     }
 
+    // Column added to "ContactLens" after init_db.sql was written, for the lens
+    // colour picker: `color` keeps holding the NAME and gains this #RRGGBB
+    // companion, which is the only thing painted into a style context.
+    //
+    // IDEMPOTENT, AND A NO-OP ON A FRESH DATABASE
+    // `ALTER TABLE ... ADD COLUMN` is not itself idempotent — running it twice
+    // fails with "duplicate column name". The catch below is what makes it so:
+    // the second run's error is swallowed, exactly as for the "User" columns
+    // above. This is the established pattern in this file rather than a
+    // PRAGMA-table_info probe, so the two migrations read the same way.
+    //
+    // IT REWRITES NOTHING
+    // ADD COLUMN appends the column to every existing row with no value (NULL)
+    // and touches no other table. The 83 costumes are not involved at all, and
+    // the two existing lenses keep `color = 'Amber'` — a name, not a hex — which
+    // is why the client falls back to a preset lookup when colorHex is NULL
+    // rather than treating the missing hex as a data error.
+    //
+    // It is appended LAST, matching the position it is declared at in
+    // init_db.sql, so the positional `SELECT *` in src/routes/lenses.js parses
+    // identically on a migrated and a freshly-initialised database.
+    await runSql('ALTER TABLE "ContactLens" ADD COLUMN colorHex TEXT;').catch(() => {
+      // Column already exists, or the table is not there yet.
+    });
+
     // Surface (never repair) any pre-existing size that sits outside XS–3XL.
     await reportSizeEnumDrift();
   })();

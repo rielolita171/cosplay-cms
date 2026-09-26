@@ -296,6 +296,47 @@
       color: #c084fc;
     }
 
+    /* Lens colour picker.
+       In the FORMS the colour is set through the CSSOM
+       (el.style.backgroundColor = safeHexColor(...)), so no style string is ever
+       built. On the lens CARD, which is an innerHTML template like every other
+       card here, the hex is interpolated into a style attribute — safe because
+       safeHexColor() has already reduced it to exactly #RRGGBB, a pattern with no
+       quote, ';' or '<'. See safeHexColor(). */
+    .color-picker {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .color-swatch {
+      width: 26px;
+      height: 26px;
+      padding: 0;
+      border-radius: 6px;
+      border: 2px solid var(--card-border);
+      cursor: pointer;
+    }
+    .color-swatch.selected {
+      border-color: #c084fc;
+      box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.45);
+    }
+    /* The swatch shown next to the colour name on a lens card. */
+    .color-dot {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      vertical-align: middle;
+      margin-right: 5px;
+    }
+    .ref-search-count {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      margin: 8px 0 0;
+    }
+
     /* Modal Overlay */
     dialog {
       background: #1e2230;
@@ -845,6 +886,18 @@
               </div>
               <button type="submit" class="btn btn-primary btn-full">Add Brand</button>
             </form>
+            <!-- Search box for the Brand list. These two live inside the
+                 Reference Lists tab rather than in the shared #filter-bar
+                 because that bar is deliberately hidden on the non-inventory
+                 tabs (see switchTab), and because the two lists are filtered
+                 independently — one query box for two separate tables would
+                 make it impossible to search one while the other stays full. -->
+            <div class="form-group" style="margin-top: 16px; margin-bottom: 0;">
+              <label for="brand-search-input">Search brands</label>
+              <input type="search" class="form-control" id="brand-search-input"
+                     placeholder="Type to filter by name…" oninput="filterReferenceLists()">
+              <p class="ref-search-count" id="brand-search-count"></p>
+            </div>
             <div class="items-grid" id="brands-grid" style="margin-top: 16px;"></div>
           </div>
 
@@ -860,6 +913,12 @@
               </div>
               <button type="submit" class="btn btn-primary btn-full">Add Fandom</button>
             </form>
+            <div class="form-group" style="margin-top: 16px; margin-bottom: 0;">
+              <label for="fandom-search-input">Search fandoms</label>
+              <input type="search" class="form-control" id="fandom-search-input"
+                     placeholder="Type to filter by name…" oninput="filterReferenceLists()">
+              <p class="ref-search-count" id="fandom-search-count"></p>
+            </div>
             <div class="items-grid" id="fandoms-grid" style="margin-top: 16px;"></div>
           </div>
         </div>
@@ -1197,7 +1256,24 @@
       </div>
       <div class="form-group">
         <label>Color *</label>
-        <input type="text" class="form-control" name="color" required placeholder="e.g. Amber / Violet">
+        <!-- COLOUR PICKER. A row of preset swatches plus a native
+             <input type="color"> for a bespoke value, over the SAME free-text
+             name field that has always been here. The name is still what gets
+             submitted as `color` and still what the server stores and searches;
+             the swatches only set it. Nothing here is library-driven and nothing
+             is fetched — the CSP forbids a CDN and this stays native HTML. -->
+        <div class="color-picker" id="add-lens-swatches"></div>
+        <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+          <input type="color" class="form-control" id="add-lens-color-native"
+                 style="width:44px; height:38px; padding:2px;"
+                 title="Pick a custom colour" aria-label="Custom colour">
+          <span style="color:var(--text-muted); font-size:0.75rem;">or a custom shade</span>
+        </div>
+        <input type="text" class="form-control" name="color" id="add-lens-color" required
+               maxlength="80" placeholder="Colour name, e.g. Amber / Violet">
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 6px;">
+          Tap a swatch to fill the name, or type any name of your own.
+        </p>
         <div class="field-error" data-error-for="color"></div>
       </div>
       <div class="form-group">
@@ -1252,7 +1328,21 @@
       </div>
       <div class="form-group">
         <label for="edit-lens-color">Color *</label>
+        <!-- Same picker as the Add Lens modal — see the note there. openEditLens()
+             calls renderColorSwatches() to mark the stored colour as selected, so
+             a lens saved with only a bespoke name opens with no swatch lit rather
+             than a wrong one lit. -->
+        <div class="color-picker" id="edit-lens-swatches"></div>
+        <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+          <input type="color" class="form-control" id="edit-lens-color-native"
+                 style="width:44px; height:38px; padding:2px;"
+                 title="Pick a custom colour" aria-label="Custom colour">
+          <span style="color:var(--text-muted); font-size:0.75rem;">or a custom shade</span>
+        </div>
         <input type="text" class="form-control" name="color" id="edit-lens-color" required maxlength="80" placeholder="e.g. Amber / Violet">
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 6px;">
+          Tap a swatch to fill the name, or type any name of your own.
+        </p>
         <div class="field-error" data-error-for="color"></div>
       </div>
       <div class="form-group">
@@ -1399,6 +1489,183 @@
     const MEDIA_PLACEHOLDER_HTML =
       '<div class="media-placeholder"><span class="media-icon">🖼️</span><span>No image</span></div>';
 
+    // ==========================================================================
+    // LENS COLOUR PICKER
+    // ==========================================================================
+    // `ContactLens.color` keeps storing the NAME and `ContactLens.colorHex` the
+    // #RRGGBB. The split is deliberate: the name is what the user reads, what
+    // the server filters on (GET /api/lenses?color=) and what the two existing
+    // rows already hold ("Amber"), so replacing it with a hex would destroy a
+    // searchable, human-meaningful value. The hex is a strictly separate column
+    // that is NULL for those rows.
+    //
+    // These presets are the colours cosplay contact lenses actually ship in.
+    // The lookup serves two purposes, not one: it fills the name when a swatch is
+    // tapped, AND it is the FALLBACK that lets a pre-picker row still render a
+    // real swatch from its name alone. That fallback is why "Amber" is in this
+    // list and why the two existing lenses need no data migration to look right.
+    const LENS_COLOR_PRESETS = [
+      ['Natural Black', '#2B2B33'],
+      ['Black', '#141419'],
+      ['Dark Brown', '#4A3524'],
+      ['Brown', '#7A5230'],
+      ['Hazel', '#9A7B4F'],
+      ['Amber', '#C8862A'],
+      ['Golden', '#E0A82E'],
+      ['Honey', '#D9A05B'],
+      ['Grey', '#8A8A93'],
+      ['Light Grey', '#B6B6BE'],
+      ['Blue', '#2F5FBF'],
+      ['Sky Blue', '#63B4E8'],
+      ['Green', '#2E8B57'],
+      ['Emerald', '#17A97A'],
+      ['Violet', '#6A3FBF'],
+      ['Purple', '#8E44AD'],
+      ['Lavender', '#B9A3E3'],
+      ['Red', '#C1272D'],
+      ['Wine', '#7B1E2B'],
+      ['Pink', '#E86A9A'],
+      ['Rose', '#F2A2B4'],
+      ['White', '#F2F2F0'],
+      ['Grey White', '#CFCFD2'],
+      ['Aqua', '#57C7D4']
+    ];
+
+    // name (lowercased, whitespace-collapsed) -> hex, for the two lookups above.
+    const LENS_COLOR_PRESET_BY_NAME = LENS_COLOR_PRESETS.reduce((map, pair) => {
+      map[collapseSpaces(pair[0]).toLowerCase()] = pair[1];
+      return map;
+    }, {});
+
+    /**
+     * The one gate a colour hex passes through before it is allowed anywhere
+     * near a CSS property.
+     *
+     * WHY THIS IS NOT escapeHtml()
+     * escapeHtml escapes HTML metacharacters, which is the right tool for text
+     * content and the wrong tool here. The server already refuses anything that
+     * is not exactly #RRGGBB (hexColorParam() in src/services/sqlSafety.js), but
+     * a client-side check is still the thing that actually protects the DOM: the
+     * value also reaches here from a hand-edited request, another tab, or any
+     * future writer that forgets the server-side validator. The pattern admits
+     * only '#' plus six hex digits — no quote, no '<', no ';', no whitespace, no
+     * ')' — so a value that passes cannot terminate the declaration, open a new
+     * attribute or append a second property. Anything else returns null and the
+     * caller renders no colour at all.
+     *
+     * Defence in depth, not a substitute: the server check is the control, this
+     * is the second lock on the same door.
+     *
+     * @param {*} value
+     * @returns {string|null} the hex, or null if it is not a valid #RRGGBB
+     */
+    function safeHexColor(value) {
+      const raw = clean(value);
+      return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw : null;
+    }
+
+    /** The hex a lens row should be painted with, or null to paint no dot. */
+    function lensSwatchHex(lens) {
+      return safeHexColor(lens.colorHex) || LENS_COLOR_PRESET_BY_NAME[collapseSpaces(clean(lens.color)).toLowerCase()] || null;
+    }
+
+    /**
+     * Build the preset swatch row for one of the two lens modals.
+     *
+     * Elements are created with document.createElement and the colour is assigned
+     * through the CSSOM (`el.style.backgroundColor = hex`), never by assembling
+     * a `style="..."` string — the same reason populateCostumeSelects() builds
+     * options with DOM APIs. There is no innerHTML anywhere in this function, so
+     * a colour name can never be parsed as markup.
+     *
+     * The hex values come from LENS_COLOR_PRESETS, a literal in this file, and
+     * pass through safeHexColor() anyway rather than being trusted because they
+     * are "ours".
+     *
+     * @param {string} swatchId   container id, e.g. 'edit-lens-swatches'
+     * @param {string} nameId     the [name="color"] input this row drives
+     * @param {string} nativeId   the <input type="color"> beside it
+     * @param {string} selected   the current colour name, to light up
+     * @param {string} currentHex the stored hex, to seed the native input
+     * @param {string} formKey    'add' / 'edit' — records the seeded baseline
+     */
+    function renderColorSwatches(swatchId, nameId, nativeId, selected, currentHex, formKey) {
+      const host = document.getElementById(swatchId);
+      if (!host) return;
+      host.innerHTML = '';
+
+      const wanted = collapseSpaces(selected || '').toLowerCase();
+
+      LENS_COLOR_PRESETS.forEach(pair => {
+        const name = pair[0];
+        const hex = safeHexColor(pair[1]);
+        if (!hex) return;                       // unreachable: literals are valid
+        const swatch = document.createElement('button');
+        swatch.type = 'button';
+        swatch.className = 'color-swatch' + (wanted === name.toLowerCase() ? ' selected' : '');
+        swatch.style.backgroundColor = hex;
+        swatch.title = name;
+        swatch.setAttribute('aria-label', name);
+        swatch.setAttribute('aria-pressed', wanted === name.toLowerCase() ? 'true' : 'false');
+        swatch.dataset.colorName = name;
+        swatch.addEventListener('click', function () {
+          document.getElementById(nameId).value = name;
+          renderColorSwatches(swatchId, nameId, nativeId, name, hex, formKey);
+        });
+        host.appendChild(swatch);
+      });
+
+      // Seed the native picker so it opens on the colour already in play rather
+      // than on the browser's default black, and record that seed as the
+      // baseline resolveColorHexForSave() compares against.
+      const native = document.getElementById(nativeId);
+      if (native) {
+        const seed = safeHexColor(currentHex) || LENS_COLOR_PRESET_BY_NAME[wanted] || '#2B2B33';
+        native.value = seed;
+        if (formKey) colorPickerBaseHex[formKey] = seed;
+      }
+    }
+
+    /**
+     * The hex the native <input type="color"> was LAST SET TO by the app itself
+     * (a swatch tap, or the seed on open). Keyed by the form it belongs to.
+     *
+     * WHY THIS IS NEEDED
+     * A native colour input ALWAYS has a value — it is never empty, and the
+     * browser seeds it with #000000. So "read the native input" cannot by itself
+     * mean "the user chose a custom colour": a user who types a bespoke name
+     * into the text box and never touches the colour picker would otherwise
+     * silently save a black swatch. Comparing against this baseline is what
+     * distinguishes "the picker still holds what we put there" from "the user
+     * moved the picker".
+     */
+    const colorPickerBaseHex = {};
+
+    /**
+     * The hex to SAVE for a lens, from whatever the picker currently holds.
+     *
+     * Three cases, in order:
+     *   1. The user moved the native picker AWAY from the value we seeded it
+     *      with — that is an explicit custom colour, and it wins.
+     *   2. Otherwise the name is looked up in the presets, so a name typed by
+     *      hand still gets its swatch, and the existing "Amber" rows acquire one
+     *      the moment they are next saved.
+     *   3. Otherwise '' — which the PUT contract reads as "clear the column to
+     *      NULL" rather than "leave it alone". That is why handleEditLens()
+     *      always sends the key.
+     *
+     * @param {string} nameValue  the [name="color"] input's value
+     * @param {string} nativeValue the <input type="color">'s current value
+     * @param {string} formKey    'add' or 'edit' — which picker's baseline to use
+     * @returns {string} a #RRGGBB, or '' for "no colour"
+     */
+    function resolveColorHexForSave(nameValue, nativeValue, formKey) {
+      const fromNative = safeHexColor(nativeValue);
+      const base = colorPickerBaseHex[formKey];
+      if (fromNative && fromNative !== base) return fromNative;
+      return LENS_COLOR_PRESET_BY_NAME[collapseSpaces(nameValue || '').toLowerCase()] || '';
+    }
+
     const state = {
       // Auth
       token: null,
@@ -1419,6 +1686,11 @@
       filterQuery: '',
       filterStatus: '',
       filterLocation: '',
+      // The two Reference Lists search boxes. Separate keys, not one shared
+      // query, because Brand and Fandom are two independent lists and the user
+      // filters one without narrowing the other. See filterReferenceLists().
+      brandQuery: '',
+      fandomQuery: '',
       loading: false,
       error: null,
 
@@ -2352,19 +2624,117 @@
       fillReferenceSelect('edit-costume-fandom', state.fandoms, '', '➕ Manage fandoms…', editing, true);
     }
 
+    // ========================================================================
+    // REFERENCE LIST SEARCH
+    // ========================================================================
+    // CLIENT-SIDE, DELIBERATELY.
+    // loadBrands()/loadFandoms() already pull the WHOLE list (23 and 24 rows
+    // today), so filtering it again on the server would be a round-trip per
+    // keystroke that returns a subset of data the browser is already holding. At
+    // this size a client-side pass over ~25 short strings is imperceptible and
+    // keeps typing instant and offline of the network.
+    //
+    // WHEN I WOULD SWITCH TO A SERVER `?q=`
+    // When a list gets big enough that (a) transferring and retaining it on every
+    // load is the dominant cost, and (b) the rendered rows are what slows the
+    // page down. Practically: somewhere past ~500 rows per list, or if the
+    // endpoint started needing its own pagination. The seam is already there —
+    // getFilteredBrands()/getFilteredFandoms() are the only readers of
+    // state.brands/state.fandoms for rendering, so swapping their body for an
+    // api('/api/brands?q=') call is a local change. Below that threshold, a
+    // server-side search adds a query surface, a round-trip and a second
+    // matching implementation to keep consistent for no user-visible gain.
+
+    /**
+     * The one matching rule, shared by both lists.
+     *
+     * It is deliberately the SAME normalisation the server applies when it
+     * derives `nameLower` (normalizeName() -> collapseWhitespace() in
+     * src/routes/brands.js / fandoms.js): collapseSpaces() then toLowerCase() on
+     * both the query and the name. That is why typing `blue  archive` with a
+     * double space, or `BLUE ARCHIVE`, still finds "Blue Archive" — the search
+     * box agrees with the uniqueness rule instead of contradicting it. Matching
+     * is a plain case-insensitive SUBSTRING test, matching the `indexOf(...) !==
+     * -1` style every other filter in this file already uses.
+     *
+     * @param {Array} items
+     * @param {string} query
+     * @returns {Array} the matching subset, in the original order
+     */
+    function matchReferenceList(items, query) {
+      const q = collapseSpaces(query || '').toLowerCase();
+      if (!q) return items;
+      return items.filter(item => collapseSpaces(clean(item.name)).toLowerCase().indexOf(q) !== -1);
+    }
+
+    function getFilteredBrands() {
+      return matchReferenceList(state.brands, state.brandQuery);
+    }
+
+    function getFilteredFandoms() {
+      return matchReferenceList(state.fandoms, state.fandomQuery);
+    }
+
+    /**
+     * Re-render both management grids from their search boxes.
+     *
+     * Bound to the `oninput` of both boxes, so it fires on every keystroke. It
+     * re-reads the inputs rather than trusting the event target, which keeps it
+     * correct when the two are driven programmatically (e.g. a future "clear
+     * filters" button) rather than by a human typing in one specific box.
+     */
+    function filterReferenceLists() {
+      const brandInput = document.getElementById('brand-search-input');
+      const fandomInput = document.getElementById('fandom-search-input');
+      state.brandQuery = brandInput ? brandInput.value : '';
+      state.fandomQuery = fandomInput ? fandomInput.value : '';
+      renderBrands();
+      renderFandoms();
+    }
+
+    /**
+     * Write the "Showing N of M" line under a search box.
+     *
+     * A count is shown whenever a filter is active; with no query the line stays
+     * blank rather than shouting "Showing 23 of 23" at an untouched list. The
+     * no-match case is stated in words AND numerically so it is unambiguous.
+     */
+    function renderReferenceCount(countId, shown, total, noun, query) {
+      const el = document.getElementById(countId);
+      if (!el) return;
+      if (!collapseSpaces(query || '')) {
+        el.textContent = '';
+        return;
+      }
+      el.textContent = shown === 0
+        ? 'No ' + noun + ' match "' + query.trim() + '".'
+        : 'Showing ' + shown + ' of ' + total + ' ' + noun + (shown === 1 ? '' : 's') + '.';
+    }
+
     /**
      * Render the two management grids. Every DB-derived string goes through
      * escapeHtml and every URL through safeUrl — the same stored-XSS barrier the
      * costume/prop/lens renderers use.
+     *
+     * Both take the FILTERED list rather than reading state directly, so the
+     * search box is the only thing that decides what is drawn. The "nothing to
+     * show" message distinguishes the two reasons a list can be empty: it has no
+     * entries at all, or the search excluded all of them.
      */
     function renderBrands() {
       const grid = document.getElementById('brands-grid');
       if (!grid) return;
+      renderReferenceCount('brand-search-count', getFilteredBrands().length, state.brands.length, 'brand', state.brandQuery);
       if (state.brands.length === 0) {
         grid.innerHTML = '<p style="color:var(--text-muted); font-size:0.82rem;">No brands yet.</p>';
         return;
       }
-      grid.innerHTML = state.brands.map(brand => {
+      const visible = getFilteredBrands();
+      if (visible.length === 0) {
+        grid.innerHTML = '<p style="color:var(--text-muted); font-size:0.82rem;">No brands match your search.</p>';
+        return;
+      }
+      grid.innerHTML = visible.map(brand => {
         const name = clean(brand.name);
         const store = safeUrl(brand.storeUrl);
         // data-url carries a URL too, so it goes through safeUrl as well —
@@ -2394,11 +2764,17 @@
     function renderFandoms() {
       const grid = document.getElementById('fandoms-grid');
       if (!grid) return;
+      renderReferenceCount('fandom-search-count', getFilteredFandoms().length, state.fandoms.length, 'fandom', state.fandomQuery);
       if (state.fandoms.length === 0) {
         grid.innerHTML = '<p style="color:var(--text-muted); font-size:0.82rem;">No fandoms yet.</p>';
         return;
       }
-      grid.innerHTML = state.fandoms.map(fandom => {
+      const visible = getFilteredFandoms();
+      if (visible.length === 0) {
+        grid.innerHTML = '<p style="color:var(--text-muted); font-size:0.82rem;">No fandoms match your search.</p>';
+        return;
+      }
+      grid.innerHTML = visible.map(fandom => {
         const name = clean(fandom.name);
         const count = parseInt(clean(fandom.costumeCount), 10) || 0;
         return [
@@ -2619,6 +2995,16 @@
       grid.innerHTML = items.map(l => {
         const status = lensDisplayStatus(l);
         const statusClass = 'badge-' + status.toLowerCase();
+        const colorName = clean(l.color);
+        // safeHexColor() gates this to exactly #RRGGBB before it is interpolated
+        // into the style attribute below; null means "paint no dot" rather than
+        // painting a default. A row with no stored hex whose name is outside the
+        // preset list (a bespoke colour) simply gets no dot — the name beside it
+        // is still fully readable, which is why the name is the primary value.
+        const swatchHex = lensSwatchHex(l);
+        const colorDot = swatchHex
+          ? '<span class="color-dot" style="background-color:' + escapeHtml(swatchHex) + ';" title="' + escapeHtml(colorName) + '"></span>'
+          : '';
         const days = daysUntil(l.expiryDate);
         const expiryRaw = clean(l.expiryDate);
         const expiryText = expiryRaw ? expiryRaw.split('T')[0] : 'N/A';
@@ -2642,7 +3028,7 @@
           '<div class="item-card">',
           '  <div>',
           '    <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:8px;">',
-          '      <h3 style="font-size:1.15rem; font-weight:700;">' + escapeHtml(clean(l.character) || 'Generic') + ' (' + escapeHtml(clean(l.color) || 'n/a') + ')</h3>',
+          '      <h3 style="font-size:1.15rem; font-weight:700;">' + escapeHtml(clean(l.character) || 'Generic') + ' (' + colorDot + escapeHtml(colorName || 'n/a') + ')</h3>',
           '      <span class="badge ' + statusClass + '">' + escapeHtml(status.replace(/_/g, ' ')) + '</span>',
           '    </div>',
           '    <div class="tags-group">',
@@ -2997,7 +3383,13 @@
     }
 
     function filterItems() {
-      state.filterQuery = (document.getElementById('search-input').value || '').toLowerCase();
+      // collapseSpaces() before toLowerCase() so the inventory search obeys the
+      // same rule as the Reference Lists search and as the server's `nameLower`
+      // derivation: "blue  archive" finds "Blue Archive" in either place, and the
+      // two search boxes can never disagree with each other. The matching itself
+      // was already a plain case-insensitive substring test; only the whitespace
+      // normalisation of the query is new.
+      state.filterQuery = collapseSpaces(document.getElementById('search-input').value || '').toLowerCase();
       state.filterStatus = document.getElementById('status-filter').value || '';
       state.filterLocation = (document.getElementById('location-filter').value || '').toLowerCase();
 
@@ -3427,11 +3819,18 @@
       }
 
       const data = Object.fromEntries(new FormData(form));
+      // The swatch row and the native colour input carry no name attribute, so
+      // they are NOT in FormData — the picked hex is attached here explicitly.
+      // It is already reduced to #RRGGBB (or '') by resolveColorHexForSave().
+      data.colorHex = resolveColorHexForSave(data.color, document.getElementById('add-lens-color-native').value, 'add');
       try {
         await api('/api/lenses', { method: 'POST', body: JSON.stringify(data) });
         showToast('Contact lens registered!', 'success');
         closeModal('modal-add-lens');
         form.reset();
+        // The native <input type="color"> is NOT covered by form.reset() in a way
+        // that clears the swatch selection, so the row is rebuilt explicitly.
+        renderColorSwatches('add-lens-swatches', 'add-lens-color', 'add-lens-color-native', '', '', 'add');
         await loadLenses();
         updateMetrics();
       } catch (err) {
@@ -3737,6 +4136,12 @@
 
       form.querySelector('[name="character"]').value = clean(lens.character);
       form.querySelector('[name="color"]').value = clean(lens.color);
+      // Light the swatch that matches the stored colour. For a row written before
+      // the picker existed colorHex is NULL, so this falls back to the preset
+      // lookup on the name — the two existing "Amber" lenses therefore open with
+      // the amber swatch already selected, and stay fully editable.
+      renderColorSwatches('edit-lens-swatches', 'edit-lens-color', 'edit-lens-color-native',
+        clean(lens.color), clean(lens.colorHex), 'edit');
       form.querySelector('[name="brand"]').value = clean(lens.brand);
       form.querySelector('[name="prescription"]').value = clean(lens.prescription);
       form.querySelector('[name="purchaseDate"]').value = dateInputValue(lens.purchaseDate);
@@ -3783,6 +4188,15 @@
         expiryDate: form.querySelector('[name="expiryDate"]').value,
         notes: form.querySelector('[name="notes"]').value.trim()
       };
+      // `colorHex` is the ONE field that is always sent, present-and-empty
+      // included: the server reads the PRESENCE of the key as "set this", so a
+      // lens whose colour is changed to a bespoke name can have its old swatch
+      // cleared rather than keeping it forever. The value is #RRGGBB or ''.
+      payload.colorHex = resolveColorHexForSave(
+        payload.color,
+        document.getElementById('edit-lens-color-native').value,
+        'edit'
+      );
 
       try {
         await api('/api/lenses/' + encodeURIComponent(id), {
@@ -4056,6 +4470,10 @@
     // ==========================================================================
     async function init() {
       bindGridEvents();
+      // The Add Lens modal's swatch row holds no state, so it is built once here
+      // rather than on every open. The Edit Lens row is rebuilt by
+      // openEditLens() because what is "selected" depends on the row being opened.
+      renderColorSwatches('add-lens-swatches', 'add-lens-color', 'add-lens-color-native', '', '', 'add');
       showLoading(false);
 
       const savedToken = sessionStorage.getItem(TOKEN_KEY);

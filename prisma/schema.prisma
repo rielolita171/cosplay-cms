@@ -127,7 +127,11 @@ model Prop {
 model ContactLens {
   id           String     @id @default(uuid())
   character    String?    // Character these lenses are for
-  color        String     // Purple, Red, Blue, etc.
+  color        String     // Purple, Red, Blue, etc. — the NAME, free text
+  // Swatch colour for `color`, kept separate so the name stays searchable and the
+  // existing bespoke names are never rewritten. #RRGGBB, or null for rows that
+  // predate the colour picker (the UI then falls back to a name-based lookup).
+  colorHex     String?
   brand        String?    // Sweety Spata, Pinkholic, etc.
   prescription String?    // Degree: -1.50, 0.00, +2.00
   purchaseDate DateTime?

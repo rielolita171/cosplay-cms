@@ -169,6 +169,46 @@ function idParam(value, maxLength = 200) {
 }
 
 /**
+ * The ONLY accepted shape for a stored colour hex: '#' plus exactly six hex digits.
+ *
+ * WHY A DEDICATED VALIDATOR AND NOT textParam()
+ * A hex value is the one free-text field in this schema whose value is destined
+ * for a STYLE CONTEXT on the client: the dashboard paints it into
+ * `style="background:<hex>"` on the lens card. Escaping (esc()) is correct and
+ * sufficient for a SQL string literal, but it is the WRONG tool for a CSS
+ * property — `esc()` would happily pass through `#fff; background-image:url(...)`
+ * because none of those characters is a quote. So the value is not escaped and
+ * sanitised here, it is ALLOWLISTED: the anchored pattern admits exactly the 16
+ * million values of the form #RRGGBB and nothing else. A value that fails is
+ * refused with 400 rather than being repaired, because "repaired" is how a
+ * crafted string reaches a style property in the first place.
+ *
+ * The pattern contains no quote, no '<', no ';' and no whitespace, so a value
+ * that passes it cannot terminate a declaration or open a new attribute — which
+ * is exactly the property the client-side `safeHexColor()` re-checks before
+ * interpolating.
+ *
+ * @param {*} value
+ * @param {{name?: string}} [opts]
+ * @returns {string|null} the value, or null when absent/blank
+ * @throws {Error} with `status = 400` when present but not a #RRGGBB literal
+ */
+const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
+
+function hexColorParam(value, { name = 'colorHex' } = {}) {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string') {
+    throw badRequest(`${name} must be a single string value`);
+  }
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+  if (!HEX_COLOR_PATTERN.test(trimmed)) {
+    throw badRequest(`${name} must be a hex colour like #1A2B3C`);
+  }
+  return trimmed;
+}
+
+/**
  * Collapse runs of internal whitespace to a single space and trim the ends.
  *
  * WHY THIS IS HERE RATHER THAN IN ONE ROUTE
@@ -200,5 +240,7 @@ module.exports = {
   textParam,
   numberParam,
   idParam,
+  hexColorParam,
+  HEX_COLOR_PATTERN,
   collapseWhitespace
 };

@@ -106,7 +106,17 @@ CREATE TABLE IF NOT EXISTS "ContactLens" (
   notes TEXT,
   imageUrl TEXT,
   createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP,
+  -- Swatch colour for `color`, stored SEPARATELY from the name. `color` stays a
+  -- free-text name because that is what the user reads and searches; this holds
+  -- only the #RRGGBB value the client paints, and is NULL for rows that predate
+  -- the colour picker (those fall back to a name-based lookup).
+  --
+  -- DECLARED LAST ON PURPOSE. Every SELECT in src/routes/lenses.js is a positional
+  -- `SELECT *`, and an existing database gets this column via ALTER TABLE, which
+  -- always appends. Declaring it last here means a fresh database and a migrated
+  -- one have the same physical column order. See LENS_COLUMNS in that file.
+  colorHex TEXT
 );
 
 -- Rotating, single-use refresh tokens (family-based reuse detection)

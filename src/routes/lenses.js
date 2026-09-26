@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
-const { esc, enumParam, textParam, idParam } = require('../services/sqlSafety');
+const { esc, enumParam, textParam, idParam, hexColorParam } = require('../services/sqlSafety');
 
 // The five states a lens can be in. The GET / filter allowlists against this
 // list, and PUT validates against it too, so a status can never be written that
@@ -12,7 +12,7 @@ const { esc, enumParam, textParam, idParam } = require('../services/sqlSafety');
 const LENS_STATUSES = ['UNOPENED', 'ACTIVE', 'EXPIRING_SOON', 'EXPIRED', 'DISPOSED'];
 
 // Column caps, mirroring what public/index.html enforces on the lens form
-// (character 120, color 80, prescription 40, notes 2000).
+// (character 120, color 80, colorHex 7 (#RRGGBB), prescription 40, notes 2000).
 const MAX_LENS_CHARACTER_LENGTH = 120;
 const MAX_LENS_COLOR_LENGTH = 80;
 const MAX_LENS_BRAND_LENGTH = 120;
@@ -42,11 +42,28 @@ async function queryDb(sql) {
 // Full column list of the "ContactLens" table (see init_db.sql / live schema).
 // Every SELECT in this file is `SELECT *`, so this list must match the table
 // order exactly — an omission silently blanks the field in the UI.
+//
+// `colorHex` is LAST, and that position is load-bearing rather than cosmetic.
+// It was added by ALTER TABLE (see the migration in src/services/db.js), and
+// SQLite always appends an added column at the end of the physical order, so on
+// a migrated database it is last. init_db.sql therefore also declares it last:
+// a fresh database and a migrated one then have the SAME physical order, which
+// is the only reason the positional `SELECT *` above stays correct on both.
+// Inserting it next to `color` in init_db.sql would silently shift every
+// following column by one on fresh installs only.
 const LENS_COLUMNS = [
   'id', 'character', 'color', 'brand', 'prescription', 'purchaseDate',
   'openedDate', 'expiryDate', 'isOpened', 'status', 'notes', 'imageUrl',
-  'createdAt', 'updatedAt'
+  'createdAt', 'updatedAt', 'colorHex'
 ];
+
+// `color` remains the free-text NAME and keeps its 80-char cap; `colorHex` is the
+// optional, strictly-validated #RRGGBB companion. Both live side by side: the
+// name is what the user reads, searches (GET /?color=) and already has bespoke
+// values for ("Amber"), the hex is only what the swatch is painted with. The hex
+// needs no length cap of its own — hexColorParam() admits only the anchored
+// #RRGGBB pattern, which is exactly 7 characters by construction. See that
+// function for why the hex is allowlisted rather than escaped.
 
 // Parse SQLite output
 function parseSqlResult(output, columns) {
@@ -134,7 +151,7 @@ router.get('/:id', async (req, res) => {
 // ============================================================================
 router.post('/', async (req, res) => {
   try {
-    const { character, color, brand, prescription, purchaseDate, expiryDate, notes } = req.body;
+    const { character, color, colorHex, brand, prescription, purchaseDate, expiryDate, notes } = req.body;
 
     if (!character || !color) {
       return res.status(400).json({ error: 'character and color are required' });
@@ -148,6 +165,7 @@ router.post('/', async (req, res) => {
     if (!normalizedCharacter || !normalizedColor) {
       return res.status(400).json({ error: 'character and color are required' });
     }
+    const normalizedColorHex = hexColorParam(colorHex, { name: 'colorHex' });
     const normalizedBrand = textParam(brand, { name: 'brand', maxLength: MAX_LENS_BRAND_LENGTH, noSeparator: true });
     const normalizedPrescription = textParam(prescription, { name: 'prescription', maxLength: MAX_PRESCRIPTION_LENGTH, noSeparator: true });
     const normalizedPurchaseDate = textParam(purchaseDate, { name: 'purchaseDate', maxLength: MAX_DATE_LENGTH, noSeparator: true });
@@ -162,8 +180,8 @@ router.post('/', async (req, res) => {
     // before rather than being interpolated.
     const status = checkExpiryStatus(normalizedExpiryDate || new Date().toISOString());
 
-    const sql = `INSERT INTO "ContactLens" (id, character, color, brand, prescription, purchaseDate, expiryDate, isOpened, status, notes, createdAt, updatedAt)
-                 VALUES (${esc(id)}, ${esc(normalizedCharacter)}, ${esc(normalizedColor)}, ${normalizedBrand ? esc(normalizedBrand) : 'NULL'}, ${normalizedPrescription ? esc(normalizedPrescription) : 'NULL'}, ${normalizedPurchaseDate ? esc(normalizedPurchaseDate) : 'NULL'}, ${normalizedExpiryDate ? esc(normalizedExpiryDate) : 'NULL'}, 0, ${esc(status)}, ${normalizedNotes ? esc(normalizedNotes) : 'NULL'}, ${esc(now)}, ${esc(now)});`;
+    const sql = `INSERT INTO "ContactLens" (id, character, color, colorHex, brand, prescription, purchaseDate, expiryDate, isOpened, status, notes, createdAt, updatedAt)
+                 VALUES (${esc(id)}, ${esc(normalizedCharacter)}, ${esc(normalizedColor)}, ${normalizedColorHex ? esc(normalizedColorHex) : 'NULL'}, ${normalizedBrand ? esc(normalizedBrand) : 'NULL'}, ${normalizedPrescription ? esc(normalizedPrescription) : 'NULL'}, ${normalizedPurchaseDate ? esc(normalizedPurchaseDate) : 'NULL'}, ${normalizedExpiryDate ? esc(normalizedExpiryDate) : 'NULL'}, 0, ${esc(status)}, ${normalizedNotes ? esc(normalizedNotes) : 'NULL'}, ${esc(now)}, ${esc(now)});`;
 
     await queryDb(sql);
 
@@ -171,6 +189,7 @@ router.post('/', async (req, res) => {
       id,
       character: normalizedCharacter,
       color: normalizedColor,
+      colorHex: normalizedColorHex || null,
       brand: normalizedBrand || null,
       status,
       createdAt: now
@@ -195,11 +214,21 @@ router.post('/', async (req, res) => {
 //   purchaseDate  string <= 40   ISO date
 //   expiryDate    string <= 40   ISO date
 //   notes         string <= 2000
+//   colorHex      #RRGGBB       optional companion to `color` (see below)
 //   openedDate    string <= 40   still accepted (PATCH /:id/open owns it)
 //   isOpened      0/1            still accepted
 //   status        LENS_STATUSES  still accepted — see below
 // Absent / null / '' means "leave the column alone", the contract these five
 // fields always had. An all-absent body is a 400, as on costumes and props.
+//
+// THE ONE EXCEPTION IS `colorHex`, AND IT IS DELIBERATE.
+// `colorHex` is DERIVED from `color`: the client sends the swatch the user
+// actually picked, or the preset hex for a name it recognises, or nothing. That
+// last case has to be expressible, and "absent means leave alone" cannot express
+// it — a lens whose colour was changed from "Amber" to a bespoke name would keep
+// an amber swatch forever. So for this ONE field the presence of the KEY is the
+// intent: present-and-non-empty sets it, present-and-empty/null clears it to
+// NULL, absent leaves it untouched. An all-absent body is still a 400.
 //
 // WHY `status` IS STILL WRITABLE HERE BUT NOT IN THE EDIT FORM
 // The edit modal deliberately does NOT expose status. status is DERIVED state:
@@ -216,8 +245,10 @@ router.put('/:id', async (req, res) => {
   try {
     const id = idParam(req.params.id) || '';
     const body = req.body || {};
-    const { character, color, brand, prescription, purchaseDate,
+    const { character, color, colorHex, brand, prescription, purchaseDate,
             status, isOpened, openedDate, expiryDate, notes } = body;
+    // Key presence, not truthiness — see the note on the contract above.
+    const colorHexSupplied = Object.prototype.hasOwnProperty.call(body, 'colorHex');
 
     // `status`, `openedDate` and `expiryDate` were all unescaped here. `status`
     // is a closed enum, so it is allowlisted instead — matching the GET filter,
@@ -228,6 +259,9 @@ router.put('/:id', async (req, res) => {
     const normalizedNotes = textParam(notes, { name: 'notes', maxLength: MAX_LENS_NOTES_LENGTH, noSeparator: true });
     const normalizedCharacter = textParam(character, { name: 'character', maxLength: MAX_LENS_CHARACTER_LENGTH, noSeparator: true });
     const normalizedColor = textParam(color, { name: 'color', maxLength: MAX_LENS_COLOR_LENGTH, noSeparator: true });
+    // Validated even when the value is going to be used to CLEAR the column, so a
+    // scripted client that sends a crafted string is refused with 400 either way.
+    const normalizedColorHex = hexColorParam(colorHex, { name: 'colorHex' });
     const normalizedBrand = textParam(brand, { name: 'brand', maxLength: MAX_LENS_BRAND_LENGTH, noSeparator: true });
     const normalizedPrescription = textParam(prescription, { name: 'prescription', maxLength: MAX_PRESCRIPTION_LENGTH, noSeparator: true });
     const normalizedPurchaseDate = textParam(purchaseDate, { name: 'purchaseDate', maxLength: MAX_DATE_LENGTH, noSeparator: true });
@@ -235,6 +269,9 @@ router.put('/:id', async (req, res) => {
     let updates = [];
     if (normalizedCharacter !== null) updates.push(`character = ${esc(normalizedCharacter)}`);
     if (normalizedColor !== null) updates.push(`color = ${esc(normalizedColor)}`);
+    if (colorHexSupplied) {
+      updates.push(`colorHex = ${normalizedColorHex ? esc(normalizedColorHex) : 'NULL'}`);
+    }
     if (normalizedBrand !== null) updates.push(`brand = ${esc(normalizedBrand)}`);
     if (normalizedPrescription !== null) updates.push(`prescription = ${esc(normalizedPrescription)}`);
     if (normalizedPurchaseDate !== null) updates.push(`purchaseDate = ${esc(normalizedPurchaseDate)}`);
