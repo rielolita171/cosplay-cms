@@ -29,14 +29,58 @@ model User {
 }
 
 // ============================================================================
+// BRAND MODEL - Managed reference list (feeds the brand dropdown)
+//
+// NOTE: this file is currently VESTIGIAL — no code reads it, and the live
+// schema is init_db.sql plus the idempotent migration in
+// src/services/db.js:initSchema(). It is kept in sync for documentation.
+//
+// "Costume".brand holds the NAME of a Brand row, not its id. That is a SOFT
+// reference, deliberately NOT a Prisma @relation: the existing 83 costumes
+// already store a display string, so keeping it as a string means the
+// migration rewrites nothing at all, and a deleted/renamed Brand can never
+// leave a dangling id behind. Enforcement lives in src/routes/brands.js
+// (a delete of a referenced brand is refused with 409).
+//
+// "nameLower" carries a case-folded copy of "name" so uniqueness is
+// case-insensitive; SQLite enforces it with a UNIQUE index on that column,
+// which is what the backfill's INSERT OR IGNORE keys off.
+// ============================================================================
+model Brand {
+  id        String   @id @default(uuid())
+  name      String
+  nameLower String   @unique
+  storeUrl  String?  // Optional online store; validated server-side to be http(s) only
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================================================
+// FANDOM MODEL - Managed reference list (feeds the fandom dropdown)
+// Soft reference from "Costume".fandom, same reasoning as Brand above.
+// ============================================================================
+model Fandom {
+  id        String   @id @default(uuid())
+  name      String
+  nameLower String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================================================
 // COSTUME MODEL - Main inventory tracking with completion milestones
 // ============================================================================
 model Costume {
   id                 String        @id @default(uuid())
-  fandom             String        // Anime series, game, etc.
+  fandom             String        // Anime series, game, etc. (soft ref to Fandom.name)
   character          String        // Character name
-  brand              String?       // Maker/brand name
-  size               String?       // XS, S, M, L, XL, etc.
+  brand              String?       // Maker/brand name (soft ref to Brand.name)
+  // Free text on purpose, NOT an enum/CHECK: legacy rows may hold a bespoke
+  // value ("One Size", a custom measurement) and a constraint would make them
+  // unwritable. New/edited entries are validated against XS, S, M, L, XL, 2XL,
+  // 3XL in src/routes/costumes.js:normalizeSize(), with an explicit `sizeOther`
+  // escape hatch for anything bespoke.
+  size               String?       // XS, S, M, L, XL, 2XL, 3XL — or a custom value
   isFullset          Boolean       @default(false)
   doneCostest        Boolean       @default(false)     // Competed at costest event
   doneEvent          Boolean       @default(false)     // Worn at formal event

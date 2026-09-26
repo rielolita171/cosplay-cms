@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
-
+const { esc, enumParam, textParam, numberParam, idParam, collapseWhitespace } = require('../services/sqlSafety');
 
 // Helper function to execute SQL queries
 async function queryDb(sql) {
@@ -104,6 +104,36 @@ function normalizeImageUrls(value) {
   return JSON.stringify(urls);
 }
 
+// The four statuses the dashboard's edit form and filter bar understand. A PUT
+// carrying anything else must be rejected with 400 rather than written, otherwise
+// an arbitrary string lands in the "status" column and the card badge (which
+// derives its CSS class from that value) breaks for every other row.
+const COSTUME_STATUSES = ['IN_POSSESSION', 'ON_RENT', 'TO_BE_SOLD', 'WISHLIST'];
+
+// Field caps for the GET filters and for the free-text columns that used to be
+// interpolated unvalidated. MAX_REFERENCE_NAME_LENGTH (brand / fandom, enforced
+// on write at normalizeReferenceName) is the right cap for the matching *filter*
+// too: a substring of a stored name is never longer than the name itself, so it
+// never rejects a filter that could have matched a row.
+const MAX_CHARACTER_LENGTH = 120;
+const MAX_REFERENCE_URL_LENGTH = 2048;
+
+/**
+ * Validate an incoming `status` value.
+ * @returns {string|null} the value to persist, or null when the field is absent.
+ * @throws {Error} with `status = 400` when the value is not one of the enum.
+ */
+function normalizeStatus(value) {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || COSTUME_STATUSES.indexOf(value) === -1) {
+    throw Object.assign(
+      new Error('status must be one of ' + COSTUME_STATUSES.join(', ')),
+      { status: 400 }
+    );
+  }
+  return value;
+}
+
 /** Cap `notes` so an unbounded blob cannot be written into the TEXT column. */
 function normalizeNotes(value) {
   if (value === undefined || value === null || value === '') return null;
@@ -116,21 +146,223 @@ function normalizeNotes(value) {
   return value;
 }
 
+// ---------------------------------------------------------------------------
+// Prices
+// ---------------------------------------------------------------------------
+// "Costume".buyPrice / sellPrice / sellPriceMutual are REAL columns
+// (`REAL DEFAULT NULL` in init_db.sql) that the cards render — but until now
+// neither POST nor PUT accepted them, so a price could be imported straight into
+// the column by the Excel script and could never be typed in the dashboard.
+//
+// VALIDATION
+//   accepted : a JSON number, or a string that Number() parses strictly —
+//             1500, '1500', '1500.50', ' 1500 ' are all fine.
+//   rejected : anything Number() cannot parse ('abc', '1,500', '1e'), NaN,
+//             Infinity, negatives, and anything above MAX_PRICE. All 400.
+//   blank    : '', null and undefined mean "absent" — leave the column alone on
+//             PUT, store NULL on POST. A price is never silently coerced to 0.
+//
+// PRECISION — ROUNDED TO 2 DECIMAL PLACES
+// The column is REAL (an IEEE double), so storing the parsed double verbatim
+// would let binary rounding noise reach the card. Every accepted value is
+// therefore rounded with Math.round(v * 100) / 100 before it is written, and
+// the rounded value is what comes back on GET. Two decimals is chosen over
+// "store exactly what was sent" because a money column that can hold 17
+// significant digits is a bug waiting to happen, and over "round to whole
+// rupiah" because the schema is generic and sellPriceMutual is often a
+// negotiated fraction of a partner's price. MAX_PRICE additionally keeps the
+// interpolated literal a sane number of digits.
+const MAX_PRICE = 1e12;
+const PRICE_PRECISION = 2;
+
+/**
+ * Validate an incoming money value.
+ * @returns {number|null} the rounded value, or null when the field is absent.
+ * @throws {Error} with `status = 400`.
+ */
+function normalizePrice(value, field) {
+  if (value === undefined || value === null) return null;
+  // A whitespace-only string must be treated as BLANK, not as a number. It is
+  // not caught by the `=== ''` test above, and Number(''.trim()) is 0 — so
+  // without this line `"buyPrice": "   "` would silently write 0 into the column
+  // instead of meaning "no price given". (Found by the scratch-port tests.)
+  if (typeof value === 'string' && value.trim() === '') return null;
+  if (value === '') return null;
+  const parsed = numberParam(value, { name: field, min: 0, max: MAX_PRICE });
+  const factor = Math.pow(10, PRICE_PRECISION);
+  return Math.round(parsed * factor) / factor;
+}
+
+// ---------------------------------------------------------------------------
+// Size
+// ---------------------------------------------------------------------------
+// "Costume".size used to be free text. It is now a fixed enum for NEW/edited
+// entries, enforced exactly like `status` above: anything outside the list is
+// rejected with 400 BEFORE any SQL runs.
+//
+// THE ESCAPE HATCH, AND WHY THE COLUMN STILL HAS NO CHECK CONSTRAINT
+// Existing rows may legitimately hold a bespoke value ("One Size", "Free Size",
+// a custom measurement). A SQLite CHECK constraint would make those rows
+// unwritable — the user could never re-save such a costume, because any UPDATE
+// touching that row would fail. So instead:
+//   * `size`    must be one of COSTUME_SIZES (case-insensitively) -> 400 otherwise.
+//   * `sizeOther` is the explicit, labelled opt-out: a non-empty free-text
+//     string stored verbatim in the same `size` column.
+//   * Supplying both, or neither-and-a-blank-other, is a 400.
+// Legacy out-of-enum values are therefore PRESERVED UNTOUCHED by the migration
+// and still render; the enum is only enforced going forward. On boot,
+// src/services/db.js:reportSizeEnumDrift() logs how many such rows exist so the
+// drift is visible rather than silent.
+const COSTUME_SIZES = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL'];
+const MAX_SIZE_OTHER_LENGTH = 40;
+
+/**
+ * Resolve the incoming `size` / `sizeOther` pair to the string to persist.
+ * @returns {{persist: boolean, value: string|null}} `persist:false` means "field
+ *   absent — leave the column alone"; `value:null` means "explicitly clear it".
+ * @throws {Error} with `status = 400`.
+ */
+function normalizeSize(size, sizeOther) {
+  const hasSize = size !== undefined && size !== null && size !== '';
+  const hasOther = sizeOther !== undefined && sizeOther !== null && sizeOther !== '';
+
+  if (hasSize && hasOther) {
+    throw Object.assign(
+      new Error('Send either size (one of ' + COSTUME_SIZES.join(', ') + ') or sizeOther, not both'),
+      { status: 400 }
+    );
+  }
+
+  if (hasOther) {
+    if (typeof sizeOther !== 'string') {
+      throw Object.assign(new Error('sizeOther must be a string'), { status: 400 });
+    }
+    const trimmed = sizeOther.trim();
+    if (trimmed === '') return { persist: false, value: null };
+    if (trimmed.length > MAX_SIZE_OTHER_LENGTH) {
+      throw Object.assign(
+        new Error(`sizeOther accepts at most ${MAX_SIZE_OTHER_LENGTH} characters`),
+        { status: 400 }
+      );
+    }
+    return { persist: true, value: trimmed };
+  }
+
+  if (!hasSize) return { persist: false, value: null };
+
+  if (typeof size !== 'string') {
+    throw Object.assign(new Error('size must be a string'), { status: 400 });
+  }
+  const canonical = size.trim().toUpperCase();
+  if (COSTUME_SIZES.indexOf(canonical) === -1) {
+    throw Object.assign(
+      new Error('size must be one of ' + COSTUME_SIZES.join(', ')
+        + ' (or use "sizeOther" for a custom measurement)'),
+      { status: 400 }
+    );
+  }
+  return { persist: true, value: canonical };
+}
+
+// ---------------------------------------------------------------------------
+// Brand / Fandom (soft references into the managed lists)
+// ---------------------------------------------------------------------------
+// "Costume".brand / .fandom hold the NAME of a "Brand" / "Fandom" row (see the
+// header comment in init_db.sql). A name that is not yet in the managed list is
+// AUTO-CREATED rather than rejected, for three reasons:
+//   1. It makes the endpoint lossless for existing clients — scripts/test_phase5.js
+//      POSTs `{fandom: 'Phase5Test'}` and n8n/import flows do the same, and a
+//      400 there would be a regression.
+//   2. It cannot lose data: the value the user typed is what gets stored, and the
+//      list is a strict superset of the costumes' values.
+//   3. The alternative (reject) pushes list management onto the UI for no
+//      safety gain, because the value is already length- and charset-checked.
+const MAX_REFERENCE_NAME_LENGTH = 120;
+
+/**
+ * Validate a brand/fandom name that is about to be written onto a costume.
+ * @returns {{value: string, lower: string}|null} null means "clear the column".
+ * @throws {Error} with `status = 400`.
+ */
+function normalizeReferenceName(value, field) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') {
+    throw Object.assign(new Error(`${field} must be a string`), { status: 400 });
+  }
+  // Whitespace is collapsed BEFORE the length check and BEFORE nameLower is
+  // derived, so "blue  archive" and "blue archive" are the same reference and
+  // the UNIQUE nameLower index makes the second one collide with the first. The
+  // same collapse is applied by brands.js / fandoms.js and by the boot backfill
+  // in db.js, so the costume side and the managed-list side can never disagree.
+  const trimmed = collapseWhitespace(value);
+  if (trimmed === '') return null;
+  if (trimmed.length > MAX_REFERENCE_NAME_LENGTH) {
+    throw Object.assign(
+      new Error(`${field} accepts at most ${MAX_REFERENCE_NAME_LENGTH} characters`),
+      { status: 400 }
+    );
+  }
+  // '|' and newlines would be split by the sqlite3 CLI pipe transport on read.
+  // A bare '|' survives collapseWhitespace (it is not whitespace) and must still
+  // be rejected here; a line break never reaches this point because collapse
+  // already turned it into a space.
+  if (trimmed.indexOf('|') !== -1) {
+    throw Object.assign(
+      new Error(`${field} cannot contain the character |`),
+      { status: 400 }
+    );
+  }
+  return { value: trimmed, lower: trimmed.toLowerCase() };
+}
+
+/**
+ * Ensure a "Brand"/"Fandom" row exists for this name, inserting it when missing.
+ * INSERT OR IGNORE off the UNIQUE nameLower index makes this safe under the
+ * concurrent-write races this CLI transport cannot lock against.
+ */
+async function ensureReferenceRow(table, name) {
+  await queryDb(
+    `INSERT OR IGNORE INTO "${table}" (id, name, nameLower, createdAt, updatedAt)
+     VALUES (${esc(require('crypto').randomUUID())}, ${esc(name.value)}, ${esc(name.lower)},
+             ${esc(new Date().toISOString())}, ${esc(new Date().toISOString())});`
+  );
+}
+
 // ============================================================================
 // GET /api/costumes - List all costumes with optional filtering
 // ============================================================================
 router.get('/', async (req, res) => {
   try {
-    const { fandom, status, brand } = req.query;
-    
+    // Every filter is validated and escaped BEFORE the statement is assembled.
+    // `status` is a closed enum (the same list POST/PUT enforce on write), so it
+    // is allowlisted outright: an unknown status is a client error, not a search
+    // for rows that cannot exist. `fandom` / `brand` are free text, so they are
+    // type-checked, length-capped, and escaped for the string-literal position.
+    //
+    // LIKE WILDCARDS ARE DELIBERATELY PRESERVED: `%` and `_` inside a filter keep
+    // their pre-existing "matches anything" meaning. That is LIKE semantics, not
+    // an injection — it cannot widen access beyond rows the caller could already
+    // list, and changing it would alter a documented filter behaviour.
+    // `filters` echoes back exactly what the caller sent, unchanged.
+    const { fandom: rawFandom, status: rawStatus, brand: rawBrand } = req.query;
+    const fandom = textParam(rawFandom, { name: 'fandom', maxLength: MAX_REFERENCE_NAME_LENGTH });
+    const status = enumParam(rawStatus, COSTUME_STATUSES, 'status');
+    const brand = textParam(rawBrand, { name: 'brand', maxLength: MAX_REFERENCE_NAME_LENGTH });
+
     let where = '1=1';
-    if (fandom) where += ` AND fandom LIKE '%${fandom}%'`;
-    if (status) where += ` AND status = '${status}'`;
-    if (brand) where += ` AND brand LIKE '%${brand}%'`;
+    // The LIKE pattern is escaped as ONE string literal (esc() wraps and quotes
+    // it), rather than pasting an escaped body between hand-written quotes.
+    if (fandom) where += ` AND fandom LIKE ${esc(`%${fandom}%`)}`;
+    if (status) where += ` AND status = ${esc(status)}`;
+    if (brand) where += ` AND brand LIKE ${esc(`%${brand}%`)}`;
 
     // SELECT * so the list endpoint returns every column the dashboard cards
     // render (doneCostest, doneEvent, donePhotoSession, referenceUrl, imageUrls,
     // notes, prices, ...). A narrow column list here was the cause of blank cards.
+    //
+    // ORDER BY is a hard-coded column name. Nothing user-supplied reaches an
+    // identifier position anywhere in this file, which is the only correct way to
+    // handle ORDER BY — there is no escaping that makes an identifier safe.
     const sql = `SELECT * FROM "Costume" WHERE ${where} ORDER BY character ASC;`;
 
     const result = await queryDb(sql);
@@ -139,10 +371,17 @@ router.get('/', async (req, res) => {
     res.json({
       count: costumes.length,
       costumes: costumes,
-      filters: { fandom, status, brand }
+      filters: { fandom: rawFandom, status: rawStatus, brand: rawBrand }
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    // A rejected filter is a client error. Without this, the enum/length 400s
+    // raised above would be flattened into a 500, which both misreports the
+    // failure and leaks the validator message as a server fault.
+    const status = error.status || 500;
+    res.status(status).json({
+      error: error.message,
+      code: status >= 500 ? 'INTERNAL_ERROR' : 'VALIDATION_ERROR'
+    });
   }
 });
 
@@ -151,11 +390,15 @@ router.get('/', async (req, res) => {
 // ============================================================================
 router.get('/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    
-    const sql = `SELECT * FROM "Costume" WHERE id = '${id}' LIMIT 1;`;
-    const result = await queryDb(sql);
-    
+    const id = idParam(req.params.id);
+
+    // A `:id` that cannot be a real row id is reported as "not found" rather than
+    // rejected, so GET/PUT/DELETE keep their existing contract (404 / 200) for an
+    // unknown id. Either way the value reaches SQL only through esc().
+    const result = id === null ? '' : await queryDb(
+      `SELECT * FROM "Costume" WHERE id = ${esc(id)} LIMIT 1;`
+    );
+
     if (!result) {
       return res.status(404).json({ error: 'Costume not found' });
     }
@@ -177,36 +420,71 @@ router.get('/:id', async (req, res) => {
 // ============================================================================
 router.post('/', async (req, res) => {
   try {
-    const { character, fandom, brand, size, notes, referenceUrl } = req.body;
+    const { character, fandom, brand, size, sizeOther, notes, referenceUrl,
+            buyPrice, sellPrice, sellPriceMutual } = req.body;
 
     if (!character || !fandom) {
       return res.status(400).json({ error: 'character and fandom are required' });
     }
 
+    // Every validator runs BEFORE the first statement, so a rejected request
+    // leaves no partial row and no half-created Brand/Fandom behind.
+    //
+    // `character` and `referenceUrl` are validated here too. They used to go
+    // straight into the INSERT: `referenceUrl` was interpolated with NO escaping
+    // at all (a quote in the body broke out of the literal), and `character` was
+    // escaped but neither type-checked nor length-capped, so a non-string threw
+    // a TypeError and surfaced as a 500.
+    const normalizedCharacter = textParam(character, {
+      name: 'character', maxLength: MAX_CHARACTER_LENGTH, noSeparator: true
+    });
+    if (!normalizedCharacter) {
+      return res.status(400).json({ error: 'character and fandom are required' });
+    }
+    const normalizedReferenceUrl = textParam(referenceUrl, {
+      name: 'referenceUrl', maxLength: MAX_REFERENCE_URL_LENGTH, noSeparator: true
+    });
+    const normalizedBuyPrice = normalizePrice(buyPrice, 'buyPrice');
+    const normalizedSellPrice = normalizePrice(sellPrice, 'sellPrice');
+    const normalizedSellPriceMutual = normalizePrice(sellPriceMutual, 'sellPriceMutual');
+    const refFandom = normalizeReferenceName(fandom, 'fandom');
+    const refBrand = normalizeReferenceName(brand, 'brand');
+    const resolvedSize = normalizeSize(size, sizeOther);
+    const normalizedNotes = normalizeNotes(notes);
+    if (normalizedNotes !== null && /[|\r\n]/.test(normalizedNotes)) {
+      throw Object.assign(new Error('notes cannot contain the characters | or a line break'), { status: 400 });
+    }
+
+    // Register the referenced names in the managed lists (no-op when present).
+    await ensureReferenceRow('Fandom', refFandom);
+    if (refBrand) await ensureReferenceRow('Brand', refBrand);
+
     const id = randomUUID();
     const now = new Date().toISOString();
-    const escapedCharacter = character.replace(/'/g, "''");
-    const escapedFandom = fandom.replace(/'/g, "''");
-    const escapedBrand = brand ? brand.replace(/'/g, "''") : null;
-    const escapedNotes = notes ? notes.replace(/'/g, "''") : null;
 
-    const sql = `INSERT INTO "Costume" (id, character, fandom, brand, size, notes, referenceUrl, status, isFullset, createdAt, updatedAt) 
-                 VALUES ('${id}', '${escapedCharacter}', '${escapedFandom}', ${escapedBrand ? `'${escapedBrand}'` : 'NULL'}, ${size ? `'${size}'` : 'NULL'}, ${escapedNotes ? `'${escapedNotes}'` : 'NULL'}, ${referenceUrl ? `'${referenceUrl}'` : 'NULL'}, 'IN_POSSESSION', 0, '${now}', '${now}');`;
-    
+    // Single helper for every string-literal position, so no column is left on
+    // the ad-hoc `'${x}'` path that caused the original bug.
+    const sql = `INSERT INTO "Costume" (id, character, fandom, brand, size, buyPrice, sellPrice, sellPriceMutual, notes, referenceUrl, status, isFullset, createdAt, updatedAt)
+                 VALUES (${esc(id)}, ${esc(normalizedCharacter)}, ${esc(refFandom.value)}, ${refBrand ? esc(refBrand.value) : 'NULL'}, ${resolvedSize.value ? esc(resolvedSize.value) : 'NULL'}, ${normalizedBuyPrice === null ? 'NULL' : normalizedBuyPrice}, ${normalizedSellPrice === null ? 'NULL' : normalizedSellPrice}, ${normalizedSellPriceMutual === null ? 'NULL' : normalizedSellPriceMutual}, ${normalizedNotes ? esc(normalizedNotes) : 'NULL'}, ${normalizedReferenceUrl ? esc(normalizedReferenceUrl) : 'NULL'}, ${esc('IN_POSSESSION')}, 0, ${esc(now)}, ${esc(now)});`;
+
     await queryDb(sql);
 
     res.status(201).json({
       id,
-      character,
-      fandom,
-      brand: brand || null,
-      size: size || null,
+      character: normalizedCharacter,
+      fandom: refFandom.value,
+      brand: refBrand ? refBrand.value : null,
+      size: resolvedSize.value,
+      buyPrice: normalizedBuyPrice,
+      sellPrice: normalizedSellPrice,
+      sellPriceMutual: normalizedSellPriceMutual,
       status: 'IN_POSSESSION',
       isFullset: false,
       createdAt: now
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    const status = error.status || 500;
+    res.status(status).json({ error: error.message, code: status >= 500 ? 'INTERNAL_ERROR' : 'VALIDATION_ERROR' });
   }
 });
 
@@ -215,11 +493,45 @@ router.post('/', async (req, res) => {
 // ============================================================================
 router.put('/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    const { status, isFullset, doneCostest, doneEvent, donePhotoSession, notes, imageUrls } = req.body;
+    // Length-capped; an id that cannot be a row id becomes '' below, so the
+    // UPDATE matches nothing — the same observable result as before.
+    const id = idParam(req.params.id) || '';
+    const { status, isFullset, doneCostest, doneEvent, donePhotoSession, notes, imageUrls,
+            brand, fandom, size, sizeOther, buyPrice, sellPrice, sellPriceMutual } = req.body;
 
     let updates = [];
-    if (status) updates.push(`status = '${status.replace(/'/g, "''")}'`);
+
+    // Rejects anything outside the enum with 400 BEFORE a single statement runs.
+    const normalizedStatus = normalizeStatus(status);
+
+    // brand / fandom / size are editable now, with the same contract as POST:
+    // an unknown brand/fandom name is registered in the managed list rather than
+    // rejected, and `size` must be in the XS-3XL enum unless the explicit
+    // `sizeOther` escape hatch is used.
+    const refBrand = normalizeReferenceName(brand, 'brand');
+    const refFandom = normalizeReferenceName(fandom, 'fandom');
+    const resolvedSize = normalizeSize(size, sizeOther);
+    // A price is validated (and rejected with 400) even though it is optional,
+    // and a null result means "leave the column alone" rather than "store NULL".
+    const normalizedBuyPrice = normalizePrice(buyPrice, 'buyPrice');
+    const normalizedSellPrice = normalizePrice(sellPrice, 'sellPrice');
+    const normalizedSellPriceMutual = normalizePrice(sellPriceMutual, 'sellPriceMutual');
+    // Column names here are literals, so only the VALUES are caller-supplied and
+    // every one of them goes through esc() rather than an ad-hoc quote-doubling.
+    if (refBrand) updates.push(`brand = ${esc(refBrand.value)}`);
+    if (refFandom) updates.push(`fandom = ${esc(refFandom.value)}`);
+    if (resolvedSize.persist) {
+      updates.push(`size = ${resolvedSize.value ? esc(resolvedSize.value) : 'NULL'}`);
+    }
+    // The price is a NUMBER column, so it is interpolated unquoted — and it can
+    // only be a number at this point, because normalizePrice() has already
+    // rejected everything Number() cannot parse strictly.
+    if (normalizedBuyPrice !== null) updates.push(`buyPrice = ${normalizedBuyPrice}`);
+    if (normalizedSellPrice !== null) updates.push(`sellPrice = ${normalizedSellPrice}`);
+    if (normalizedSellPriceMutual !== null) updates.push(`sellPriceMutual = ${normalizedSellPriceMutual}`);
+    if (normalizedStatus !== null) {
+      updates.push(`status = ${esc(normalizedStatus)}`);
+    }
     if (isFullset !== undefined) updates.push(`isFullset = ${isFullset ? 1 : 0}`);
     if (doneCostest !== undefined) updates.push(`doneCostest = ${doneCostest ? 1 : 0}`);
     if (doneEvent !== undefined) updates.push(`doneEvent = ${doneEvent ? 1 : 0}`);
@@ -230,21 +542,26 @@ router.put('/:id', async (req, res) => {
     // from this whitelist made the thumbnail survive only until a page reload.
     const normalizedImages = normalizeImageUrls(imageUrls);
     if (normalizedImages !== null) {
-      updates.push(`imageUrls = '${normalizedImages.replace(/'/g, "''")}'`);
+      updates.push(`imageUrls = ${esc(normalizedImages)}`);
     }
 
     const normalizedNotes = normalizeNotes(notes);
     if (normalizedNotes !== null) {
-      updates.push(`notes = '${normalizedNotes.replace(/'/g, "''")}'`);
+      updates.push(`notes = ${esc(normalizedNotes)}`);
     }
 
     if (updates.length === 0) {
-      return res.status(400).json({ error: 'No fields to update' });
+      return res.status(400).json({ error: 'No fields to update', code: 'VALIDATION_ERROR' });
     }
 
-    updates.push(`updatedAt = '${new Date().toISOString()}'`);
+    updates.push(`updatedAt = ${esc(new Date().toISOString())}`);
 
-    const sql = `UPDATE "Costume" SET ${updates.join(', ')} WHERE id = '${id}';`;
+    // Only once every field has validated: register the referenced names, so a
+    // rejected request can never leave an orphan entry in the managed list.
+    if (refBrand) await ensureReferenceRow('Brand', refBrand);
+    if (refFandom) await ensureReferenceRow('Fandom', refFandom);
+
+    const sql = `UPDATE "Costume" SET ${updates.join(', ')} WHERE id = ${esc(id)};`;
     await queryDb(sql);
 
     res.json({
@@ -255,7 +572,7 @@ router.put('/:id', async (req, res) => {
   } catch (error) {
     // Malformed input is a client error (400), not a server fault (500).
     const status = error.status || 500;
-    res.status(status).json({ error: error.message });
+    res.status(status).json({ error: error.message, code: status >= 500 ? 'INTERNAL_ERROR' : 'VALIDATION_ERROR' });
   }
 });
 
@@ -264,9 +581,9 @@ router.put('/:id', async (req, res) => {
 // ============================================================================
 router.delete('/:id', async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = idParam(req.params.id) || '';
 
-    const sql = `DELETE FROM "Costume" WHERE id = '${id}';`;
+    const sql = `DELETE FROM "Costume" WHERE id = ${esc(id)};`;
     await queryDb(sql);
 
     res.json({ 

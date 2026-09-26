@@ -163,6 +163,16 @@ app.get('/api/version', (req, res) => {
       'GET /api/costumes/:id',
       'PUT /api/costumes/:id',
       'DELETE /api/costumes/:id',
+      'GET /api/brands',
+      'POST /api/brands',
+      'GET /api/brands/:id',
+      'PUT /api/brands/:id',
+      'DELETE /api/brands/:id',
+      'GET /api/fandoms',
+      'POST /api/fandoms',
+      'GET /api/fandoms/:id',
+      'PUT /api/fandoms/:id',
+      'DELETE /api/fandoms/:id',
       'GET /api/props',
       'POST /api/props',
       'GET /api/props/:id',
@@ -209,6 +219,16 @@ const { verifyTokenOrApiKey } = require('./middleware/apiKeyAuth');
 const costumeRoutes = require('./routes/costumes');
 app.use('/api/costumes', authMiddleware.verifyToken, costumeRoutes);
 app.use('/costumes', authMiddleware.verifyToken, costumeRoutes);
+
+// Brand / Fandom reference lists. Same prefix-scoped guard as the other data
+// routes — see the WARNING above about mounting on '/' or '/api'.
+const brandRoutes = require('./routes/brands');
+app.use('/api/brands', authMiddleware.verifyToken, brandRoutes);
+app.use('/brands', authMiddleware.verifyToken, brandRoutes);
+
+const fandomRoutes = require('./routes/fandoms');
+app.use('/api/fandoms', authMiddleware.verifyToken, fandomRoutes);
+app.use('/fandoms', authMiddleware.verifyToken, fandomRoutes);
 
 const propsRoutes = require('./routes/props');
 app.use('/api/props', authMiddleware.verifyToken, propsRoutes);
@@ -273,6 +293,15 @@ app.use((err, req, res, next) => {
 // SERVER STARTUP
 // ============================================================================
 
+// Create the Brand/Fandom tables and run the one-time backfill of the existing
+// "Costume".brand/fandom values BEFORE the first request is served. initSchema()
+// is idempotent and single-flight, so a DB that already has them is untouched;
+// a genuinely fresh one converges on init_db.sql's schema.
+const db = require('./services/db');
+db.initSchema().catch((error) => {
+  console.error('❌ Schema initialisation failed:', error.message);
+});
+
 app.listen(PORT, () => {
   console.log(`\n${'='.repeat(60)}`);
   console.log('✅ Express Server Started');
@@ -289,7 +318,7 @@ app.listen(PORT, () => {
   console.log('   POST /api/auth/login  (2FA challenge or token pair)');
   console.log('   POST /api/auth/2fa/verify');
   console.log('');
-  console.log('🔐 Bearer-token endpoints: /api/costumes, /api/props, /api/lenses, /api/images');
+  console.log('🔐 Bearer-token endpoints: /api/costumes, /api/brands, /api/fandoms, /api/props, /api/lenses, /api/images');
   console.log('🤖 API-key endpoints:     /api/notifications (X-CMS-API-KEY)');
   console.log('\nℹ️  Frontend SPA: public/index.html\n');
 });

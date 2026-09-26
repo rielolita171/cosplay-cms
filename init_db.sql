@@ -1,3 +1,43 @@
+-- ---------------------------------------------------------------------------
+-- Managed reference lists
+--
+-- "Costume".brand / "Costume".fandom used to be free text. They now reference a
+-- row here BY NAME (the column still holds the display string, see the note on
+-- the backfill in src/services/db.js:initSchema), which means:
+--   * the existing 83 costumes keep rendering with zero rewrites, and
+--   * a brand/fandom can never end up pointing at a row that no longer exists.
+-- The linkage is therefore a soft reference enforced in src/routes/brands.js and
+-- src/routes/fandoms.js (a delete of a referenced row is refused with 409), NOT a
+-- SQLite FOREIGN KEY — SQLite would not enforce it here anyway, since
+-- `PRAGMA foreign_keys` is off by default on the `sqlite3` CLI this project uses.
+--
+-- nameLower carries a case-folded copy of `name` so uniqueness is
+-- case-insensitive; the UNIQUE index on it is what "INSERT OR IGNORE" in the
+-- backfill keys off. id is a 32-char hex string (randomblob(16)) because the
+-- `sqlite3` CLI has no UUID function.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS "Brand" (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  nameLower TEXT NOT NULL,
+  -- Optional online-store link, validated server-side to be http(s) only.
+  storeUrl TEXT,
+  createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_Brand_nameLower" ON "Brand"(nameLower);
+CREATE INDEX IF NOT EXISTS "idx_Brand_name" ON "Brand"(name);
+
+CREATE TABLE IF NOT EXISTS "Fandom" (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  nameLower TEXT NOT NULL,
+  createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_Fandom_nameLower" ON "Fandom"(nameLower);
+CREATE INDEX IF NOT EXISTS "idx_Fandom_name" ON "Fandom"(name);
+
 CREATE TABLE IF NOT EXISTS "User" (
   id TEXT PRIMARY KEY,
   username TEXT UNIQUE NOT NULL,

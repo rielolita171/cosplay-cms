@@ -60,7 +60,12 @@ function parseRows(output, columns) {
     });
 }
 
-async function queryAll(sql, columns) {
+async function queryAll(sql, columns, params) {
+  // `params` are bound as ? placeholders. Only the fixed COSTUME_SIZE_ENUM uses
+  // them; it is an internal constant, never caller input.
+  if (params && params.length) {
+    sql = params.reduce((acc, _p, i) => acc.replace('?', esc(params[i])), sql);
+  }
   return parseRows(await runSql(sql), columns);
 }
 
@@ -80,6 +85,27 @@ async function exec(sql) {
 // Idempotent migrations
 // ============================================================================
 let schemaReady = null;
+
+/**
+ * SQL twin of collapseWhitespace() in src/services/sqlSafety.js.
+ *
+ * SQLite has no REGEXP_REPLACE, so the collapse is done with nested REPLACE:
+ * tab/CR/LF are first turned into a plain space, then the two-space sequence is
+ * folded to one space repeatedly. Five folds are enough for any realistic run of
+ * spaces (2^5 = 32); anything longer is still reduced to at most 32 consecutive
+ * spaces, and such a value cannot exist in this data set.
+ *
+ * The result is TRIM()med, matching the JS helper's `.replace(/\s+/g,' ').trim()`
+ * exactly, so the backfill below and the route writers agree byte for byte.
+ *
+ * @param {string} column a bare column name (never caller input)
+ * @returns {string} a SQL expression over that column
+ */
+function sqlNormalize(column) {
+  let expr = `REPLACE(REPLACE(REPLACE(${column}, char(9), ' '), char(10), ' '), char(13), ' ')`;
+  for (let i = 0; i < 5; i++) expr = `REPLACE(${expr}, '  ', ' ')`;
+  return `TRIM(${expr})`;
+}
 
 async function initSchema() {
   if (schemaReady) return schemaReady;
@@ -112,15 +138,164 @@ async function initSchema() {
       console.warn('⚠️  token tables not created:', error.message);
     });
 
+    // -----------------------------------------------------------------------
+    // Managed reference lists + the one-time backfill of "Costume".brand/fandom.
+    //
+    // The first statements CREATE the tables; the rest is INSERT OR IGNORE keyed
+    // off the UNIQUE index on nameLower. That makes the whole block a no-op on
+    // every boot after the first, which is what lets a fresh install and an
+    // existing DB converge on the same schema without a separate migration step.
+    //
+    // WHY THE BACKFILL DOES NOT REWRITE "Costume"
+    // "Costume".brand / .fandom hold the NAME (not the id) of the managed row —
+    // see the header comment in init_db.sql. So the mapping is implicit: a
+    // costume already "points at" the row whose name matches its own text, and
+    // there is literally nothing to update on the costume side. That is the
+    // strongest possible no-data-loss guarantee — the 83 rows are never rewritten,
+    // only read. Lookups are case-insensitive (nameLower) on both sides, so a
+    // group holding two spellings of the same name still resolves to one row.
+    //
+    // WHITESPACE NORMALISATION (idempotent, and a no-op on clean data)
+    // Every WRITER now collapses internal whitespace before deriving nameLower
+    // (brands.js / fandoms.js normalizeName, costumes.js normalizeReferenceName,
+    // both via collapseWhitespace() in sqlSafety.js). This block makes the READ
+    // side agree with them, so a database that predates that change cannot end
+    // up with a stored list entry that no writer would ever produce again:
+    //   1. UPDATE normalises any EXISTING "Brand"/"Fandom" row in place, but
+    //      ONLY rows that actually need it (the WHERE). On the current dataset
+    //      it matches zero rows, so it is a provable no-op — verified by
+    //      dumping the table before and after a boot.
+    //   2. The INSERT then groups on the NORMALISED expression, so two costumes
+    //      spelled "blue archive" / "blue  archive" land in ONE group and one
+    //      list row instead of two.
+    //
+    // THE COSTUME SIDE IS NOT TOUCHED, AND THAT IS THE POINT
+    // A managed-list row whose name differs from a costume's stored text only by
+    // whitespace would still resolve, because the list lookup is
+    // LOWER(TRIM(costume.brand)) = nameLower on both sides and TRIM is a no-op
+    // for the values normalisation leaves alone. Normalising the list WITHOUT
+    // normalising the costume would be the dangerous half; doing both, and only
+    // ever moving a value that is already whitespace-equivalent, is safe.
+    // -----------------------------------------------------------------------
+    await runSql(`
+      CREATE TABLE IF NOT EXISTS "Brand" (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        nameLower TEXT NOT NULL,
+        storeUrl TEXT,
+        createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS "idx_Brand_nameLower" ON "Brand"(nameLower);
+      CREATE INDEX IF NOT EXISTS "idx_Brand_name" ON "Brand"(name);
+
+      CREATE TABLE IF NOT EXISTS "Fandom" (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        nameLower TEXT NOT NULL,
+        createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS "idx_Fandom_nameLower" ON "Fandom"(nameLower);
+      CREATE INDEX IF NOT EXISTS "idx_Fandom_name" ON "Fandom"(name);
+
+      -- One row per DISTINCT non-empty brand / fandom currently stored.
+      -- MIN(TRIM(col)) is deliberate: under GROUP BY a bare column reference
+      -- picks an ARBITRARY member of the group, which would make the stored
+      -- spelling non-deterministic across runs. MIN() is stable.
+      -- Values containing the sqlite3 CLI's '|' row separator or a newline are
+      -- skipped rather than inserted, because they could not survive the pipe
+      -- transport the route files use. The costume keeps its own value either
+      -- way, so that is a display-list gap, never a data loss.
+      INSERT OR IGNORE INTO "Brand" (id, name, nameLower, createdAt, updatedAt)
+      SELECT lower(hex(randomblob(16))), MIN(${sqlNormalize('brand')}), LOWER(MIN(${sqlNormalize('brand')})),
+             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      FROM "Costume"
+      WHERE brand IS NOT NULL AND ${sqlNormalize('brand')} <> ''
+        AND INSTR(${sqlNormalize('brand')}, '|') = 0
+      GROUP BY LOWER(${sqlNormalize('brand')});
+
+      INSERT OR IGNORE INTO "Fandom" (id, name, nameLower, createdAt, updatedAt)
+      SELECT lower(hex(randomblob(16))), MIN(${sqlNormalize('fandom')}), LOWER(MIN(${sqlNormalize('fandom')})),
+             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      FROM "Costume"
+      WHERE fandom IS NOT NULL AND ${sqlNormalize('fandom')} <> ''
+        AND INSTR(${sqlNormalize('fandom')}, '|') = 0
+      GROUP BY LOWER(${sqlNormalize('fandom')});
+    `).catch((error) => {
+      // "Costume" does not exist yet (init_db.sql has not been run).
+      console.warn('⚠️  Brand/Fandom tables not created:', error.message);
+    });
+
+    // IDEMPOTENT BACKFILL OF THE MANAGED-LIST ROWS' OWN WHITESPACE.
+    // Runs AFTER the CREATE/INSERT block so the tables definitely exist, and in
+    // its OWN runSql() with its own catch so that a constraint violation here can
+    // never abort the backfill above or stop the server booting.
+    //
+    // The WHERE clause is the idempotence: a row whose name and nameLower are
+    // already normalised does not match, so the statement writes nothing and the
+    // database is byte-identical to what it was before. On the current data set
+    // ZERO rows match, which is why this is safe to ship against real data.
+    //
+    // It is also self-limiting: it can only move a name to a value that already
+    // means the same thing under the lookup (LOWER(TRIM(...)) = nameLower), so
+    // no costume can be orphaned by it. Should two legacy rows ever collapse onto
+    // the same nameLower, the UNIQUE index rejects the second UPDATE and the
+    // catch below reports it rather than silently merging or deleting anything.
+    await runSql(`
+      UPDATE "Brand"
+         SET name = ${sqlNormalize('name')}, nameLower = LOWER(${sqlNormalize('name')})
+       WHERE name <> ${sqlNormalize('name')} OR nameLower <> LOWER(${sqlNormalize('name')});
+      UPDATE "Fandom"
+         SET name = ${sqlNormalize('name')}, nameLower = LOWER(${sqlNormalize('name')})
+       WHERE name <> ${sqlNormalize('name')} OR nameLower <> LOWER(${sqlNormalize('name')});
+    `).catch((error) => {
+      console.warn('⚠️  Brand/Fandom whitespace backfill skipped (list left as-is):', error.message);
+    });
+
     // Columns added to "User" after init_db.sql was written.
     for (const [column, definition] of [['passwordHash', 'TEXT'], ['role', "TEXT DEFAULT 'user'"]]) {
       await runSql(`ALTER TABLE "User" ADD COLUMN ${column} ${definition};`).catch(() => {
         // Column already exists, or the table is not there yet.
       });
     }
+
+    // Surface (never repair) any pre-existing size that sits outside XS–3XL.
+    await reportSizeEnumDrift();
   })();
 
   return schemaReady;
+}
+
+/**
+ * The size enum enforced by POST/PUT /api/costumes (COSTUME_SIZES in
+ * src/routes/costumes.js). "Costume".size deliberately has NO CHECK constraint:
+ * legacy rows may hold a bespoke value ("One Size", a custom measurement) and a
+ * CHECK would make those rows unwritable. Instead the routes reject an
+ * out-of-enum `size` for new/edited entries, and this function reports how many
+ * pre-existing rows sit outside the enum so the drift is visible instead of
+ * silent.
+ */
+const COSTUME_SIZE_ENUM = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL'];
+
+async function reportSizeEnumDrift() {
+  const placeholders = COSTUME_SIZE_ENUM.map(() => '?').join(', ');
+  try {
+    const rows = await queryAll(
+      `SELECT size, COUNT(*) AS n FROM "Costume"
+       WHERE size IS NOT NULL AND TRIM(size) <> '' AND UPPER(TRIM(size)) NOT IN (${placeholders})
+       GROUP BY size ORDER BY n DESC;`,
+      ['size', 'n'],
+      COSTUME_SIZE_ENUM
+    );
+    if (rows.length === 0) return;
+    // No error: these rows are preserved exactly as they are and still render.
+    console.warn('⚠️  Costume sizes outside XS–3XL (preserved as-is, '
+      + `${rows.reduce((sum, r) => sum + parseInt(r.n, 10), 0)} rows): `
+      + rows.map(r => `${r.size} ×${r.n}`).join(', '));
+  } catch (_) {
+    // "Costume" missing — nothing to report.
+  }
 }
 
 // ============================================================================
@@ -235,6 +410,7 @@ module.exports = {
   esc,
   parseRows,
   initSchema,
+  reportSizeEnumDrift,
   sweepExpired,
   insertRefreshToken,
   getRefreshToken,

@@ -2,7 +2,23 @@ const express = require('express');
 const router = express.Router();
 const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
+const { esc, enumParam, textParam, idParam } = require('../services/sqlSafety');
 
+// The five states a lens can be in. The GET / filter allowlists against this
+// list, and PUT validates against it too, so a status can never be written that
+// the filter would then be unable to represent. The frontend derives its status
+// badge class from this exact value, which is why an out-of-set write is worse
+// than cosmetic.
+const LENS_STATUSES = ['UNOPENED', 'ACTIVE', 'EXPIRING_SOON', 'EXPIRED', 'DISPOSED'];
+
+// Column caps, mirroring what public/index.html enforces on the lens form
+// (character 120, color 80, prescription 40, notes 2000).
+const MAX_LENS_CHARACTER_LENGTH = 120;
+const MAX_LENS_COLOR_LENGTH = 80;
+const MAX_LENS_BRAND_LENGTH = 120;
+const MAX_PRESCRIPTION_LENGTH = 40;
+const MAX_LENS_NOTES_LENGTH = 2000;
+const MAX_DATE_LENGTH = 40;
 
 // Execute SQL queries helper
 async function queryDb(sql) {
@@ -59,15 +75,22 @@ function checkExpiryStatus(expiryDate) {
 // ============================================================================
 router.get('/', async (req, res) => {
   try {
-    const { status, color, brand } = req.query;
-    
+    // `status` is a closed enum — the same five values the response advertises —
+    // so it is allowlisted rather than escaped. `color` / `brand` are free text
+    // and are type-checked, length-capped and escaped.
+    const status = enumParam(req.query.status, LENS_STATUSES, 'status');
+    const color = textParam(req.query.color, { name: 'color', maxLength: MAX_LENS_COLOR_LENGTH });
+    const brand = textParam(req.query.brand, { name: 'brand', maxLength: MAX_LENS_BRAND_LENGTH });
+
     let where = '1=1';
-    if (status) where += ` AND status = '${status}'`;
-    if (color) where += ` AND color LIKE '%${color}%'`;
-    if (brand) where += ` AND brand LIKE '%${brand}%'`;
+    if (status) where += ` AND status = ${esc(status)}`;
+    if (color) where += ` AND color LIKE ${esc(`%${color}%`)}`;
+    if (brand) where += ` AND brand LIKE ${esc(`%${brand}%`)}`;
 
     // SELECT * so the cards receive prescription/purchaseDate/notes/imageUrl,
     // which the previous 6-column projection dropped.
+    // ORDER BY character is a hard-coded column — nothing user-supplied reaches
+    // an identifier position anywhere in this file.
     const sql = `SELECT * FROM "ContactLens" WHERE ${where} ORDER BY character ASC;`;
     const result = await queryDb(sql);
     const lenses = parseSqlResult(result, LENS_COLUMNS);
@@ -75,10 +98,14 @@ router.get('/', async (req, res) => {
     res.json({
       count: lenses.length,
       lenses: lenses,
-      statuses: ['UNOPENED', 'ACTIVE', 'EXPIRING_SOON', 'EXPIRED', 'DISPOSED']
+      statuses: LENS_STATUSES
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    const status = error.status || 500;
+    res.status(status).json({
+      error: error.message,
+      code: status >= 500 ? 'INTERNAL_ERROR' : 'VALIDATION_ERROR'
+    });
   }
 });
 
@@ -87,9 +114,11 @@ router.get('/', async (req, res) => {
 // ============================================================================
 router.get('/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    const sql = `SELECT * FROM "ContactLens" WHERE id = '${id}' LIMIT 1;`;
-    const result = await queryDb(sql);
+    const id = idParam(req.params.id);
+
+    const result = id === null ? '' : await queryDb(
+      `SELECT * FROM "ContactLens" WHERE id = ${esc(id)} LIMIT 1;`
+    );
 
     if (!result) return res.status(404).json({ error: 'Lens not found' });
 
@@ -111,60 +140,135 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'character and color are required' });
     }
 
+    // `prescription`, `purchaseDate` and `expiryDate` used to be interpolated with
+    // NO escaping into the INSERT — the clearest injection on this route, since
+    // the dashboard's expiryDate is a free <input type="date"> string.
+    const normalizedCharacter = textParam(character, { name: 'character', maxLength: MAX_LENS_CHARACTER_LENGTH, noSeparator: true });
+    const normalizedColor = textParam(color, { name: 'color', maxLength: MAX_LENS_COLOR_LENGTH, noSeparator: true });
+    if (!normalizedCharacter || !normalizedColor) {
+      return res.status(400).json({ error: 'character and color are required' });
+    }
+    const normalizedBrand = textParam(brand, { name: 'brand', maxLength: MAX_LENS_BRAND_LENGTH, noSeparator: true });
+    const normalizedPrescription = textParam(prescription, { name: 'prescription', maxLength: MAX_PRESCRIPTION_LENGTH, noSeparator: true });
+    const normalizedPurchaseDate = textParam(purchaseDate, { name: 'purchaseDate', maxLength: MAX_DATE_LENGTH, noSeparator: true });
+    const normalizedExpiryDate = textParam(expiryDate, { name: 'expiryDate', maxLength: MAX_DATE_LENGTH, noSeparator: true });
+    const normalizedNotes = textParam(notes, { name: 'notes', maxLength: MAX_LENS_NOTES_LENGTH, noSeparator: true });
+
     const id = randomUUID();
     const now = new Date().toISOString();
-    const escapedCharacter = character.replace(/'/g, "''");
-    const escapedColor = color.replace(/'/g, "''");
-    const escapedBrand = brand ? brand.replace(/'/g, "''") : null;
-    const escapedNotes = notes ? notes.replace(/'/g, "''") : null;
 
-    const status = checkExpiryStatus(expiryDate || new Date().toISOString());
+    // Derived from the VALIDATED expiry date, so a value that survived validation
+    // but is not a real date falls through to the same "expired/soon" branches as
+    // before rather than being interpolated.
+    const status = checkExpiryStatus(normalizedExpiryDate || new Date().toISOString());
 
     const sql = `INSERT INTO "ContactLens" (id, character, color, brand, prescription, purchaseDate, expiryDate, isOpened, status, notes, createdAt, updatedAt)
-                 VALUES ('${id}', '${escapedCharacter}', '${escapedColor}', ${escapedBrand ? `'${escapedBrand}'` : 'NULL'}, ${prescription ? `'${prescription}'` : 'NULL'}, ${purchaseDate ? `'${purchaseDate}'` : 'NULL'}, ${expiryDate ? `'${expiryDate}'` : 'NULL'}, 0, '${status}', ${escapedNotes ? `'${escapedNotes}'` : 'NULL'}, '${now}', '${now}');`;
-    
+                 VALUES (${esc(id)}, ${esc(normalizedCharacter)}, ${esc(normalizedColor)}, ${normalizedBrand ? esc(normalizedBrand) : 'NULL'}, ${normalizedPrescription ? esc(normalizedPrescription) : 'NULL'}, ${normalizedPurchaseDate ? esc(normalizedPurchaseDate) : 'NULL'}, ${normalizedExpiryDate ? esc(normalizedExpiryDate) : 'NULL'}, 0, ${esc(status)}, ${normalizedNotes ? esc(normalizedNotes) : 'NULL'}, ${esc(now)}, ${esc(now)});`;
+
     await queryDb(sql);
 
     res.status(201).json({
       id,
-      character,
-      color,
-      brand: brand || null,
+      character: normalizedCharacter,
+      color: normalizedColor,
+      brand: normalizedBrand || null,
       status,
       createdAt: now
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    const status = error.status || 500;
+    res.status(status).json({
+      error: error.message,
+      code: status >= 500 ? 'INTERNAL_ERROR' : 'VALIDATION_ERROR'
+    });
   }
 });
 
 // ============================================================================
 // PUT /api/lenses/:id - Update lens
 // ============================================================================
+// CONTRACT (the edit modal in public/index.html submits exactly these keys)
+//   character     string <= 120
+//   color         string <= 80
+//   brand         string <= 120
+//   prescription  string <= 40
+//   purchaseDate  string <= 40   ISO date
+//   expiryDate    string <= 40   ISO date
+//   notes         string <= 2000
+//   openedDate    string <= 40   still accepted (PATCH /:id/open owns it)
+//   isOpened      0/1            still accepted
+//   status        LENS_STATUSES  still accepted — see below
+// Absent / null / '' means "leave the column alone", the contract these five
+// fields always had. An all-absent body is a 400, as on costumes and props.
+//
+// WHY `status` IS STILL WRITABLE HERE BUT NOT IN THE EDIT FORM
+// The edit modal deliberately does NOT expose status. status is DERIVED state:
+// checkExpiryStatus() computes it from expiryDate, PATCH /:id/open recomputes it
+// from the new openedDate, and the frontend's lensDisplayStatus() overrides it
+// again from the date. A value hand-typed into a form would therefore be
+// overwritten by the next open/expiry recomputation, which is worse than not
+// offering it. The allowlist is KEPT on this route so an existing scripted
+// client that PUTs { status: 'DISPOSED' } keeps working, and so an out-of-enum
+// value can still never reach the column. An explicit status in the body always
+// wins; only when it is absent AND expiryDate changed is the status recomputed
+// from the new date, so editing the date cannot leave a stale derived status.
 router.put('/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    const { status, isOpened, openedDate, expiryDate, notes } = req.body;
+    const id = idParam(req.params.id) || '';
+    const body = req.body || {};
+    const { character, color, brand, prescription, purchaseDate,
+            status, isOpened, openedDate, expiryDate, notes } = body;
+
+    // `status`, `openedDate` and `expiryDate` were all unescaped here. `status`
+    // is a closed enum, so it is allowlisted instead — matching the GET filter,
+    // so no status can be written that the filter cannot represent.
+    const normalizedStatus = enumParam(status, LENS_STATUSES, 'status');
+    const normalizedOpenedDate = textParam(openedDate, { name: 'openedDate', maxLength: MAX_DATE_LENGTH, noSeparator: true });
+    const normalizedExpiryDate = textParam(expiryDate, { name: 'expiryDate', maxLength: MAX_DATE_LENGTH, noSeparator: true });
+    const normalizedNotes = textParam(notes, { name: 'notes', maxLength: MAX_LENS_NOTES_LENGTH, noSeparator: true });
+    const normalizedCharacter = textParam(character, { name: 'character', maxLength: MAX_LENS_CHARACTER_LENGTH, noSeparator: true });
+    const normalizedColor = textParam(color, { name: 'color', maxLength: MAX_LENS_COLOR_LENGTH, noSeparator: true });
+    const normalizedBrand = textParam(brand, { name: 'brand', maxLength: MAX_LENS_BRAND_LENGTH, noSeparator: true });
+    const normalizedPrescription = textParam(prescription, { name: 'prescription', maxLength: MAX_PRESCRIPTION_LENGTH, noSeparator: true });
+    const normalizedPurchaseDate = textParam(purchaseDate, { name: 'purchaseDate', maxLength: MAX_DATE_LENGTH, noSeparator: true });
 
     let updates = [];
-    if (status) updates.push(`status = '${status}'`);
+    if (normalizedCharacter !== null) updates.push(`character = ${esc(normalizedCharacter)}`);
+    if (normalizedColor !== null) updates.push(`color = ${esc(normalizedColor)}`);
+    if (normalizedBrand !== null) updates.push(`brand = ${esc(normalizedBrand)}`);
+    if (normalizedPrescription !== null) updates.push(`prescription = ${esc(normalizedPrescription)}`);
+    if (normalizedPurchaseDate !== null) updates.push(`purchaseDate = ${esc(normalizedPurchaseDate)}`);
     if (isOpened !== undefined) updates.push(`isOpened = ${isOpened ? 1 : 0}`);
-    if (openedDate) updates.push(`openedDate = '${openedDate}'`);
-    if (expiryDate) updates.push(`expiryDate = '${expiryDate}'`);
-    if (notes) updates.push(`notes = '${notes.replace(/'/g, "''")}'`);
+    if (normalizedOpenedDate !== null) updates.push(`openedDate = ${esc(normalizedOpenedDate)}`);
+    if (normalizedExpiryDate !== null) updates.push(`expiryDate = ${esc(normalizedExpiryDate)}`);
+    if (normalizedNotes !== null) updates.push(`notes = ${esc(normalizedNotes)}`);
 
-    if (updates.length === 0) {
-      return res.status(400).json({ error: 'No fields to update' });
+    if (normalizedStatus !== null) {
+      updates.push(`status = ${esc(normalizedStatus)}`);
+    } else if (normalizedExpiryDate !== null) {
+      // No explicit status and the expiry moved: recompute the derived value so
+      // the row cannot disagree with itself. Derived from the VALIDATED date, so
+      // a value that is not a real date falls through to the same branches as
+      // POST rather than being interpolated.
+      updates.push(`status = ${esc(checkExpiryStatus(normalizedExpiryDate))}`);
     }
 
-    updates.push(`updatedAt = '${new Date().toISOString()}'`);
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update', code: 'VALIDATION_ERROR' });
+    }
 
-    const sql = `UPDATE "ContactLens" SET ${updates.join(', ')} WHERE id = '${id}';`;
+    updates.push(`updatedAt = ${esc(new Date().toISOString())}`);
+
+    const sql = `UPDATE "ContactLens" SET ${updates.join(', ')} WHERE id = ${esc(id)};`;
     await queryDb(sql);
 
     res.json({ id, message: 'Lens updated successfully', updatedFields: req.body });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    const status = error.status || 500;
+    res.status(status).json({
+      error: error.message,
+      code: status >= 500 ? 'INTERNAL_ERROR' : 'VALIDATION_ERROR'
+    });
   }
 });
 
@@ -180,10 +284,10 @@ const OPEN_LIFETIME_MONTHS = 12;
 
 router.patch('/:id/open', async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = idParam(req.params.id);
 
-    const existing = await queryDb(
-      `SELECT id, isOpened, openedDate, expiryDate, status FROM "ContactLens" WHERE id = '${id}' LIMIT 1;`
+    const existing = id === null ? '' : await queryDb(
+      `SELECT id, isOpened, openedDate, expiryDate, status FROM "ContactLens" WHERE id = ${esc(id)} LIMIT 1;`
     );
 
     if (!existing) {
@@ -213,8 +317,8 @@ router.patch('/:id/open', async (req, res) => {
 
     await queryDb(
       `UPDATE "ContactLens"
-       SET isOpened = 1, openedDate = '${openedDate}', expiryDate = '${expiryDate}', status = '${status}', updatedAt = '${new Date().toISOString()}'
-       WHERE id = '${id}';`
+       SET isOpened = 1, openedDate = ${esc(openedDate)}, expiryDate = ${esc(expiryDate)}, status = ${esc(status)}, updatedAt = ${esc(new Date().toISOString())}
+       WHERE id = ${esc(id)};`
     );
 
     res.json({
@@ -235,8 +339,8 @@ router.patch('/:id/open', async (req, res) => {
 // ============================================================================
 router.delete('/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    const sql = `DELETE FROM "ContactLens" WHERE id = '${id}';`;
+    const id = idParam(req.params.id) || '';
+    const sql = `DELETE FROM "ContactLens" WHERE id = ${esc(id)};`;
     await queryDb(sql);
 
     res.json({ id, message: 'Lens deleted successfully' });

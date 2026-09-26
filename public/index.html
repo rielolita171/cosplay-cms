@@ -648,6 +648,33 @@
     .form-control.is-invalid:focus {
       outline: 2px solid var(--danger);
     }
+
+    /* Milestone checkboxes (edit costume form) */
+    .checkbox-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .checkbox-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.03);
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+
+    .checkbox-item input {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--primary);
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
   </style>
 </head>
 <body>
@@ -745,6 +772,7 @@
         <button class="tab-btn active" data-tab="costumes" onclick="switchTab('costumes')">👘 Costumes</button>
         <button class="tab-btn" data-tab="props" onclick="switchTab('props')">⚔️ Props & Accessories</button>
         <button class="tab-btn" data-tab="lenses" onclick="switchTab('lenses')">👁️ Contact Lenses</button>
+        <button class="tab-btn" data-tab="lists" onclick="switchTab('lists')">🏷️ Reference Lists</button>
         <button class="tab-btn" data-tab="security" onclick="switchTab('security')">🔐 Security & 2FA</button>
       </div>
 
@@ -777,6 +805,64 @@
       <!-- Lenses Tab Content -->
       <section id="tab-lenses" style="display: none;">
         <div class="items-grid" id="lenses-grid"></div>
+      </section>
+
+      <!-- Reference Lists Tab Content (Brands + Fandoms).
+           Both grids are delegated through bindGridEvents() and use the same
+           data-action="..." contract as the costume/prop/lens cards. -->
+      <section id="tab-lists" style="display: none;">
+        <div class="metric-card" style="margin-bottom: 20px;">
+          <h2 style="font-size: 1.2rem; margin-bottom: 6px;">🏷️ Reference Lists</h2>
+          <p style="color: var(--text-muted); font-size: 0.85rem;">
+            These lists feed the Brand and Fandom dropdowns on the costume forms.
+            Renaming an entry also renames it on every costume that uses it.
+            An entry that is still in use cannot be deleted — the server answers
+            409 and tells you how many costumes reference it.
+          </p>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+          <!-- Brands -->
+          <div class="metric-card">
+            <h3 style="font-size: 1rem; margin-bottom: 12px;">Brands & Makers</h3>
+            <form onsubmit="handleCreateBrand(event)" novalidate>
+              <div class="form-group">
+                <label for="brand-name-input">Brand name *</label>
+                <input type="text" class="form-control" id="brand-name-input" maxlength="120"
+                       placeholder="e.g. 1/3 Delusion" required>
+                <!-- The near-duplicate message ("... differs only by spacing or
+                     case") is written here by showInlineError(). -->
+                <div class="field-error" data-error-for="name"></div>
+              </div>
+              <div class="form-group">
+                <label for="brand-url-input">Store link (optional)</label>
+                <input type="url" class="form-control" id="brand-url-input" maxlength="2048"
+                       placeholder="https://…">
+                <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 6px;">
+                  http:// or https:// only. Anything else is rejected with 400.
+                </p>
+                <div class="field-error" data-error-for="storeUrl"></div>
+              </div>
+              <button type="submit" class="btn btn-primary btn-full">Add Brand</button>
+            </form>
+            <div class="items-grid" id="brands-grid" style="margin-top: 16px;"></div>
+          </div>
+
+          <!-- Fandoms -->
+          <div class="metric-card">
+            <h3 style="font-size: 1rem; margin-bottom: 12px;">Fandoms</h3>
+            <form onsubmit="handleCreateFandom(event)" novalidate>
+              <div class="form-group">
+                <label for="fandom-name-input">Fandom name *</label>
+                <input type="text" class="form-control" id="fandom-name-input" maxlength="120"
+                       placeholder="e.g. Genshin Impact" required>
+                <div class="field-error" data-error-for="name"></div>
+              </div>
+              <button type="submit" class="btn btn-primary btn-full">Add Fandom</button>
+            </form>
+            <div class="items-grid" id="fandoms-grid" style="margin-top: 16px;"></div>
+          </div>
+        </div>
       </section>
 
       <!-- Security Tab Content -->
@@ -846,18 +932,47 @@
       </div>
       <div class="form-group">
         <label>Fandom / Series *</label>
-        <input type="text" class="form-control" name="fandom" required placeholder="e.g. Genshin Impact">
+        <!-- Populated from GET /api/fandoms by populateFandomSelects(). The
+             last option opens the "Reference Lists" tab, which is where names
+             are added / renamed / deleted. -->
+        <select class="form-control" name="fandom" id="add-costume-fandom" required>
+          <option value="">Loading fandoms…</option>
+        </select>
         <div class="field-error" data-error-for="fandom"></div>
       </div>
       <div class="form-group">
         <label>Brand / Maker</label>
-        <input type="text" class="form-control" name="brand" placeholder="e.g. Miaowu / Dokidoki">
+        <!-- Populated from GET /api/brands by populateBrandSelects(). -->
+        <select class="form-control" name="brand" id="add-costume-brand">
+          <option value="">-- No brand --</option>
+        </select>
         <div class="field-error" data-error-for="brand"></div>
       </div>
       <div class="form-group">
         <label>Size</label>
-        <input type="text" class="form-control" name="size" placeholder="e.g. M / L / Custom">
+        <select class="form-control" name="size" id="add-costume-size">
+          <option value="">-- Not set --</option>
+        </select>
+        <!-- Escape hatch, revealed when the "Other / custom" option is picked.
+             Sent as `sizeOther`; a size outside the enum sent as `size` is a
+             400 (src/routes/costumes.js:normalizeSize). -->
+        <input type="text" class="form-control" name="sizeOther" id="add-costume-size-other"
+               maxlength="40" placeholder="e.g. One Size, or 82/66/94"
+               style="display: none; margin-top: 8px;">
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 6px;" id="add-costume-size-hint">
+          Pick a standard size. Choose "Other / custom" for anything bespoke.
+        </p>
         <div class="field-error" data-error-for="size"></div>
+        <div class="field-error" data-error-for="sizeOther"></div>
+      </div>
+      <div class="form-group">
+        <label for="add-costume-buy-price">Buy Price (IDR)</label>
+        <input type="text" inputmode="decimal" class="form-control" name="buyPrice" id="add-costume-buy-price"
+               placeholder="e.g. 1250000">
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 6px;">
+          Optional. Numbers only, no thousands separator; stored to 2 decimal places.
+        </p>
+        <div class="field-error" data-error-for="buyPrice"></div>
       </div>
       <div class="form-group">
         <label>Reference / Taobao Link</label>
@@ -875,15 +990,158 @@
     </form>
   </dialog>
 
+  <!-- Modal: Edit Costume (opened from a card's Edit button via
+       bindGridEvents -> data-action="edit"). Every field here is one of the
+       seven accepted by PUT /api/costumes/:id. -->
+  <dialog id="modal-edit-costume">
+    <h3 style="margin-bottom: 4px;">Edit Costume</h3>
+    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 16px;" id="edit-costume-subtitle"></p>
+    <form onsubmit="handleEditCostume(event)" novalidate>
+      <div class="form-group">
+        <label for="edit-costume-status">Status</label>
+        <select class="form-control" name="status" id="edit-costume-status">
+          <option value="IN_POSSESSION">In Possession</option>
+          <option value="ON_RENT">On Rent</option>
+          <option value="TO_BE_SOLD">To Be Sold</option>
+          <option value="WISHLIST">Wishlist</option>
+        </select>
+        <div class="field-error" data-error-for="status"></div>
+      </div>
+      <div class="form-group">
+        <label for="edit-costume-brand">Brand / Maker</label>
+        <select class="form-control" name="brand" id="edit-costume-brand">
+          <option value="">-- No brand --</option>
+        </select>
+        <div class="field-error" data-error-for="brand"></div>
+      </div>
+      <div class="form-group">
+        <label for="edit-costume-fandom">Fandom / Series</label>
+        <select class="form-control" name="fandom" id="edit-costume-fandom" required>
+          <option value="">Loading fandoms…</option>
+        </select>
+        <div class="field-error" data-error-for="fandom"></div>
+      </div>
+      <div class="form-group">
+        <label for="edit-costume-size">Size</label>
+        <select class="form-control" name="size" id="edit-costume-size">
+          <option value="">-- Not set --</option>
+        </select>
+        <input type="text" class="form-control" name="sizeOther" id="edit-costume-size-other"
+               maxlength="40" placeholder="e.g. One Size, or 82/66/94"
+               style="display: none; margin-top: 8px;">
+        <div class="field-error" data-error-for="size"></div>
+        <div class="field-error" data-error-for="sizeOther"></div>
+      </div>
+      <div class="form-group">
+        <label>Milestones</label>
+        <div class="checkbox-grid">
+          <label class="checkbox-item"><input type="checkbox" name="isFullset"> Fullset</label>
+          <label class="checkbox-item"><input type="checkbox" name="doneCostest"> Costest</label>
+          <label class="checkbox-item"><input type="checkbox" name="doneEvent"> Event</label>
+          <label class="checkbox-item"><input type="checkbox" name="donePhotoSession"> Photoshoot</label>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="edit-costume-buy-price">Buy Price (IDR)</label>
+        <input type="text" inputmode="decimal" class="form-control" name="buyPrice" id="edit-costume-buy-price"
+               placeholder="e.g. 1250000">
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 6px;">
+          Optional. Numbers only, no thousands separator; stored to 2 decimal places.
+          Clearing the box leaves the stored price untouched.
+        </p>
+        <div class="field-error" data-error-for="buyPrice"></div>
+      </div>
+      <div class="form-group">
+        <label for="edit-costume-notes">Description</label>
+        <textarea class="form-control" id="edit-costume-notes" name="notes" rows="4" maxlength="2000" placeholder="Wig styled, needs hem fix..."></textarea>
+        <div class="field-error" data-error-for="notes"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-costume')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Modal: Edit Prop (opened from a prop card's Edit button via
+       bindGridEvents -> data-action="edit" on #props-grid). Every field here is
+       one of the six accepted by PUT /api/props/:id. The linked-costume select
+       is the only field that can be CLEARED (choosing "Standalone" sends
+       costumeId: ""), because "standalone" is a real state, not "unknown". -->
+  <dialog id="modal-edit-prop">
+    <h3 style="margin-bottom: 4px;">Edit Prop</h3>
+    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 16px;" id="edit-prop-subtitle"></p>
+    <form onsubmit="handleEditProp(event)" novalidate>
+      <div class="form-group">
+        <label for="edit-prop-costume">Linked Costume</label>
+        <select class="form-control" name="costumeId" id="edit-prop-costume">
+          <option value="">-- Standalone (no costume) --</option>
+        </select>
+        <div class="field-error" data-error-for="costumeId"></div>
+      </div>
+      <div class="form-group">
+        <label for="edit-prop-name">Prop Name *</label>
+        <input type="text" class="form-control" name="name" id="edit-prop-name" required maxlength="120" placeholder="e.g. Engulfing Lightning Polearm">
+        <div class="field-error" data-error-for="name"></div>
+      </div>
+      <div class="form-group">
+        <label for="edit-prop-category">Category *</label>
+        <select class="form-control" name="category" id="edit-prop-category" required>
+          <option value="Weapon">Weapon</option>
+          <option value="Armor">Armor</option>
+          <option value="Headpiece">Headpiece</option>
+          <option value="Wig">Wig</option>
+          <option value="Accessory">Accessory</option>
+          <option value="Shoes">Shoes</option>
+          <option value="__other__">Other (keep / type a custom one)…</option>
+        </select>
+        <input type="text" class="form-control" name="categoryOther" id="edit-prop-category-other"
+               maxlength="120" placeholder="Custom category" style="display: none; margin-top: 8px;">
+        <div class="field-error" data-error-for="category"></div>
+        <div class="field-error" data-error-for="categoryOther"></div>
+      </div>
+      <div class="form-group">
+        <label for="edit-prop-location">Storage Location</label>
+        <input type="text" class="form-control" name="location" id="edit-prop-location" maxlength="160" placeholder="e.g. Box A - Hall Closet">
+        <div class="field-error" data-error-for="location"></div>
+      </div>
+      <div class="form-group">
+        <label for="edit-prop-condition">Condition</label>
+        <select class="form-control" name="condition" id="edit-prop-condition">
+          <option value="">-- Not set --</option>
+          <option value="Mint">Mint</option>
+          <option value="Good">Good</option>
+          <option value="Minor Wear">Minor Wear</option>
+          <option value="Needs Repair">Needs Repair</option>
+          <option value="__other__">Other (keep / type a custom one)…</option>
+        </select>
+        <input type="text" class="form-control" name="conditionOther" id="edit-prop-condition-other"
+               maxlength="120" placeholder="Custom condition" style="display: none; margin-top: 8px;">
+        <div class="field-error" data-error-for="condition"></div>
+        <div class="field-error" data-error-for="conditionOther"></div>
+      </div>
+      <div class="form-group">
+        <label for="edit-prop-notes">Notes</label>
+        <textarea class="form-control" name="notes" id="edit-prop-notes" rows="3" maxlength="2000" placeholder="Fragile; stored flat..."></textarea>
+        <div class="field-error" data-error-for="notes"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-prop')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Modal: Add Prop -->
   <dialog id="modal-add-prop">
     <h3 style="margin-bottom: 16px;">Add Prop / Accessory</h3>
     <form onsubmit="handleCreateProp(event)" novalidate>
       <div class="form-group">
-        <label>Linked Costume *</label>
+        <label>Linked Costume (optional)</label>
         <select class="form-control" name="costumeId" id="prop-costume-select">
-          <option value="">-- Select a costume --</option>
+          <option value="">-- Standalone (no costume) --</option>
         </select>
+        <p style="color: var(--text-muted); font-size: 0.78rem; margin-top: 6px;">Leave as "Standalone" for a prop that does not belong to a costume.</p>
         <div class="field-error" data-error-for="costumeId"></div>
       </div>
       <div class="form-group">
@@ -964,6 +1222,104 @@
     </form>
   </dialog>
 
+  <!-- Modal: Edit Lens (opened from a lens card's Edit button via
+       bindGridEvents -> data-action="edit" on #lenses-grid).
+
+       THERE IS DELIBERATELY NO `status` FIELD HERE. A lens's status is DERIVED
+       state on the server: checkExpiryStatus() computes ACTIVE / EXPIRING_SOON /
+       EXPIRED from expiryDate, PATCH /:id/open recomputes it from the new
+       openedDate, and lensDisplayStatus() overrides it from the date again on
+       the client. A value typed here would be overwritten by the next open or
+       expiry recomputation, which is worse than not offering it at all. The
+       status is shown read-only below so the user can still see it, and
+       PUT /api/lenses/:id keeps its LENS_STATUSES allowlist for scripted
+       clients. See the comment on the route for the full argument. -->
+  <dialog id="modal-edit-lens">
+    <h3 style="margin-bottom: 4px;">Edit Contact Lens</h3>
+    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 16px;" id="edit-lens-subtitle"></p>
+    <form onsubmit="handleEditLens(event)" novalidate>
+      <div class="form-group">
+        <label>Status (managed automatically)</label>
+        <p id="edit-lens-status" style="margin:0; padding:8px 10px; border:1px solid var(--card-border); border-radius:6px; font-size:0.85rem; color:var(--text-muted);"></p>
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 6px;">
+          Derived from the expiry date and from "Mark as Opened". It is not editable by hand.
+        </p>
+      </div>
+      <div class="form-group">
+        <label for="edit-lens-character">Character *</label>
+        <input type="text" class="form-control" name="character" id="edit-lens-character" required maxlength="120" placeholder="e.g. Fischl">
+        <div class="field-error" data-error-for="character"></div>
+      </div>
+      <div class="form-group">
+        <label for="edit-lens-color">Color *</label>
+        <input type="text" class="form-control" name="color" id="edit-lens-color" required maxlength="80" placeholder="e.g. Amber / Violet">
+        <div class="field-error" data-error-for="color"></div>
+      </div>
+      <div class="form-group">
+        <label for="edit-lens-brand">Brand</label>
+        <input type="text" class="form-control" name="brand" id="edit-lens-brand" maxlength="120" placeholder="e.g. Sweety Spata">
+        <div class="field-error" data-error-for="brand"></div>
+      </div>
+      <div class="form-group">
+        <label for="edit-lens-prescription">Prescription / Power</label>
+        <input type="text" class="form-control" name="prescription" id="edit-lens-prescription" maxlength="40" placeholder="e.g. -1.50">
+        <div class="field-error" data-error-for="prescription"></div>
+      </div>
+      <div class="form-group">
+        <label for="edit-lens-purchase">Purchase Date</label>
+        <input type="date" class="form-control" name="purchaseDate" id="edit-lens-purchase">
+        <div class="field-error" data-error-for="purchaseDate"></div>
+      </div>
+      <div class="form-group">
+        <label for="edit-lens-expiry">Expiry Date *</label>
+        <input type="date" class="form-control" name="expiryDate" id="edit-lens-expiry" required>
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 6px;">
+          Changing this date recalculates the status above on save.
+        </p>
+        <div class="field-error" data-error-for="expiryDate"></div>
+      </div>
+      <div class="form-group">
+        <label for="edit-lens-notes">Notes</label>
+        <textarea class="form-control" name="notes" id="edit-lens-notes" rows="3" maxlength="2000" placeholder="Left eye only..."></textarea>
+        <div class="field-error" data-error-for="notes"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-lens')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Modal: single-field text entry.
+
+       THIS IS NOT A SECOND CONFIRM PATH. confirmAction() (#modal-confirm) is the
+       project's single yes/no mechanism for destructive actions and is left
+       exactly as it was. This dialog has no confirm semantics at all: it collects
+       a value, and it is used by the two interactions that previously called the
+       browser's native window.prompt() — brand/fandom rename and the brand store
+       link. window.prompt() rendered an unthemed OS dialog that looked nothing
+       like the rest of the app and could not show an inline validation message.
+
+       It resolves with a string, or with null when dismissed (Esc / Cancel), so
+       the callers keep the same "did the user cancel?" branch they had. Server
+       errors (409 *_EXISTS, 400 VALIDATION_ERROR) are written into the .field-error
+       div below, the same as every other form in the app. -->
+  <dialog id="modal-text-entry">
+    <h3 style="margin-bottom: 8px;" id="text-entry-title">Enter a value</h3>
+    <p id="text-entry-hint" style="color: var(--text-muted); font-size: 0.82rem; margin-bottom: 12px;"></p>
+    <form onsubmit="handleTextEntrySubmit(event)" novalidate>
+      <div class="form-group">
+        <label for="text-entry-input" id="text-entry-label">Value</label>
+        <input type="text" class="form-control" id="text-entry-input" name="value" maxlength="2048" autocomplete="off">
+        <div class="field-error" data-error-for="value"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="text-entry-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="text-entry-submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Hidden file input used by the costume card upload button (opened by
        bindGridEvents -> data-action="upload"; accept + size are re-checked in JS) -->
   <input type="file" id="costume-image-input" class="upload-input-hidden" accept="image/png,image/jpeg,image/webp,image/gif">
@@ -1007,6 +1363,39 @@
     // Accepted upload MIME types (must match the multer fileFilter).
     const ALLOWED_UPLOAD_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
+    // The status values PUT /api/costumes/:id accepts (COSTUME_STATUSES in
+    // src/routes/costumes.js). Kept as a list so the edit form and this check
+    // cannot drift apart.
+    const COSTUME_STATUS_OPTIONS = ['IN_POSSESSION', 'ON_RENT', 'TO_BE_SOLD', 'WISHLIST'];
+
+    // The size enum accepted by POST/PUT /api/costumes (COSTUME_SIZES in
+    // src/routes/costumes.js). Mirrored as a list, following the same "one list
+    // per layer" pattern as COSTUME_STATUS_OPTIONS, so the two <select>s and
+    // the custom-value check cannot drift apart.
+    const COSTUME_SIZE_OPTIONS = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL'];
+
+    // Sentinel option value in both size <select>s. Selecting it reveals a free
+    // text box submitted as `sizeOther`; the server accepts a bespoke value only
+    // through that field and rejects one sent as `size` with a 400.
+    const CUSTOM_SIZE_VALUE = '__custom__';
+
+    // Sentinel option value in the brand/fandom <select>s: opens the Reference
+    // Lists tab, which is where names are actually managed.
+    const MANAGE_LISTS_VALUE = '__manage__';
+
+    // Sentinel option value in the prop edit form's category/condition <select>s.
+    // Both columns are free text on the server (POST /api/props accepts any
+    // string), so a stored value outside the common list is offered as a one-off
+    // option and the free-text box is pre-filled — opening and saving without
+    // touching anything is a no-op. Mirrors the CUSTOM_SIZE_VALUE pattern.
+    const CUSTOM_PROP_VALUE = '__other__';
+
+    // The buyPrice rule, mirrored from normalizePrice() in
+    // src/routes/costumes.js: a plain non-negative decimal, no thousands
+    // separator, rounded to 2 decimal places server-side. Kept here so the
+    // inline error and the server's 400 can never disagree.
+    const BUY_PRICE_PATTERN = /^\d+(?:\.\d+)?$/;
+
     const MEDIA_PLACEHOLDER_HTML =
       '<div class="media-placeholder"><span class="media-icon">🖼️</span><span>No image</span></div>';
 
@@ -1022,6 +1411,8 @@
       costumes: [],
       props: [],
       lenses: [],
+      brands: [],
+      fandoms: [],
 
       // UI
       currentTab: 'costumes',
@@ -1034,9 +1425,17 @@
       // Uploads / transient UI state
       imageUrlsCache: {},
       imageUploadTargetId: null,
+      editingCostumeId: null,
+      editingPropId: null,
+      editingLensId: null,
       toastTimer: null,
       refreshPromise: null,   // single-flight guard for the silent token refresh
-      confirmResolver: null
+      confirmResolver: null,
+      // The text-entry modal. Deliberately a SEPARATE slot from
+      // confirmResolver: that one is the project's only yes/no path; this one
+      // only collects a value.
+      textEntryResolver: null,
+      textEntryValidate: null
     };
 
     // ==========================================================================
@@ -1093,7 +1492,15 @@
     }
 
     function toNumber(value) {
-      const n = Number(clean(value));
+      // A blank / NULL column must yield null, NOT 0. Number('') is 0 and
+      // Number.isFinite(0) is true, so without this guard a costume with NO
+      // buyPrice rendered the price chip "Rp 0" and the edit modal pre-filled
+      // the box with "0" — a stored absence displayed as a real price. (Found
+      // by the DOM-stub run.) Backends also push the literal string "NULL"
+      // through this pipe transport, which clean() already folds to ''.
+      const raw = clean(value);
+      if (raw === '') return null;
+      const n = Number(raw);
       return Number.isFinite(n) ? n : null;
     }
 
@@ -1338,6 +1745,97 @@
     }
 
     // ==========================================================================
+    // TEXT-ENTRY DIALOG (#modal-text-entry) — replaces window.prompt
+    // ==========================================================================
+    // NOT A CONFIRM MECHANISM. confirmAction() above is, and remains, the only
+    // yes/no path in the app. This dialog has no confirm semantics at all: it
+    // collects a value. It is used by the two interactions that previously
+    // called the browser's native window.prompt() — the brand/fandom rename and
+    // the brand store-link editor — which rendered an unthemed OS dialog that
+    // looked nothing like the rest of the app and could not show an inline
+    // validation message.
+    //
+    // Resolves with the entered string, or with null when dismissed (Cancel /
+    // Esc), so every caller keeps the same "the user cancelled" branch it had.
+    //
+    // @param {{title, label, hint, value, placeholder, submitLabel, maxLength,
+    //          type, validate}} cfg
+    //   `validate(value) -> string` returns an error message, or '' when valid.
+    // @returns {Promise<string|null>}
+    function promptText(cfg) {
+      const config = cfg || {};
+      const dialog = document.getElementById('modal-text-entry');
+      const input = document.getElementById('text-entry-input');
+      if (!dialog || !input) return Promise.resolve(null);
+      const holder = dialog.querySelector('[data-error-for="value"]');
+
+      // Every one of these is a textContent / property assignment, never an
+      // innerHTML write, so nothing from the caller can become markup.
+      document.getElementById('text-entry-title').textContent = config.title || 'Enter a value';
+      document.getElementById('text-entry-label').textContent = config.label || 'Value';
+      document.getElementById('text-entry-submit').textContent = config.submitLabel || 'Save';
+      const hint = document.getElementById('text-entry-hint');
+      hint.textContent = config.hint || '';
+      hint.style.display = config.hint ? 'block' : 'none';
+
+      input.type = config.type || 'text';
+      input.placeholder = config.placeholder || '';
+      input.value = config.value || '';
+      input.maxLength = config.maxLength || 120;
+      input.setAttribute('autocomplete', 'off');
+      setFieldError(holder, input, config.error || '');
+
+      return new Promise(resolve => {
+        state.textEntryResolver = resolve;
+        state.textEntryValidate = config.validate || null;
+        dialog.showModal();
+        input.focus();
+        if (input.select) input.select();
+      });
+    }
+
+    function settleTextEntry(value) {
+      const dialog = document.getElementById('modal-text-entry');
+      if (dialog && dialog.open) dialog.close();
+      const resolver = state.textEntryResolver;
+      state.textEntryResolver = null;
+      state.textEntryValidate = null;
+      if (resolver) resolver(value);
+    }
+
+    function handleTextEntrySubmit(e) {
+      e.preventDefault();
+      const dialog = document.getElementById('modal-text-entry');
+      const form = dialog.querySelector('form');
+      const input = document.getElementById('text-entry-input');
+      const holder = form.querySelector('[data-error-for="value"]');
+      const raw = (input.value || '').trim();
+
+      const message = state.textEntryValidate ? (state.textEntryValidate(raw) || '') : '';
+      setFieldError(holder, input, message);
+      if (message) { input.focus(); return; }
+
+      settleTextEntry(raw);
+    }
+
+    /**
+     * Report a server rejection of a text-entry value.
+     *
+     * WHY THIS IS JUST A TOAST, AND WHY THE CALLERS LOOP
+     * promptText() resolves by CLOSING the dialog, so by the time the API call
+     * comes back the dialog is already gone and a message written into it would
+     * be invisible. The callers therefore loop: promptText -> PUT -> on error,
+     * promptText AGAIN with `value` set to what the user just typed and `error`
+     * set to the server's own wording. The dialog re-opens with the value still
+     * in the box and the 409 BRAND_EXISTS / FANDOM_EXISTS message sitting in its
+     * .field-error, so the user corrects one thing instead of retyping the name.
+     * The toast is the secondary signal while that re-open is happening.
+     */
+    function showTextEntryError(message) {
+      showToast(message, 'error');
+    }
+
+    // ==========================================================================
     // SCREENS
     // ==========================================================================
     function showLoading(show) {
@@ -1579,7 +2077,7 @@
     // threw ReferenceError and the session-restore branch never ran.
     // ==========================================================================
     function bindGridEvents() {
-      ['costumes-grid', 'props-grid', 'lenses-grid'].forEach(gridId => {
+      ['costumes-grid', 'props-grid', 'lenses-grid', 'brands-grid', 'fandoms-grid'].forEach(gridId => {
         const grid = document.getElementById(gridId);
         if (!grid) return;
 
@@ -1590,11 +2088,29 @@
           const id = trigger.dataset.id;
 
           if (action === 'upload') openImagePicker(id);
-          else if (action === 'delete') {
+          else if (action === 'edit') {
+            // `edit` is one action name shared by three grids, exactly like
+            // `delete` below, because all the card renderers follow the same
+            // data-action contract. Dispatching on the GRID rather than on the
+            // resource is what stops the prop modal opening for a lens card.
+            if (gridId === 'costumes-grid') openEditCostume(id);
+            else if (gridId === 'props-grid') openEditProp(id);
+            else openEditLens(id);
+          } else if (action === 'delete') {
             if (gridId === 'costumes-grid') deleteCostume(id);
             else if (gridId === 'props-grid') deleteProp(id);
+            else if (gridId === 'brands-grid') deleteBrand(id);
+            else if (gridId === 'fandoms-grid') deleteFandom(id);
             else deleteLens(id);
           } else if (action === 'open-lens') markLensOpened(id);
+          else if (action === 'rename-brand') renameReference('brands', id, trigger.dataset.name);
+          else if (action === 'link-brand') editBrandStoreUrl(id, trigger.dataset.name, trigger.dataset.url);
+          else if (action === 'rename-fandom') renameReference('fandoms', id, trigger.dataset.name);
+          // The brand/fandom grids render their Delete button with its own
+          // action name, so they need their own branch here. Without these two
+          // lines the Delete button on those cards did nothing at all.
+          else if (action === 'delete-brand') deleteBrand(id);
+          else if (action === 'delete-fandom') deleteFandom(id);
         });
 
         // Broken thumbnail -> graceful placeholder (capture phase, non-bubbling).
@@ -1614,8 +2130,50 @@
         dialog.addEventListener('cancel', event => { event.preventDefault(); settleConfirm(false); });
       }
 
+      // The text-entry dialog resolves null on Cancel and on Esc, mirroring the
+      // null that window.prompt() returned when the user dismissed it.
+      document.getElementById('text-entry-cancel').addEventListener('click', () => settleTextEntry(null));
+      const textDialog = document.getElementById('modal-text-entry');
+      if (textDialog) {
+        textDialog.addEventListener('cancel', event => { event.preventDefault(); settleTextEntry(null); });
+      }
+
       const fileInput = document.getElementById('costume-image-input');
       if (fileInput) fileInput.addEventListener('change', onImagePicked);
+
+      // Size selects: build them once, and reveal/hide the custom text box as
+      // the value changes. Both modals are wired identically.
+      [['add-costume-size', 'add-costume-size-other'],
+       ['edit-costume-size', 'edit-costume-size-other']].forEach(pair => {
+        const select = document.getElementById(pair[0]);
+        if (!select) return;
+        buildSizeSelect(pair[0], '');
+        select.addEventListener('change', () => syncSizeSelect(pair[0], pair[1]));
+      });
+
+      // Prop category/condition selects: the CUSTOM_PROP_VALUE sentinel reveals
+      // the free-text box, exactly as CUSTOM_SIZE_VALUE does for the size selects.
+      [['edit-prop-category', 'edit-prop-category-other'],
+       ['edit-prop-condition', 'edit-prop-condition-other']].forEach(pair => {
+        const select = document.getElementById(pair[0]);
+        if (!select) return;
+        select.addEventListener('change', () => syncPropCustom(pair[0], pair[1]));
+      });
+
+      // Brand/fandom selects: MANAGE_LISTS_VALUE is a navigation affordance, so
+      // choosing it jumps to the Reference Lists tab and restores the previous
+      // value (the submit handlers reject it too, belt and braces).
+      [['add-costume-brand', null], ['edit-costume-brand', null],
+       ['add-costume-fandom', null], ['edit-costume-fandom', null]].forEach(pair => {
+        const select = document.getElementById(pair[0]);
+        if (!select) return;
+        select.addEventListener('change', () => {
+          if (select.value !== MANAGE_LISTS_VALUE) return;
+          select.value = '';
+          switchTab('lists');
+          showToast('Add, rename or delete entries under Reference Lists.', 'info');
+        });
+      });
 
       // Clear an inline field error as soon as the user edits that field.
       document.querySelectorAll('.field-error').forEach(holder => {
@@ -1683,8 +2241,183 @@
       }
     }
 
+    // ==========================================================================
+    // REFERENCE LISTS (brands / fandoms)
+    // ==========================================================================
+    // These two lists back the brand and fandom <select>s on the add/edit
+    // costume modals and the "Reference Lists" tab. A 401 is swallowed for the
+    // same reason as everywhere else: forceLogout() has already run.
+    async function loadBrands() {
+      try {
+        const data = await api('/api/brands');
+        state.brands = Array.isArray(data.brands) ? data.brands : [];
+      } catch (err) {
+        if (err.status === 401) return;
+        state.brands = [];
+      }
+      renderBrands();
+      populateBrandSelects();
+    }
+
+    async function loadFandoms() {
+      try {
+        const data = await api('/api/fandoms');
+        state.fandoms = Array.isArray(data.fandoms) ? data.fandoms : [];
+      } catch (err) {
+        if (err.status === 401) return;
+        state.fandoms = [];
+      }
+      renderFandoms();
+      populateFandomSelects();
+    }
+
+    /**
+     * Rebuild a brand/fandom <select> from the managed list.
+     *
+     * Options are built with document.createElement + textContent and the select
+     * is assigned via .innerHTML = '' (an empty string carries no data), so no
+     * DB-derived name is ever interpolated into an HTML string. That is the same
+     * rule populateCostumeSelects() already follows.
+     *
+     * @param {string} selectId
+     * @param {Array} items           state.brands / state.fandoms
+     * @param {string} blankLabel     first, always-present option
+     * @param {string} manageLabel    last option; opens the Reference Lists tab
+     * @param {string} selected       value to re-select, if still present
+     * @param {boolean} required      when false the blank option is allowed
+     */
+    function fillReferenceSelect(selectId, items, blankLabel, manageLabel, selected, required) {
+      const select = document.getElementById(selectId);
+      if (!select) return;
+      select.innerHTML = '';
+
+      if (!required) {
+        const blank = document.createElement('option');
+        blank.value = '';
+        blank.textContent = blankLabel;
+        select.appendChild(blank);
+      } else {
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = state[items === state.brands ? 'brands' : 'fandoms'].length
+          ? 'Loading…'
+          : 'No entries yet — add some under Reference Lists';
+        select.appendChild(placeholder);
+      }
+
+      // Sorted case-insensitively, matching the server's COLLATE NOCASE order.
+      items.slice().sort((a, b) => clean(a.name).toLowerCase().localeCompare(clean(b.name).toLowerCase()))
+        .forEach(item => {
+          const option = document.createElement('option');
+          option.value = clean(item.name);
+          option.textContent = clean(item.name);
+          select.appendChild(option);
+        });
+
+      const manage = document.createElement('option');
+      manage.value = MANAGE_LISTS_VALUE;
+      manage.textContent = manageLabel;
+      select.appendChild(manage);
+
+      const wanted = clean(selected).toLowerCase();
+      const match = wanted
+        ? items.find(i => clean(i.name).toLowerCase() === wanted)
+        : null;
+      // A value that is not in the list (e.g. it was deleted elsewhere) is kept
+      // as a one-off option so the form can still round-trip it unchanged.
+      if (wanted && !match) {
+        const orphan = document.createElement('option');
+        orphan.value = clean(selected);
+        orphan.textContent = clean(selected) + ' (not in list)';
+        select.insertBefore(orphan, manage);
+      }
+      select.value = match ? clean(match.name) : (wanted ? clean(selected) : '');
+    }
+
+    function populateBrandSelects() {
+      const editing = state.editingCostumeId
+        ? clean((state.costumes.find(c => clean(c.id) === state.editingCostumeId) || {}).brand)
+        : '';
+      fillReferenceSelect('add-costume-brand', state.brands, '-- No brand --',
+        '➕ Manage brands…', '', false);
+      fillReferenceSelect('edit-costume-brand', state.brands, '-- No brand --',
+        '➕ Manage brands…', editing, false);
+    }
+
+    function populateFandomSelects() {
+      const editing = state.editingCostumeId
+        ? clean((state.costumes.find(c => clean(c.id) === state.editingCostumeId) || {}).fandom)
+        : '';
+      fillReferenceSelect('add-costume-fandom', state.fandoms, '', '➕ Manage fandoms…', '', true);
+      fillReferenceSelect('edit-costume-fandom', state.fandoms, '', '➕ Manage fandoms…', editing, true);
+    }
+
+    /**
+     * Render the two management grids. Every DB-derived string goes through
+     * escapeHtml and every URL through safeUrl — the same stored-XSS barrier the
+     * costume/prop/lens renderers use.
+     */
+    function renderBrands() {
+      const grid = document.getElementById('brands-grid');
+      if (!grid) return;
+      if (state.brands.length === 0) {
+        grid.innerHTML = '<p style="color:var(--text-muted); font-size:0.82rem;">No brands yet.</p>';
+        return;
+      }
+      grid.innerHTML = state.brands.map(brand => {
+        const name = clean(brand.name);
+        const store = safeUrl(brand.storeUrl);
+        // data-url carries a URL too, so it goes through safeUrl as well —
+        // escapeHtml alone would happily let a `javascript:` payload reach the
+        // DOM and from there into the edit prompt.
+        const storeForPrompt = store || '';
+        const count = parseInt(clean(brand.costumeCount), 10) || 0;
+        return [
+          '    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 10px; border:1px solid var(--card-border); border-radius:6px;">',
+          '      <div style="min-width:0;">',
+          '        <div style="font-size:0.9rem; font-weight:600; overflow:hidden; text-overflow:ellipsis;">' + escapeHtml(name) + '</div>',
+          '        <div style="font-size:0.72rem; color:var(--text-muted);">' + escapeHtml(count + ' costume' + (count === 1 ? '' : 's')) + '</div>',
+          store
+            ? '        <a href="' + escapeHtml(store) + '" target="_blank" rel="noopener noreferrer" style="font-size:0.72rem; color:var(--info);">Store ↗</a>'
+            : '',
+          '      </div>',
+          '      <div style="display:flex; gap:6px; flex:0 0 auto;">',
+          '        <button type="button" class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px;" data-action="rename-brand" data-id="' + idAttr(brand.id) + '" data-name="' + escapeHtml(name) + '">Rename</button>',
+          '        <button type="button" class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px;" data-action="link-brand" data-id="' + idAttr(brand.id) + '" data-name="' + escapeHtml(name) + '" data-url="' + escapeHtml(storeForPrompt) + '">Store link</button>',
+          '        <button type="button" class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px; color:var(--danger);" data-action="delete-brand" data-id="' + idAttr(brand.id) + '">Delete</button>',
+          '      </div>',
+          '    </div>'
+        ].filter(Boolean).join('\n');
+      }).join('\n');
+    }
+
+    function renderFandoms() {
+      const grid = document.getElementById('fandoms-grid');
+      if (!grid) return;
+      if (state.fandoms.length === 0) {
+        grid.innerHTML = '<p style="color:var(--text-muted); font-size:0.82rem;">No fandoms yet.</p>';
+        return;
+      }
+      grid.innerHTML = state.fandoms.map(fandom => {
+        const name = clean(fandom.name);
+        const count = parseInt(clean(fandom.costumeCount), 10) || 0;
+        return [
+          '    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 10px; border:1px solid var(--card-border); border-radius:6px;">',
+          '      <div style="min-width:0;">',
+          '        <div style="font-size:0.9rem; font-weight:600; overflow:hidden; text-overflow:ellipsis;">' + escapeHtml(name) + '</div>',
+          '        <div style="font-size:0.72rem; color:var(--text-muted);">' + escapeHtml(count + ' costume' + (count === 1 ? '' : 's')) + '</div>',
+          '      </div>',
+          '      <div style="display:flex; gap:6px; flex:0 0 auto;">',
+          '        <button type="button" class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px;" data-action="rename-fandom" data-id="' + idAttr(fandom.id) + '" data-name="' + escapeHtml(name) + '">Rename</button>',
+          '        <button type="button" class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px; color:var(--danger);" data-action="delete-fandom" data-id="' + idAttr(fandom.id) + '">Delete</button>',
+          '      </div>',
+          '    </div>'
+        ].filter(Boolean).join('\n');
+      }).join('\n');
+    }
+
     async function loadAllData() {
-      await Promise.all([loadCostumes(), loadProps(), loadLenses()]);
+      await Promise.all([loadCostumes(), loadProps(), loadLenses(), loadBrands(), loadFandoms()]);
       updateMetrics();
       populateCostumeSelects();
       updateSecurityTab();
@@ -1807,7 +2540,10 @@
           refUrl
             ? '<a href="' + escapeHtml(refUrl) + '" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 12px;">Reference ↗</a>'
             : '<span></span>',
-          '    <button type="button" class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" data-action="delete" data-id="' + idAttr(c.id) + '">Delete</button>',
+          '    <div style="display:flex; gap:8px;">',
+          '      <button type="button" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 12px;" data-action="edit" data-id="' + idAttr(c.id) + '">Edit</button>',
+          '      <button type="button" class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" data-action="delete" data-id="' + idAttr(c.id) + '">Delete</button>',
+          '    </div>',
           '  </div>',
           '</div>'
         ].join('');
@@ -1845,7 +2581,10 @@
           '  </div>',
           '  <div class="card-actions">',
           '    <span></span>',
-          '    <button type="button" class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" data-action="delete" data-id="' + idAttr(p.id) + '">Delete</button>',
+          '    <div style="display:flex; gap:8px;">',
+          '      <button type="button" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 12px;" data-action="edit" data-id="' + idAttr(p.id) + '">Edit</button>',
+          '      <button type="button" class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" data-action="delete" data-id="' + idAttr(p.id) + '">Delete</button>',
+          '    </div>',
           '  </div>',
           '</div>'
         ].join('');
@@ -1918,11 +2657,289 @@
           showOpenButton
             ? '<button type="button" class="btn btn-primary" style="font-size:0.8rem; padding:6px 12px;" data-action="open-lens" data-id="' + idAttr(l.id) + '">Mark as Opened</button>'
             : '<span></span>',
-          '    <button type="button" class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" data-action="delete" data-id="' + idAttr(l.id) + '">Delete</button>',
+          '    <div style="display:flex; gap:8px;">',
+          '      <button type="button" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 12px;" data-action="edit" data-id="' + idAttr(l.id) + '">Edit</button>',
+          '      <button type="button" class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" data-action="delete" data-id="' + idAttr(l.id) + '">Delete</button>',
+          '    </div>',
           '  </div>',
           '</div>'
         ].join('');
       }).join('');
+    }
+
+    // ==========================================================================
+    // REFERENCE LIST MUTATIONS (brands / fandoms)
+    // ==========================================================================
+    const referenceEndpoint = kind => kind === 'brands' ? '/api/brands' : '/api/fandoms';
+
+    async function handleCreateBrand(e) {
+      e.preventDefault();
+      const form = e.target;
+      const raw = document.getElementById('brand-name-input').value.trim();
+      const storeUrl = document.getElementById('brand-url-input').value.trim();
+
+      // NEAR-DUPLICATE CHECK. The server collapses whitespace and ignores case
+      // when it derives nameLower, so "blue  archive" and "blue archive" already
+      // collide there with a 409. Doing the same comparison here means the user
+      // is told it is a duplicate BEFORE the round-trip, and that the entry they
+      // already have is the one to edit — rather than after a failed request.
+      const clash = raw ? findReferenceClash('brands', raw, null) : null;
+      if (clash) {
+        showToast('"' + clash.name + '" already exists — your text differs from it only by spacing or case. '
+          + 'Use Rename on that entry to change it.', 'error');
+        showInlineError('brand-name-input', '"' + clash.name + '" already exists.');
+        return;
+      }
+      if (!raw) {
+        showToast('Enter a brand name.', 'error');
+        showInlineError('brand-name-input', 'This field is required.');
+        return;
+      }
+      if (raw.indexOf('|') !== -1) {
+        showToast('A name cannot contain the character |.', 'error');
+        showInlineError('brand-name-input', 'A name cannot contain the character |.');
+        return;
+      }
+      if (storeUrl && !/^https?:\/\/\S+$/i.test(storeUrl)) {
+        showToast('Enter a full URL starting with http:// or https://', 'error');
+        showInlineError('brand-url-input', 'Enter a full URL starting with http:// or https://');
+        return;
+      }
+
+      try {
+        await api('/api/brands', {
+          method: 'POST',
+          body: JSON.stringify({ name: collapseSpaces(raw), storeUrl })
+        });
+        form.reset();
+        showToast('Brand added.', 'success');
+        await loadBrands();
+        await loadCostumes();
+      } catch (err) {
+        // A 409 BRAND_EXISTS can still arrive (another tab, or a name created
+        // between the check above and this request). Show the server's own
+        // wording rather than a generic failure.
+        showToast('Could not add brand: ' + err.message, 'error');
+        showInlineError('brand-name-input', err.message);
+      }
+    }
+
+    async function handleCreateFandom(e) {
+      e.preventDefault();
+      const form = e.target;
+      const raw = document.getElementById('fandom-name-input').value.trim();
+
+      const clash = raw ? findReferenceClash('fandoms', raw, null) : null;
+      if (clash) {
+        showToast('"' + clash.name + '" already exists — your text differs from it only by spacing or case. '
+          + 'Use Rename on that entry to change it.', 'error');
+        showInlineError('fandom-name-input', '"' + clash.name + '" already exists.');
+        return;
+      }
+      if (!raw) {
+        showToast('Enter a fandom name.', 'error');
+        showInlineError('fandom-name-input', 'This field is required.');
+        return;
+      }
+      if (raw.indexOf('|') !== -1) {
+        showToast('A name cannot contain the character |.', 'error');
+        showInlineError('fandom-name-input', 'A name cannot contain the character |.');
+        return;
+      }
+
+      try {
+        await api('/api/fandoms', {
+          method: 'POST', body: JSON.stringify({ name: collapseSpaces(raw) })
+        });
+        form.reset();
+        showToast('Fandom added.', 'success');
+        await loadFandoms();
+        await loadCostumes();
+      } catch (err) {
+        showToast('Could not add fandom: ' + err.message, 'error');
+        showInlineError('fandom-name-input', err.message);
+      }
+    }
+
+    /**
+     * Attach a message to the .field-error div that sits in the same .form-group
+     * as the given input. Needed for the two Reference Lists name inputs, which
+     * live in the tab markup rather than inside a modal <form>, so validateForm()
+     * cannot reach them. Falls back to a toast when no holder is found, so a
+     * message is never silently dropped.
+     */
+    function showInlineError(inputId, message) {
+      const input = document.getElementById(inputId);
+      const group = input ? input.closest('.form-group') : null;
+      const holder = group ? group.querySelector('.field-error') : null;
+      if (holder) {
+        holder.textContent = message || '';
+        holder.style.display = message ? 'block' : 'none';
+      } else if (message) {
+        showToast(message, 'error');
+      }
+    }
+
+    /**
+     * Client-side twin of the server's collapseWhitespace() in
+     * src/services/sqlSafety.js. Used only to decide whether a typed name is a
+     * near-duplicate of an existing entry; the value that is actually SENT is
+     * the collapsed one, so the two layers agree even if this is imperfect.
+     */
+    function collapseSpaces(value) {
+      return String(value === null || value === undefined ? '' : value)
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    /**
+     * Find an existing managed-list entry that a typed name collides with once
+     * case and internal whitespace are ignored — but that is NOT the entry being
+     * edited. Lets the form say so BEFORE the round-trip instead of after it.
+     *
+     * @returns {object|null} the clashing item, or null
+     */
+    function findReferenceClash(kind, typed, excludeId) {
+      const items = kind === 'brands' ? state.brands : state.fandoms;
+      const wanted = collapseSpaces(typed).toLowerCase();
+      if (!wanted) return null;
+      return items.find(item =>
+        clean(item.id) !== clean(excludeId)
+        && collapseSpaces(item.name).toLowerCase() === wanted) || null;
+    }
+
+    /**
+     * Rename an entry. The server applies the new name to every costume that
+     * uses it in a single transaction, so the costumes are reloaded afterwards.
+     *
+     * Uses the themed #modal-text-entry dialog (promptText) instead of the
+     * browser's window.prompt(), which rendered an unthemed OS dialog. A 409
+     * BRAND_EXISTS / FANDOM_EXISTS — which is what a name differing only by
+     * spacing or case now produces, since every writer collapses whitespace
+     * before deriving nameLower — re-opens the dialog with the value still in the
+     * box and the server's own wording in the .field-error, so it is actionable
+     * rather than a toast that vanishes after 4.5 seconds. The loop is what
+     * makes that possible: promptText closes the dialog when it resolves, so a
+     * rejection has to re-open it (see showTextEntryError).
+     */
+    async function renameReference(kind, id, currentName) {
+      const label = kind === 'brands' ? 'brand' : 'fandom';
+      const current = collapseSpaces(currentName);
+      let seed = current;
+      let serverError = '';
+
+      // Bounded so a persistently rejected value can never spin forever; the
+      // user simply gets the toast on the last pass.
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const next = await promptText({
+          title: 'Rename ' + label,
+          label: 'New name',
+          hint: 'Every costume using "' + currentName + '" is renamed with it. '
+            + 'Extra spaces are collapsed and case is ignored when checking for duplicates.',
+          value: seed,
+          error: serverError,
+          submitLabel: 'Rename',
+          maxLength: 120,
+          placeholder: 'e.g. Blue Archive',
+          validate: value => {
+            if (!value) return 'Enter a name.';
+            if (value.length > 120) return 'Must be 120 characters or fewer.';
+            if (value.indexOf('|') !== -1) return 'A name cannot contain the character |.';
+            const clash = findReferenceClash(kind, value, id);
+            if (clash) {
+              return '"' + clash.name + '" already exists — that name differs from yours only by spacing or case.';
+            }
+            return '';
+          }
+        });
+        if (next === null) return;               // user cancelled
+
+        const trimmed = collapseSpaces(next);
+        if (!trimmed || trimmed.toLowerCase() === current.toLowerCase()) return;   // no-op
+        try {
+          await api(referenceEndpoint(kind) + '/' + encodeURIComponent(id), {
+            method: 'PUT', body: JSON.stringify({ name: trimmed })
+          });
+          showToast('Renamed to "' + trimmed + '".', 'success');
+          await loadCostumes();
+          if (kind === 'brands') await loadBrands(); else await loadFandoms();
+          return;
+        } catch (err) {
+          serverError = err.message;
+          seed = trimmed;
+          showTextEntryError(err.message);
+        }
+      }
+    }
+
+    async function editBrandStoreUrl(id, name, currentUrl) {
+      let seed = currentUrl || '';
+      let serverError = '';
+
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const next = await promptText({
+          title: 'Store link',
+          label: 'Online store URL',
+          hint: 'The store page for "' + name + '". Leave the box empty and save to remove the link.',
+          value: seed,
+          error: serverError,
+          type: 'url',
+          submitLabel: 'Save link',
+          maxLength: 2048,
+          placeholder: 'https://…',
+          validate: value => {
+            if (!value) return '';                       // empty = remove the link
+            if (!/^https?:\/\/\S+$/i.test(value)) {
+              return 'Enter a full URL starting with http:// or https://';
+            }
+            return '';
+          }
+        });
+        if (next === null) return;
+        try {
+          await api('/api/brands/' + encodeURIComponent(id), {
+            method: 'PUT', body: JSON.stringify({ storeUrl: next })
+          });
+          showToast('Store link updated.', 'success');
+          await loadBrands();
+          return;
+        } catch (err) {
+          serverError = err.message;
+          seed = next;
+          showTextEntryError(err.message);
+        }
+      }
+    }
+
+    // A referenced entry is refused by the server with 409. That message is shown
+    // as-is rather than a generic failure: it states how many costumes block the
+    // delete, which is the whole point of refusing rather than orphaning.
+    async function deleteReference(kind, id, name) {
+      const ok = await confirmAction({
+        title: 'Delete "' + name + '"?',
+        message: 'If any costume still uses it the server will refuse and tell you how many. '
+          + 'Nothing is deleted until then.',
+        confirmLabel: 'Delete entry'
+      });
+      if (!ok) return;
+      try {
+        await api(referenceEndpoint(kind) + '/' + encodeURIComponent(id), { method: 'DELETE' });
+        showToast('Deleted "' + name + '".', 'success');
+        await loadCostumes();
+        if (kind === 'brands') await loadBrands(); else await loadFandoms();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    function deleteBrand(id) {
+      const brand = state.brands.find(b => clean(b.id) === id);
+      return deleteReference('brands', id, brand ? clean(brand.name) : id);
+    }
+
+    function deleteFandom(id) {
+      const fandom = state.fandoms.find(f => clean(f.id) === id);
+      return deleteReference('fandoms', id, fandom ? clean(fandom.name) : id);
     }
 
     // ==========================================================================
@@ -2039,29 +3056,169 @@
       document.getElementById('tab-costumes').style.display = tab === 'costumes' ? 'block' : 'none';
       document.getElementById('tab-props').style.display = tab === 'props' ? 'block' : 'none';
       document.getElementById('tab-lenses').style.display = tab === 'lenses' ? 'block' : 'none';
+      document.getElementById('tab-lists').style.display = tab === 'lists' ? 'block' : 'none';
       document.getElementById('tab-security').style.display = tab === 'security' ? 'block' : 'none';
-      document.getElementById('filter-bar').style.display = tab === 'security' ? 'none' : 'flex';
+      // The filter bar only describes costumes/props/lenses, so it is hidden on
+      // the two non-inventory tabs.
+      document.getElementById('filter-bar').style.display =
+        (tab === 'security' || tab === 'lists') ? 'none' : 'flex';
 
       syncFilterControls();
       filterItems();
     }
 
     function populateCostumeSelects() {
-      const select = document.getElementById('prop-costume-select');
+      // The add-prop form and the edit-prop form each get their own <select>,
+      // but they are filled from the same list, so the builder is shared.
+      ['prop-costume-select', 'edit-prop-costume'].forEach(selectId => {
+        const select = document.getElementById(selectId);
+        if (!select) return;
+        const previous = select.value;
+        select.innerHTML = '';                     // never interpolate into innerHTML
+        const blank = document.createElement('option');
+        blank.value = '';
+        blank.textContent = '-- Standalone (no costume) --';
+        select.appendChild(blank);
+        state.costumes.forEach(c => {
+          const option = document.createElement('option');
+          option.value = clean(c.id);
+          option.textContent = clean(c.character) + ' (' + clean(c.fandom) + ')';
+          select.appendChild(option);
+        });
+        // A stored costumeId that is not in the list (deleted elsewhere) is kept
+        // as a one-off option so re-saving the prop does not silently unlink it.
+        if (previous && !state.costumes.some(c => clean(c.id) === previous)) {
+          const orphan = document.createElement('option');
+          orphan.value = previous;
+          orphan.textContent = previous + ' (not in list)';
+          select.appendChild(orphan);
+        }
+        select.value = previous || '';
+      });
+    }
+
+    /**
+     * Show / hide the free-text box next to a prop category or condition select
+     * when the CUSTOM_PROP_VALUE sentinel is chosen. Both columns are free text
+     * on the server, so a stored value outside the common list is pre-filled into
+     * the box and the sentinel is pre-selected — opening and saving the modal
+     * without touching anything is a no-op.
+     */
+    function syncPropCustom(selectId, otherId) {
+      const select = document.getElementById(selectId);
+      const other = document.getElementById(otherId);
+      if (!select || !other) return;
+      other.style.display = select.value === CUSTOM_PROP_VALUE ? 'block' : 'none';
+    }
+
+    /**
+     * Build a prop category/condition <select> from the common values, a blank
+     * "not set" option, the CUSTOM_PROP_VALUE escape hatch, and (when the stored
+     * value is not one of them) a one-off option so a bespoke value survives a
+     * no-op save. Options are built with createElement/textContent.
+     *
+     * @param {string} selectId
+     * @param {string[]} options
+     * @param {string} stored  the value currently in the database
+     * @param {boolean} blank  true when an empty "not set" option is wanted
+     */
+    function buildPropSelect(selectId, options, stored, blank) {
+      const select = document.getElementById(selectId);
       if (!select) return;
-      const previous = select.value;
-      select.innerHTML = '';                       // never interpolate into innerHTML
-      const blank = document.createElement('option');
-      blank.value = '';
-      blank.textContent = '-- Select a costume --';
-      select.appendChild(blank);
-      state.costumes.forEach(c => {
+      const value = clean(stored);
+
+      select.innerHTML = '';
+      if (blank) {
+        const none = document.createElement('option');
+        none.value = '';
+        none.textContent = '-- Not set --';
+        select.appendChild(none);
+      }
+      options.forEach(text => {
         const option = document.createElement('option');
-        option.value = clean(c.id);
-        option.textContent = clean(c.character) + ' (' + clean(c.fandom) + ')';
+        option.value = text;
+        option.textContent = text;
         select.appendChild(option);
       });
-      if (previous) select.value = previous;
+      const other = document.createElement('option');
+      other.value = CUSTOM_PROP_VALUE;
+      other.textContent = 'Other (keep / type a custom one)…';
+      select.appendChild(other);
+
+      const known = value === ''
+        || options.indexOf(value) !== -1
+        || value === CUSTOM_PROP_VALUE;
+      if (!known) {
+        const legacy = document.createElement('option');
+        legacy.value = value;
+        legacy.textContent = value + ' (custom)';
+        select.insertBefore(legacy, other);
+      }
+      select.value = value || (blank ? '' : options[0]);
+    }
+
+    // ==========================================================================
+    // SIZE SELECT
+    // ==========================================================================
+    /**
+     * Build a size <select> from COSTUME_SIZE_OPTIONS plus the "Other / custom"
+     * escape hatch. Options are created with createElement/textContent — no
+     * value is ever interpolated into an HTML string.
+     */
+    function buildSizeSelect(selectId, selectedValue) {
+      const select = document.getElementById(selectId);
+      if (!select) return;
+      const previous = selectedValue !== undefined
+        ? selectedValue
+        : select.value;
+
+      select.innerHTML = '';
+      const blank = document.createElement('option');
+      blank.value = '';
+      blank.textContent = '-- Not set --';
+      select.appendChild(blank);
+
+      COSTUME_SIZE_OPTIONS.forEach(size => {
+        const option = document.createElement('option');
+        option.value = size;
+        option.textContent = size;
+        select.appendChild(option);
+      });
+
+      const custom = document.createElement('option');
+      custom.value = CUSTOM_SIZE_VALUE;
+      custom.textContent = 'Other / custom…';
+      select.appendChild(custom);
+
+      // A stored value outside the enum (a legacy bespoke size) is offered as a
+      // one-off option so re-saving the costume does not silently rewrite it.
+      const known = previous === ''
+        || COSTUME_SIZE_OPTIONS.indexOf(previous) !== -1
+        || previous === CUSTOM_SIZE_VALUE;
+      if (!known) {
+        const legacy = document.createElement('option');
+        legacy.value = previous;
+        legacy.textContent = previous + ' (custom)';
+        select.insertBefore(legacy, custom);
+      }
+      select.value = previous || '';
+    }
+
+    /** Show or hide the custom-size text box to match the select's value. */
+    function syncSizeSelect(selectId, otherId) {
+      const select = document.getElementById(selectId);
+      const other = document.getElementById(otherId);
+      if (!select || !other) return;
+      other.style.display = select.value === CUSTOM_SIZE_VALUE ? 'block' : 'none';
+    }
+
+    function resetSizeSelect(selectId, otherId) {
+      const other = document.getElementById(otherId);
+      if (other) {
+        other.value = '';
+        other.style.display = 'none';
+      }
+      buildSizeSelect(selectId, '');
     }
 
     // ==========================================================================
@@ -2129,6 +3286,38 @@
     }
 
     // ==========================================================================
+    // PRICE HELPERS
+    // ============================================================================
+    /**
+     * Inline rule for the buyPrice box. Deliberately a plain non-negative
+     * decimal: no thousands separator, no currency symbol, no exponent, because
+     * every one of those is rejected by normalizePrice() on the server and a
+     * round-trip that 400s is worse than an inline message. Mirrored from
+     * normalizePrice() in src/routes/costumes.js via BUY_PRICE_PATTERN.
+     *
+     * @param {string} value the trimmed field value ('' means "not given")
+     * @returns {string} the error message, or '' when valid
+     */
+    function validateBuyPrice(value) {
+      if (!value) return '';
+      if (!BUY_PRICE_PATTERN.test(value)) {
+        return 'Enter a number with no commas or currency symbol, e.g. 1250000 or 1250000.50';
+      }
+      if (!Number.isFinite(Number(value))) return 'That is not a usable number.';
+      return '';
+    }
+
+    /**
+     * Render a stored REAL column back into an editable text box. Values arrive
+     * as strings over the pipe transport; a non-numeric or NULL value yields '',
+     * so the form shows "not set" rather than the literal "NULL".
+     */
+    function plainNumber(value) {
+      const n = toNumber(value);
+      return n === null ? '' : String(n);
+    }
+
+    // ==========================================================================
     // CREATE HANDLERS
     // ==========================================================================
     async function handleCreateCostume(e) {
@@ -2137,7 +3326,19 @@
 
       const valid = validateForm(form, [
         { name: 'character', required: true, maxLength: 120 },
-        { name: 'fandom', required: true, maxLength: 120 },
+        {
+          name: 'fandom',
+          required: true,
+          custom: value => (value === MANAGE_LISTS_VALUE
+            ? 'Pick a fandom from the list, or add one under Reference Lists.'
+            : '')
+        },
+        {
+          name: 'brand',
+          custom: value => (value === MANAGE_LISTS_VALUE ? 'Pick a brand from the list.' : '')
+        },
+        { name: 'sizeOther', maxLength: 40 },
+        { name: 'buyPrice', custom: validateBuyPrice },
         { name: 'referenceUrl', type: 'url' },
         { name: 'notes', maxLength: 2000 }
       ]);
@@ -2146,12 +3347,27 @@
         return;
       }
 
+      // The select sentinels are stripped here: MANAGE_LISTS_VALUE is a UI
+      // affordance and never a real brand/fandom, and CUSTOM_SIZE_VALUE means
+      // the real value lives in the `sizeOther` box.
       const data = Object.fromEntries(new FormData(form));
+      if (data.brand === MANAGE_LISTS_VALUE) data.brand = '';
+      if (data.size === CUSTOM_SIZE_VALUE) {
+        delete data.size;
+        if (!data.sizeOther) data.sizeOther = '';
+      } else {
+        delete data.sizeOther;
+      }
+      // A blank price box means "no price given" on create, which the server
+      // stores as NULL. Stripped so the key is not sent as an empty string.
+      if (!data.buyPrice) delete data.buyPrice;
+
       try {
         await api('/api/costumes', { method: 'POST', body: JSON.stringify(data) });
         showToast('Costume added successfully!', 'success');
         closeModal('modal-add-costume');
         form.reset();
+        resetSizeSelect('add-costume-size', 'add-costume-size-other');
         await loadCostumes();
         updateMetrics();
         populateCostumeSelects();
@@ -2164,10 +3380,11 @@
       e.preventDefault();
       const form = e.target;
 
-      // POST /api/props rejects a prop with no costumeId (src/routes/props.js:106),
-      // so a linked costume is mandatory in the UI as well.
+      // "Prop".costumeId is nullable (init_db.sql: ON DELETE SET NULL) and
+      // POST /api/props treats an empty value as "standalone"
+      // (src/routes/props.js:118-123), so a linked costume is OPTIONAL here too.
       const valid = validateForm(form, [
-        { name: 'costumeId', required: true },
+        { name: 'costumeId' },
         { name: 'name', required: true, maxLength: 120 },
         { name: 'location', maxLength: 160 },
         { name: 'notes', maxLength: 2000 }
@@ -2219,6 +3436,366 @@
         updateMetrics();
       } catch (err) {
         showToast('Could not register lens: ' + err.message, 'error');
+      }
+    }
+
+    // ==========================================================================
+    // EDIT COSTUME
+    // ==========================================================================
+    // The four status options mirror COSTUME_STATUSES in src/routes/costumes.js;
+    // the four checkboxes mirror the isFullset / doneCostest / doneEvent /
+    // donePhotoSession columns. All of them, plus `notes`, are in the PUT whitelist.
+    function openEditCostume(id) {
+      const costume = state.costumes.find(c => c.id === id);
+      if (!costume) {
+        showToast('That costume is no longer loaded — refresh and try again.', 'error');
+        return;
+      }
+
+      state.editingCostumeId = clean(costume.id);
+      const dialog = document.getElementById('modal-edit-costume');
+      const form = dialog.querySelector('form');
+      clearFormErrors(form);
+
+      // Subtitle via textContent, never innerHTML.
+      document.getElementById('edit-costume-subtitle').textContent =
+        (clean(costume.character) || 'Unnamed') + ' — ' + (clean(costume.fandom) || 'unknown fandom');
+
+      // A status stored outside the enum falls back to the default so the
+      // select can never submit a value the backend would reject with 400.
+      const status = clean(costume.status).toUpperCase();
+      form.querySelector('[name="status"]').value =
+        COSTUME_STATUS_OPTIONS.indexOf(status) !== -1 ? status : 'IN_POSSESSION';
+
+      // Brand / fandom / size are editable here too, from the managed lists.
+      // state.editingCostumeId is set above, so populateBrandSelects() /
+      // populateFandomSelects() resolve the current values for this costume.
+      populateBrandSelects();
+      populateFandomSelects();
+
+      // A stored size that is in the enum selects the matching option; anything
+      // else is offered as a one-off "custom" option and the free-text box is
+      // pre-filled, so opening + saving without touching anything is a no-op.
+      const storedSize = clean(costume.size);
+      const inEnum = COSTUME_SIZE_OPTIONS.indexOf(storedSize.toUpperCase()) !== -1;
+      buildSizeSelect('edit-costume-size', inEnum ? storedSize.toUpperCase() : (storedSize || ''));
+      const otherBox = document.getElementById('edit-costume-size-other');
+      if (otherBox) {
+        otherBox.value = inEnum ? '' : storedSize;
+        otherBox.style.display = (!inEnum && storedSize) ? 'block' : 'none';
+      }
+
+      form.querySelector('[name="isFullset"]').checked = toBool(costume.isFullset);
+      form.querySelector('[name="doneCostest"]').checked = toBool(costume.doneCostest);
+      form.querySelector('[name="doneEvent"]').checked = toBool(costume.doneEvent);
+      form.querySelector('[name="donePhotoSession"]').checked = toBool(costume.donePhotoSession);
+      form.querySelector('[name="notes"]').value = clean(costume.notes);
+      // buyPrice is a REAL column that reaches the client as a string over the
+      // pipe transport. A stored 1250.5 must not be shown as "1250.50000" nor
+      // silently dropped, so it is formatted plainly when finite.
+      form.querySelector('[name="buyPrice"]').value = plainNumber(costume.buyPrice);
+
+      dialog.showModal();
+    }
+
+    async function handleEditCostume(e) {
+      e.preventDefault();
+      const form = e.target;
+      const id = state.editingCostumeId;
+      if (!id) {
+        closeModal('modal-edit-costume');
+        return;
+      }
+
+      const valid = validateForm(form, [
+        {
+          name: 'status',
+          custom: value => (COSTUME_STATUS_OPTIONS.indexOf(value) === -1 ? 'Choose a valid status.' : '')
+        },
+        {
+          name: 'fandom',
+          required: true,
+          custom: value => (value === MANAGE_LISTS_VALUE
+            ? 'Pick a fandom from the list, or add one under Reference Lists.'
+            : '')
+        },
+        {
+          name: 'brand',
+          custom: value => (value === MANAGE_LISTS_VALUE ? 'Pick a brand from the list.' : '')
+        },
+        { name: 'sizeOther', maxLength: 40 },
+        { name: 'buyPrice', custom: validateBuyPrice },
+        { name: 'notes', maxLength: 2000 }
+      ]);
+      if (!valid) {
+        showToast('Please fix the highlighted fields.', 'error');
+        return;
+      }
+
+      const payload = {
+        status: form.querySelector('[name="status"]').value,
+        isFullset: form.querySelector('[name="isFullset"]').checked,
+        doneCostest: form.querySelector('[name="doneCostest"]').checked,
+        doneEvent: form.querySelector('[name="doneEvent"]').checked,
+        donePhotoSession: form.querySelector('[name="donePhotoSession"]').checked,
+        notes: form.querySelector('[name="notes"]').value.trim()
+      };
+
+      // A BLANK price box must leave the stored price alone, not clear it and not
+      // write 0: the key is simply omitted, and the server treats an absent
+      // buyPrice as "do not touch the column". To actually change a price the
+      // user types a new one.
+      const buyPrice = form.querySelector('[name="buyPrice"]').value.trim();
+      if (buyPrice) payload.buyPrice = buyPrice;
+
+      // Sentinels are stripped exactly as in handleCreateCostume(). The brand /
+      // fandom selects are only included when they carry a real value, so an
+      // untouched optional brand does not blank a stored one.
+      const brand = form.querySelector('[name="brand"]').value;
+      const fandom = form.querySelector('[name="fandom"]').value;
+      if (brand !== MANAGE_LISTS_VALUE && brand !== '') payload.brand = brand;
+      if (fandom !== MANAGE_LISTS_VALUE) payload.fandom = fandom;
+
+      const size = form.querySelector('[name="size"]').value;
+      if (size === CUSTOM_SIZE_VALUE) {
+        delete payload.size;
+        payload.sizeOther = form.querySelector('[name="sizeOther"]').value.trim();
+      } else if (size !== '') {
+        payload.size = size;
+        delete payload.sizeOther;
+      }
+
+      try {
+        await api('/api/costumes/' + encodeURIComponent(id), {
+          method: 'PUT',
+          body: JSON.stringify(payload)
+        });
+        state.editingCostumeId = null;
+        showToast('Costume updated.', 'success');
+        closeModal('modal-edit-costume');
+        await loadCostumes();
+        updateMetrics();
+        populateCostumeSelects();
+      } catch (err) {
+        showToast('Could not update costume: ' + err.message, 'error');
+      }
+    }
+
+    // ==========================================================================
+    // EDIT PROP
+    // ==========================================================================
+    // The category / condition option lists here mirror the <select>s in
+    // #modal-add-prop. "Prop".category and .condition are free text on the
+    // server (POST accepts any string), so a stored value outside the list is
+    // offered as a one-off option and the free-text box is pre-filled, which
+    // makes opening + saving without touching anything a no-op.
+    const PROP_CATEGORY_OPTIONS = ['Weapon', 'Armor', 'Headpiece', 'Wig', 'Accessory', 'Shoes'];
+    const PROP_CONDITION_OPTIONS = ['Mint', 'Good', 'Minor Wear', 'Needs Repair'];
+
+    function openEditProp(id) {
+      const prop = state.props.find(p => clean(p.id) === clean(id));
+      if (!prop) {
+        showToast('That prop is no longer loaded — refresh and try again.', 'error');
+        return;
+      }
+
+      state.editingPropId = clean(prop.id);
+      const dialog = document.getElementById('modal-edit-prop');
+      const form = dialog.querySelector('form');
+      clearFormErrors(form);
+
+      // Subtitle via textContent, never innerHTML.
+      document.getElementById('edit-prop-subtitle').textContent =
+        (clean(prop.name) || 'Unnamed') + (clean(prop.costumeName) ? ' — linked to ' + clean(prop.costumeName) : ' — standalone');
+
+      // state.editingPropId is set above, so the <select> is rebuilt from the
+      // current costume list and the current link is re-selected.
+      populateCostumeSelects();
+      form.querySelector('[name="costumeId"]').value = clean(prop.costumeId);
+      form.querySelector('[name="name"]').value = clean(prop.name);
+      form.querySelector('[name="location"]').value = clean(prop.location);
+      form.querySelector('[name="notes"]').value = clean(prop.notes);
+
+      buildPropSelect('edit-prop-category', PROP_CATEGORY_OPTIONS, clean(prop.category), false);
+      buildPropSelect('edit-prop-condition', PROP_CONDITION_OPTIONS, clean(prop.condition), true);
+      const categoryBox = document.getElementById('edit-prop-category-other');
+      const conditionBox = document.getElementById('edit-prop-condition-other');
+      const categorySelect = document.getElementById('edit-prop-category');
+      const conditionSelect = document.getElementById('edit-prop-condition');
+      // A stored value outside the option lists is a real value, not the
+      // sentinel, so it goes in the free-text box and the box stays visible.
+      categoryBox.value = PROP_CATEGORY_OPTIONS.indexOf(clean(prop.category)) === -1 ? clean(prop.category) : '';
+      conditionBox.value = PROP_CONDITION_OPTIONS.indexOf(clean(prop.condition)) === -1 ? clean(prop.condition) : '';
+      syncPropCustom('edit-prop-category', 'edit-prop-category-other');
+      syncPropCustom('edit-prop-condition', 'edit-prop-condition-other');
+      if (categorySelect && categoryBox.value && categorySelect.value !== CUSTOM_PROP_VALUE) {
+        categorySelect.value = CUSTOM_PROP_VALUE;
+        categoryBox.style.display = 'block';
+      }
+      if (conditionSelect && conditionBox.value && conditionSelect.value !== CUSTOM_PROP_VALUE) {
+        conditionSelect.value = CUSTOM_PROP_VALUE;
+        conditionBox.style.display = 'block';
+      }
+
+      dialog.showModal();
+    }
+
+    async function handleEditProp(e) {
+      e.preventDefault();
+      const form = e.target;
+      const id = state.editingPropId;
+      if (!id) {
+        closeModal('modal-edit-prop');
+        return;
+      }
+
+      // Category is a required column on POST, so it is required here too. The
+      // check has to consider the free-text box, because a bespoke value lives
+      // there rather than in the <select>.
+      const categoryOther = form.querySelector('[name="categoryOther"]').value.trim();
+      const valid = validateForm(form, [
+        { name: 'name', required: true, maxLength: 120 },
+        {
+          name: 'category',
+          custom: value => (value === CUSTOM_PROP_VALUE || value === ''
+            ? (categoryOther ? '' : 'Choose a category.')
+            : '')
+        },
+        { name: 'categoryOther', maxLength: 120 },
+        { name: 'location', maxLength: 160 },
+        { name: 'conditionOther', maxLength: 120 },
+        { name: 'notes', maxLength: 2000 }
+      ]);
+      if (!valid) {
+        showToast('Please fix the highlighted fields.', 'error');
+        return;
+      }
+
+      // The CUSTOM_PROP_VALUE sentinel is a UI affordance; the real value is in
+      // the paired free-text box. An empty box means "leave the column alone",
+      // which is what the server does with an absent field.
+      const payload = {
+        costumeId: form.querySelector('[name="costumeId"]').value,
+        name: form.querySelector('[name="name"]').value.trim(),
+        location: form.querySelector('[name="location"]').value.trim(),
+        notes: form.querySelector('[name="notes"]').value.trim()
+      };
+      const category = form.querySelector('[name="category"]').value;
+      payload.category = category === CUSTOM_PROP_VALUE ? categoryOther : category;
+      const condition = form.querySelector('[name="condition"]').value;
+      if (condition === CUSTOM_PROP_VALUE) payload.condition = form.querySelector('[name="conditionOther"]').value.trim();
+      else if (condition !== '') payload.condition = condition;
+
+      try {
+        await api('/api/props/' + encodeURIComponent(id), {
+          method: 'PUT',
+          body: JSON.stringify(payload)
+        });
+        state.editingPropId = null;
+        showToast('Prop updated.', 'success');
+        closeModal('modal-edit-prop');
+        await loadProps();
+      } catch (err) {
+        showToast('Could not update prop: ' + err.message, 'error');
+      }
+    }
+
+    // ==========================================================================
+    // EDIT LENS
+    // ==========================================================================
+    // NOTE THE ABSENT `status` FIELD. A lens's status is derived server-side
+    // (checkExpiryStatus from expiryDate, and PATCH /:id/open from the new
+    // openedDate) and then overridden again client-side by lensDisplayStatus().
+    // A hand-typed value would be silently reverted by the next recomputation,
+    // so the form shows it read-only and PUT never sends it. The endpoint keeps
+    // its LENS_STATUSES allowlist for scripted clients.
+    //
+    // Dates arrive as an ISO string or a bare YYYY-MM-DD. The <input type="date">
+    // only accepts the latter, so a stored timestamp is truncated to its date
+    // part rather than being refused by the browser.
+    function dateInputValue(value) {
+      const raw = clean(value);
+      return raw ? raw.split('T')[0] : '';
+    }
+
+    function openEditLens(id) {
+      const lens = state.lenses.find(l => clean(l.id) === clean(id));
+      if (!lens) {
+        showToast('That lens is no longer loaded — refresh and try again.', 'error');
+        return;
+      }
+
+      state.editingLensId = clean(lens.id);
+      const dialog = document.getElementById('modal-edit-lens');
+      const form = dialog.querySelector('form');
+      clearFormErrors(form);
+
+      document.getElementById('edit-lens-subtitle').textContent =
+        (clean(lens.character) || 'Unnamed') + ' — ' + (clean(lens.color) || 'no colour');
+      document.getElementById('edit-lens-status').textContent =
+        lensDisplayStatus(lens).replace(/_/g, ' ');
+
+      form.querySelector('[name="character"]').value = clean(lens.character);
+      form.querySelector('[name="color"]').value = clean(lens.color);
+      form.querySelector('[name="brand"]').value = clean(lens.brand);
+      form.querySelector('[name="prescription"]').value = clean(lens.prescription);
+      form.querySelector('[name="purchaseDate"]').value = dateInputValue(lens.purchaseDate);
+      form.querySelector('[name="expiryDate"]').value = dateInputValue(lens.expiryDate);
+      form.querySelector('[name="notes"]').value = clean(lens.notes);
+
+      dialog.showModal();
+    }
+
+    async function handleEditLens(e) {
+      e.preventDefault();
+      const form = e.target;
+      const id = state.editingLensId;
+      if (!id) {
+        closeModal('modal-edit-lens');
+        return;
+      }
+
+      const valid = validateForm(form, [
+        { name: 'character', required: true, maxLength: 120 },
+        { name: 'color', required: true, maxLength: 80 },
+        { name: 'brand', maxLength: 120 },
+        {
+          name: 'prescription',
+          maxLength: 40,
+          custom: value => (!value || /^-?\d+(\.\d+)?$/.test(value) ? '' : 'Use a number, e.g. -1.50')
+        },
+        { name: 'purchaseDate', type: 'date' },
+        { name: 'expiryDate', required: true, type: 'date' },
+        { name: 'notes', maxLength: 2000 }
+      ]);
+      if (!valid) {
+        showToast('Please fix the highlighted fields.', 'error');
+        return;
+      }
+
+      // `status` is deliberately NOT part of this payload — see the note above.
+      const payload = {
+        character: form.querySelector('[name="character"]').value.trim(),
+        color: form.querySelector('[name="color"]').value.trim(),
+        brand: form.querySelector('[name="brand"]').value.trim(),
+        prescription: form.querySelector('[name="prescription"]').value.trim(),
+        purchaseDate: form.querySelector('[name="purchaseDate"]').value,
+        expiryDate: form.querySelector('[name="expiryDate"]').value,
+        notes: form.querySelector('[name="notes"]').value.trim()
+      };
+
+      try {
+        await api('/api/lenses/' + encodeURIComponent(id), {
+          method: 'PUT',
+          body: JSON.stringify(payload)
+        });
+        state.editingLensId = null;
+        showToast('Contact lens updated.', 'success');
+        closeModal('modal-edit-lens');
+        await loadLenses();
+        updateMetrics();
+      } catch (err) {
+        showToast('Could not update lens: ' + err.message, 'error');
       }
     }
 
@@ -2335,9 +3912,11 @@
         if (existing.indexOf(url) === -1) state.imageUrlsCache[costumeId] = existing.concat([url]);
         await loadCostumes();
 
-        // ...then try to persist it. NOTE: the current backend
-        // (src/routes/costumes.js:150-180) does NOT persist `imageUrls`, so the
-        // result is reported honestly instead of pretending the save worked.
+        // ...then persist it. `imageUrls` IS in the PUT /api/costumes/:id
+        // whitelist (normalizeImageUrls in src/routes/costumes.js), so the
+        // re-read below genuinely verifies the write. The warning branch is
+        // kept for the case where the request succeeded but the list did not
+        // stick — it no longer claims the endpoint ignores the field.
         try {
           const merged = costumeImages({ id: costumeId, imageUrls: JSON.stringify([url]) });
           await api('/api/costumes/' + encodeURIComponent(costumeId), {
@@ -2348,7 +3927,7 @@
           const refreshed = state.costumes.find(c => c.id === costumeId) || {};
           const persisted = parseImageUrls(refreshed.imageUrls);
           if (persisted.indexOf(url) === -1) {
-            showToast('Image uploaded, but the server did not store it (PUT /api/costumes/:id ignores imageUrls) — it will only show for this session.', 'warning');
+            showToast('Image uploaded, but the server did not store it — it will only show for this session.', 'warning');
           } else {
             showToast('Image uploaded and saved.', 'success');
           }

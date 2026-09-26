@@ -288,7 +288,9 @@ const state = {
   costumeId: null,
   propId: null,
   lensId: null,
-  fixtureLensId: null
+  fixtureLensId: null,
+  brandId: null,
+  fandomId: null
 };
 
 const PASSWORD = 'Phase5Password!2026';
@@ -1134,7 +1136,46 @@ async function testDataContracts() {
     `status=${anonUploadRes.status}`
   );
 
-  section('3.9 /api/version manifest only advertises routes that exist');
+  section('3.9 Brand / Fandom reference lists');
+  // Fixtures are deliberately NOT attached to any costume, so a DELETE of one
+  // is allowed (200) rather than refused as in-use (409). Both are non-404,
+  // but 200 keeps the manifest probe below unambiguous.
+  const newBrand = await request({
+    method: 'POST', path: '/api/brands', token,
+    body: { name: `Phase5 Brand ${Date.now()}`, storeUrl: 'https://example.test/phase5' }
+  });
+  logTest('POST /api/brands creates a fixture brand', newBrand.status === 201 && !!newBrand.body.id,
+    `status=${newBrand.status} id=${newBrand.body.id}`);
+  state.brandId = newBrand.body.id;
+
+  const newFandom = await request({
+    method: 'POST', path: '/api/fandoms', token,
+    body: { name: `Phase5 Fandom ${Date.now()}` }
+  });
+  logTest('POST /api/fandoms creates a fixture fandom', newFandom.status === 201 && !!newFandom.body.id,
+    `status=${newFandom.status} id=${newFandom.body.id}`);
+  state.fandomId = newFandom.body.id;
+
+  const brandLists = await request({ method: 'GET', path: '/api/brands', token });
+  const fandomLists = await request({ method: 'GET', path: '/api/fandoms', token });
+  logTest(
+    'GET /api/brands and /api/fandoms return the migrated lists with a costume usage count',
+    brandLists.status === 200 && Array.isArray(brandLists.body.brands)
+      && brandLists.body.brands.length > 0
+      && brandLists.body.brands.every(b => 'costumeCount' in b && 'name' in b)
+      && fandomLists.status === 200 && Array.isArray(fandomLists.body.fandoms)
+      && fandomLists.body.fandoms.length > 0
+      && fandomLists.body.fandoms.every(f => 'costumeCount' in f && 'name' in f),
+    `brands=${brandLists.body.brands && brandLists.body.brands.length} fandoms=${fandomLists.body.fandoms && fandomLists.body.fandoms.length}`
+  );
+
+  const badStore = await request({
+    method: 'POST', path: '/api/brands', token, body: { name: `Phase5 Bad ${Date.now()}`, storeUrl: 'javascript:alert(1)' }
+  });
+  logTest('POST /api/brands with a non-http(s) storeUrl → 400', badStore.status === 400,
+    `status=${badStore.status} error=${JSON.stringify(badStore.body.error)}`);
+
+  section('3.10 /api/version manifest only advertises routes that exist');
   const version = await request({ method: 'GET', path: '/api/version' });
   logTest('GET /api/version → 200 with an endpoint list',
     version.status === 200 && Array.isArray(version.body.endpoints) && version.body.endpoints.length > 0,
@@ -1147,11 +1188,22 @@ async function testDataContracts() {
   const ids = {
     '/api/costumes': state.costumeId,
     '/api/props': state.propId,
-    '/api/lenses': state.lensId
+    '/api/lenses': state.lensId,
+    '/api/brands': state.brandId,
+    '/api/fandoms': state.fandomId
   };
   // PATCH /api/lenses/:id/open reads the lens first and 404s before doing
   // anything, so it needs a real id for the same reason GET-by-id does.
-  const idSemanticEntries = { 'PATCH /api/lenses/:id/open': state.fixtureLensId };
+  // The Brand/Fandom PUT + DELETE routes read their row first for the same
+  // reason: a 404 there means "no such brand", NOT "no such route", so probing
+  // them with a synthetic id would be testing the wrong thing.
+  const idSemanticEntries = {
+    'PATCH /api/lenses/:id/open': state.fixtureLensId,
+    'PUT /api/brands/:id': state.brandId,
+    'DELETE /api/brands/:id': state.brandId,
+    'PUT /api/fandoms/:id': state.fandomId,
+    'DELETE /api/fandoms/:id': state.fandomId
+  };
   const notFound = [];
   for (const entry of version.body.endpoints || []) {
     const [method, rawPath] = entry.split(' ');

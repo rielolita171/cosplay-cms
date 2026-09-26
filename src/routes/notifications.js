@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { spawn } = require('child_process');
 const { requireApiKey } = require('../middleware/apiKeyAuth');
+const { numberParam } = require('../services/sqlSafety');
 
 // Execute SQL query helper
 async function queryDb(sql) {
@@ -39,10 +40,28 @@ function parseSqlResult(output, columns) {
 // ============================================================================
 router.get('/notifications/contact-lenses/expiring', requireApiKey, async (req, res) => {
   try {
-    const thresholdDays = parseInt(req.query.days || '14', 10);
-    
-    if (isNaN(thresholdDays) || thresholdDays < 0) {
-      return res.status(400).json({ error: 'Parameter "days" must be a positive number' });
+    // `days` is validated as a strict non-negative integer.
+    //
+    // The old `parseInt(..., 10)` accepted anything with a numeric prefix and
+    // silently truncated it: '14; DROP TABLE' became 14 and '7abc' became 7, so
+    // a malformed or hostile value was accepted and answered as though it were
+    // legitimate. numberParam() requires the WHOLE value to be a finite integer.
+    //
+    // (This value is not interpolated into SQL — the threshold is applied in JS
+    // below — so this was never an injection, but it is the same class of
+    // "unvalidated numeric input" defect and is fixed on the same terms.)
+    // No upper bound is imposed: the old code only rejected negatives and NaN,
+    // so any large threshold was a valid 200 and stays one.
+    let thresholdDays;
+    try {
+      thresholdDays = numberParam(req.query.days, {
+        name: 'days', integer: true, min: 0, fallback: 14
+      });
+    } catch (validationError) {
+      return res.status(400).json({
+        error: 'Parameter "days" must be a positive number',
+        code: 'VALIDATION_ERROR'
+      });
     }
 
     // Retrieve active or unopened lenses
@@ -81,7 +100,12 @@ router.get('/notifications/contact-lenses/expiring', requireApiKey, async (req, 
       items: expiringItems
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    // The sqlite3 CLI writes its parse errors to stderr, and this route was
+    // returning error.message verbatim — which leaks table and column names of
+    // the real schema to any caller holding the API key. Log the detail, return
+    // a generic body, and use the project's standard {error, code} shape.
+    console.error('❌ notifications/contact-lenses/expiring:', error.message);
+    res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -101,7 +125,8 @@ router.get('/notifications/costumes/on-rent', requireApiKey, async (req, res) =>
       items: costumes
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('❌ notifications/costumes/on-rent:', error.message);
+    res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
   }
 });
 
