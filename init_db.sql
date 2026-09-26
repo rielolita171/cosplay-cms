@@ -2,6 +2,10 @@ CREATE TABLE IF NOT EXISTS "User" (
   id TEXT PRIMARY KEY,
   username TEXT UNIQUE NOT NULL,
   email TEXT UNIQUE NOT NULL,
+  -- Added post-initial-schema: bcrypt password hash + role.
+  -- src/services/db.js also adds these idempotently at boot for existing DBs.
+  passwordHash TEXT,
+  role TEXT DEFAULT 'user',
   oauthProvider TEXT,
   oauthId TEXT UNIQUE,
   telegramChatId TEXT UNIQUE,
@@ -64,3 +68,26 @@ CREATE TABLE IF NOT EXISTS "ContactLens" (
   createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
   updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Rotating, single-use refresh tokens (family-based reuse detection)
+CREATE TABLE IF NOT EXISTS "RefreshToken" (
+  jti TEXT PRIMARY KEY,
+  userId TEXT NOT NULL,
+  familyId TEXT NOT NULL,
+  expiresAt INTEGER NOT NULL,
+  usedAt INTEGER,
+  revokedAt INTEGER,
+  createdAt INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_RefreshToken_family" ON "RefreshToken"(familyId);
+CREATE INDEX IF NOT EXISTS "idx_RefreshToken_user" ON "RefreshToken"(userId);
+CREATE INDEX IF NOT EXISTS "idx_RefreshToken_expires" ON "RefreshToken"(expiresAt);
+
+-- Consumed single-use token ids (2FA tempToken replay protection)
+CREATE TABLE IF NOT EXISTS "ConsumedToken" (
+  jti TEXT PRIMARY KEY,
+  purpose TEXT NOT NULL,
+  expiresAt INTEGER NOT NULL,
+  consumedAt INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_ConsumedToken_expires" ON "ConsumedToken"(expiresAt);

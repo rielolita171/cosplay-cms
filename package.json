@@ -8,7 +8,8 @@
     "dev": "node --watch src/server.js",
     "test": "node scripts/test_api.js",
     "test:phase3": "node scripts/test_phase3.js",
-    "test:phase4": "node scripts/test_phase4.js"
+    "test:phase4": "node scripts/test_phase4.js",
+    "test:phase5": "node scripts/test_phase5.js"
   },
   "keywords": [],
   "author": "",

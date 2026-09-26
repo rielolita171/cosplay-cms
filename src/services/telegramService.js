@@ -1,10 +1,34 @@
 const https = require('https');
+const fs = require('fs');
+
+// ---------------------------------------------------------------------------
+// TEST-ONLY TRANSPORT STUB (default OFF — Phase 5 automated suite)
+//
+// Telegram is not configured in this environment, so the real send path can
+// never report success and the whole 2FA happy path would be untestable. When
+// BOTH of these hold:
+//   NODE_ENV === 'test'  AND  CMS_TEST_TELEGRAM_CAPTURE=<path>
+// the OTP is appended to that file (JSON lines) and reported as a simulated
+// success, WITHOUT any network call. Inert in dev/production.
+// ---------------------------------------------------------------------------
+const TEST_CAPTURE_FILE = process.env.NODE_ENV === 'test'
+  ? (process.env.CMS_TEST_TELEGRAM_CAPTURE || null)
+  : null;
 
 /**
  * Send message to Telegram Chat ID
  * Supports simulated delivery in development when bot token is unconfigured or offline.
  */
 async function sendTelegramMessage(chatId, text) {
+  if (TEST_CAPTURE_FILE) {
+    try {
+      fs.appendFileSync(TEST_CAPTURE_FILE, JSON.stringify({ chatId, text }) + '\n');
+    } catch (error) {
+      console.warn('⚠️  test capture write failed:', error.message);
+    }
+    return { success: true, simulated: true };
+  }
+
   const token = process.env.TELEGRAM_BOT_TOKEN;
 
   // Check if token is placeholder or unset

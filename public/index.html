@@ -362,7 +362,14 @@
       box-shadow: 0 10px 15px -3px rgba(0,0,0,0.4);
       display: none;
       z-index: 9999;
+      max-width: min(420px, 80vw);
+      font-size: 0.9rem;
     }
+
+    .toast.toast-success { border-left-color: var(--success); background: #123029; }
+    .toast.toast-error   { border-left-color: var(--danger);  background: #3a1a1d; }
+    .toast.toast-info    { border-left-color: var(--info);    background: #16233d; }
+    .toast.toast-warning { border-left-color: var(--warning); background: #3a2e12; }
 
     /* Auth Screens */
     .screen {
@@ -735,15 +742,17 @@
 
       <!-- Tab Navigation -->
       <div class="tabs-nav">
-        <button class="tab-btn active" onclick="switchTab('costumes')">👘 Costumes</button>
-        <button class="tab-btn" onclick="switchTab('props')">⚔️ Props & Accessories</button>
-        <button class="tab-btn" onclick="switchTab('lenses')">👁️ Contact Lenses</button>
-        <button class="tab-btn" onclick="switchTab('security')">🔐 Security & 2FA</button>
+        <button class="tab-btn active" data-tab="costumes" onclick="switchTab('costumes')">👘 Costumes</button>
+        <button class="tab-btn" data-tab="props" onclick="switchTab('props')">⚔️ Props & Accessories</button>
+        <button class="tab-btn" data-tab="lenses" onclick="switchTab('lenses')">👁️ Contact Lenses</button>
+        <button class="tab-btn" data-tab="security" onclick="switchTab('security')">🔐 Security & 2FA</button>
       </div>
 
       <!-- Filter Bar -->
       <div class="filter-bar" id="filter-bar">
         <input type="text" class="search-input" id="search-input" placeholder="Search by character or fandom..." oninput="filterItems()">
+        <!-- Options are rebuilt per tab by syncFilterControls() so one control
+             serves costumes(status) / props(category) / lenses(status). -->
         <select class="select-input" id="status-filter" onchange="filterItems()">
           <option value="">All Statuses</option>
           <option value="IN_POSSESSION">In Possession</option>
@@ -751,6 +760,8 @@
           <option value="TO_BE_SOLD">To Be Sold</option>
           <option value="WISHLIST">Wishlist</option>
         </select>
+        <!-- Props-only filter dimension (checklist: "filter across name/category/location") -->
+        <input type="text" class="search-input" id="location-filter" style="display: none; flex: 0 1 220px; min-width: 160px;" placeholder="Filter by storage location..." oninput="filterItems()">
       </div>
 
       <!-- Costumes Tab Content -->
@@ -785,6 +796,9 @@
               <div><strong>Telegram Chat ID:</strong> <span id="sec-telegram-id">-</span></div>
               <div><strong>Role:</strong> <span id="sec-role">-</span></div>
             </div>
+            <div id="sec-telegram-warning" style="display: none; margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: 0.8rem; background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.3); color: #fbbf24;">
+              ⚠️ This server has no Telegram credentials configured, so 2FA codes cannot be delivered and 2FA cannot be enabled. Enable 2FA will fail with a 503.
+            </div>
           </div>
 
           <div class="form-group">
@@ -801,9 +815,12 @@
               If you ever lose access to your Telegram device, use an emergency recovery key at <code>/api/auth/break-glass</code> to bypass 2FA.
             </p>
             <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-              <button class="btn btn-secondary" onclick="generateNewBreakGlassKey()">Regenerate Emergency Key</button>
-              <button class="btn btn-primary" onclick="showBreakGlassKey()">Show Current Key</button>
+              <button class="btn btn-primary" onclick="generateNewBreakGlassKey()">Generate / Rotate Emergency Key</button>
             </div>
+            <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 8px;">
+              The backend stores only a hash of the key, so an existing key can never be displayed again.
+              "Generate" always issues a <strong>brand new</strong> key and immediately invalidates the previous one.
+            </p>
             <div id="break-glass-display" style="margin-top: 12px; display: none;">
               <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 6px;">Your Emergency Key (save securely!):</label>
               <div style="display: flex; gap: 8px; align-items: center;">
@@ -863,9 +880,9 @@
     <h3 style="margin-bottom: 16px;">Add Prop / Accessory</h3>
     <form onsubmit="handleCreateProp(event)" novalidate>
       <div class="form-group">
-        <label>Linked Costume</label>
+        <label>Linked Costume *</label>
         <select class="form-control" name="costumeId" id="prop-costume-select">
-          <option value="">Standalone Prop</option>
+          <option value="">-- Select a costume --</option>
         </select>
         <div class="field-error" data-error-for="costumeId"></div>
       </div>
@@ -890,6 +907,10 @@
         <label>Storage Location</label>
         <input type="text" class="form-control" name="location" placeholder="e.g. Box A - Hall Closet">
         <div class="field-error" data-error-for="location"></div>
+      </div>
+      <div class="form-group">
+        <label>Notes</label>
+        <textarea class="form-control" name="notes" rows="2" placeholder="Fragile; stored flat..."></textarea>
       </div>
       <div class="form-group">
         <label>Condition</label>
@@ -943,8 +964,9 @@
     </form>
   </dialog>
 
-  <!-- Hidden file input used by the costume card upload button -->
-  <input type="file" id="costume-image-input" class="upload-input-hidden" accept="image/*">
+  <!-- Hidden file input used by the costume card upload button (opened by
+       bindGridEvents -> data-action="upload"; accept + size are re-checked in JS) -->
+  <input type="file" id="costume-image-input" class="upload-input-hidden" accept="image/png,image/jpeg,image/webp,image/gif">
 
   <!-- Confirm Dialog (replaces native confirm() for destructive actions) -->
   <dialog id="modal-confirm">
@@ -960,9 +982,38 @@
   <div class="toast" id="toast"></div>
 
   <script>
-    let state = {
+    'use strict';
+
+    // ==========================================================================
+    // CONSTANTS
+    // ==========================================================================
+    const TOKEN_KEY = 'cms_token';
+    const REFRESH_TOKEN_KEY = 'cms_refresh_token';
+    const USER_KEY = 'cms_user';
+    const TEMP_TOKEN_KEY = 'cms_temp_token';
+
+    // Server cap is 10MB (src/middleware/imageUpload.js:38-40). We use a slightly
+    // lower client limit so the user gets an instant, friendly message instead of
+    // a server-side failure from the image processor.
+    const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+
+    // DOCUMENTED DEVIATION: the backend flips EXPIRING_SOON at <= 30 days
+    // (src/routes/lenses.js:47-55) but the phase-5 spec asks for a 14-day badge
+    // (phase-5-setup/CHECKLIST.md:47,78). The badge/countdown is therefore
+    // computed CLIENT-SIDE with 14 days; the server status is still honoured for
+    // UNOPENED / EXPIRED / DISPOSED.
+    const LENS_WARN_DAYS = 14;
+
+    // Accepted upload MIME types (must match the multer fileFilter).
+    const ALLOWED_UPLOAD_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+
+    const MEDIA_PLACEHOLDER_HTML =
+      '<div class="media-placeholder"><span class="media-icon">🖼️</span><span>No image</span></div>';
+
+    const state = {
       // Auth
       token: null,
+      refreshToken: null,
       user: null,
       currentScreen: 'login',
       tempToken: null,
@@ -975,37 +1026,323 @@
       // UI
       currentTab: 'costumes',
       filterQuery: '',
-      filterStatus: 'all',
+      filterStatus: '',
+      filterLocation: '',
       loading: false,
       error: null,
 
-      // Client-side caches (see notes on imageUrls persistence in uploadCostumeImage)
+      // Uploads / transient UI state
       imageUrlsCache: {},
       imageUploadTargetId: null,
-      toastTimer: null
+      toastTimer: null,
+      refreshPromise: null,   // single-flight guard for the silent token refresh
+      confirmResolver: null
     };
 
-    // Authenticated API helper
-    // NOTE: when body is FormData we must NOT set Content-Type so the browser
-    // can append the multipart boundary itself.
-    async function api(path, options = {}) {
-      const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
-      const headers = {
-        ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
-        ...(state.token ? { 'Authorization': `Bearer ${state.token}` } : {}),
-        ...(options.headers || {})
-      };
-      const res = await fetch(path, { ...options, headers });
-      if (res.status === 401) {
-        // Token expired or invalid → force logout
-        logout();
-        return null;
-      }
-      return res.json();
+    // ==========================================================================
+    // SMALL UTILITIES
+    // ==========================================================================
+
+    /**
+     * Escape EVERY value that comes out of the database before it is placed into
+     * an innerHTML template. This is the XSS barrier: character / fandom / notes /
+     * brand / etc. are attacker-controllable via the create endpoints.
+     */
+    function escapeHtml(value) {
+      if (value === null || value === undefined) return '';
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
     }
 
+    /**
+     * Only http(s) and same-origin absolute paths are allowed in href/src.
+     * This blocks `javascript:`, `data:`, `vbscript:` and protocol-relative
+     * `//evil.tld` payloads coming from referenceUrl / imageUrls.
+     */
+    function safeUrl(value) {
+      if (value === null || value === undefined) return null;
+      const raw = String(value).trim();
+      if (!raw) return null;
+      const lower = raw.toLowerCase();
+      if (lower === 'null' || lower === 'undefined') return null;
+      if (/^https?:\/\//i.test(raw)) return raw;
+      if (raw.charAt(0) === '/' && raw.charAt(1) !== '/') return raw;
+      return null;
+    }
+
+    // SQLite INTEGER columns arrive as the STRING '0' / '1' over the CLI pipe and
+    // the string '0' is truthy in JS, so every boolean must be coerced explicitly.
+    function toBool(value) {
+      return value === 1 || value === '1' || value === true || value === 'true';
+    }
+
+    // SQLite NULLs come back as the literal string "NULL" through this stack.
+    function clean(value) {
+      if (value === null || value === undefined) return '';
+      const s = String(value);
+      if (s === '' || s.toUpperCase() === 'NULL') return '';
+      return s;
+    }
+
+    function idAttr(value) {
+      return escapeHtml(clean(value));
+    }
+
+    function toNumber(value) {
+      const n = Number(clean(value));
+      return Number.isFinite(n) ? n : null;
+    }
+
+    // Days from now until dateValue; null when there is no usable date.
+    function daysUntil(dateValue) {
+      const raw = clean(dateValue);
+      if (!raw) return null;
+      const target = new Date(raw.length === 10 ? raw + 'T00:00:00' : raw);
+      if (isNaN(target.getTime())) return null;
+      return Math.ceil((target.getTime() - Date.now()) / 86400000);
+    }
+
+    function formatMoney(value) {
+      const n = toNumber(value);
+      return n === null ? '' : 'Rp ' + n.toLocaleString('id-ID');
+    }
+
+    // imageUrls may be a JSON array, a delimited list, or a single URL.
+    function parseImageUrls(value) {
+      const raw = clean(value);
+      if (!raw || raw === '[]') return [];
+      let list = [];
+      if (raw.charAt(0) === '[') {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) list = parsed;
+          else list = [raw];
+        } catch (_) {
+          list = raw.split(',');
+        }
+      } else {
+        list = raw.split(',');
+      }
+      return list.map(safeUrl).filter(Boolean);
+    }
+
+    // ==========================================================================
+    // API LAYER
+    // ==========================================================================
+    class ApiError extends Error {
+      constructor(message, status, code, payload) {
+        super(message);
+        this.name = 'ApiError';
+        this.status = status || 0;
+        this.code = code || null;
+        this.payload = payload || null;
+      }
+    }
+
+    // The server may answer with HTML (express error page) or with an empty body.
+    async function readJsonSafely(res) {
+      let text = '';
+      try {
+        text = await res.text();
+      } catch (_) {
+        return null;
+      }
+      if (!text) return null;
+      try {
+        return JSON.parse(text);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function storeSession(payload) {
+      if (!payload) return;
+      const accessToken = payload.token || payload.accessToken || null;
+      if (accessToken) {
+        state.token = accessToken;
+        sessionStorage.setItem(TOKEN_KEY, accessToken);
+      }
+      if (payload.refreshToken) {
+        state.refreshToken = payload.refreshToken;
+        sessionStorage.setItem(REFRESH_TOKEN_KEY, payload.refreshToken);
+      }
+      if (payload.user) {
+        state.user = payload.user;
+        sessionStorage.setItem(USER_KEY, JSON.stringify(payload.user));
+      }
+    }
+
+    function clearSession() {
+      state.token = null;
+      state.refreshToken = null;
+      state.user = null;
+      state.tempToken = null;
+      state.costumes = [];
+      state.props = [];
+      state.lenses = [];
+      state.imageUrlsCache = {};
+      sessionStorage.removeItem(TOKEN_KEY);
+      sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+      sessionStorage.removeItem(USER_KEY);
+      sessionStorage.removeItem(TEMP_TOKEN_KEY);
+    }
+
+    // Local, state-only teardown (no network). Used when a refresh has failed.
+    function forceLogout(message) {
+      clearSession();
+      showLogin();
+      if (message) showToast(message, 'error');
+    }
+
+    /**
+     * One in-flight refresh shared by every caller: a burst of 401s (the three
+     * parallel list loaders can all expire at once) results in exactly ONE
+     * POST /api/auth/refresh, not a stampede. Returns true when a fresh access
+     * token is available.
+     */
+    function tryRefreshToken() {
+      if (state.refreshPromise) return state.refreshPromise;
+
+      const refreshToken = state.refreshToken || sessionStorage.getItem(REFRESH_TOKEN_KEY);
+      if (!refreshToken) return Promise.resolve(false);
+
+      state.refreshPromise = (async () => {
+        try {
+          // auth:false so a 401 here can NEVER recurse into another refresh.
+          const data = await api('/api/auth/refresh', {
+            method: 'POST',
+            auth: false,
+            body: JSON.stringify({ refreshToken: refreshToken })
+          });
+          storeSession(data);
+          return true;
+        } catch (err) {
+          console.warn('Silent token refresh failed:', err.code || err.message);
+          // Invalid / expired / REUSED refresh token -> the family is dead.
+          sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+          state.refreshToken = null;
+          return false;
+        } finally {
+          state.refreshPromise = null;
+        }
+      })();
+
+      return state.refreshPromise;
+    }
+
+    /**
+     * The single network chokepoint. EVERY request in the app goes through here.
+     *   - injects Authorization: Bearer <accessToken> (unless auth:false)
+     *   - omits Content-Type for FormData so the browser sets the boundary
+     *   - THROWS ApiError on !res.ok, surfacing the server 'error' field
+     *   - on 401 (authenticated requests only) attempts ONE silent refresh and
+     *     then retries the original request exactly once; if the refresh fails it
+     *     logs out instead of looping.
+     */
+    async function api(path, options) {
+      const opts = options || {};
+      const auth = opts.auth !== false;
+      const isRetry = opts.__retry === true;
+      const isFormData = typeof FormData !== 'undefined' && opts.body instanceof FormData;
+
+      const headers = Object.assign(
+        {},
+        isFormData ? {} : { 'Content-Type': 'application/json' },
+        opts.headers || {}
+      );
+      if (auth && state.token) headers['Authorization'] = 'Bearer ' + state.token;
+
+      const init = Object.assign({}, opts);
+      delete init.auth;
+      delete init.__retry;
+
+      let res;
+      try {
+        res = await fetch(path, Object.assign({}, init, { headers: headers }));
+      } catch (_networkError) {
+        throw new ApiError('Network error — could not reach the server. Is it running?', 0, 'NETWORK_ERROR');
+      }
+
+      const data = await readJsonSafely(res);
+
+      if (res.status === 401 && auth && !isRetry) {
+        const refreshed = await tryRefreshToken();
+        if (refreshed) {
+          // Exactly one retry of the ORIGINAL request.
+          return api(path, Object.assign({}, opts, { __retry: true }));
+        }
+        forceLogout('Your session expired. Please sign in again.');
+        throw new ApiError(
+          (data && data.error) || 'Session expired. Please sign in again.',
+          401,
+          (data && data.code) || 'SESSION_EXPIRED'
+        );
+      }
+
+      if (!res.ok) {
+        throw new ApiError(
+          (data && data.error) || ('Request failed (HTTP ' + res.status + ')'),
+          res.status,
+          (data && data.code) || null,
+          data
+        );
+      }
+
+      return data === null ? {} : data;
+    }
+
+    // ==========================================================================
+    // TOASTS
+    // ==========================================================================
+    function showToast(message, type) {
+      const toast = document.getElementById('toast');
+      const kind = type || 'info';
+      toast.textContent = message;
+      toast.className = 'toast toast-' + kind;
+      toast.style.display = 'block';
+      if (state.toastTimer) clearTimeout(state.toastTimer);
+      state.toastTimer = setTimeout(() => {
+        toast.style.display = 'none';
+      }, 4500);
+    }
+
+    // ==========================================================================
+    // CONFIRM DIALOG (replaces every native confirm — exactly one mechanism)
+    // ==========================================================================
+    function confirmAction(options) {
+      const cfg = options || {};
+      const dialog = document.getElementById('modal-confirm');
+      document.getElementById('confirm-title').textContent = cfg.title || 'Are you sure?';
+      document.getElementById('confirm-message').textContent = cfg.message || 'This action cannot be undone.';
+      document.getElementById('confirm-accept').textContent = cfg.confirmLabel || 'Delete';
+
+      if (!dialog || typeof dialog.showModal !== 'function') {
+        return Promise.resolve(window.confirm(cfg.message || 'Are you sure?'));
+      }
+      return new Promise(resolve => {
+        state.confirmResolver = resolve;
+        dialog.showModal();
+      });
+    }
+
+    function settleConfirm(value) {
+      const dialog = document.getElementById('modal-confirm');
+      if (dialog && dialog.open) dialog.close();
+      const resolver = state.confirmResolver;
+      state.confirmResolver = null;
+      if (resolver) resolver(!!value);
+    }
+
+    // ==========================================================================
+    // SCREENS
+    // ==========================================================================
     function showLoading(show) {
-      document.getElementById('loading-overlay').classList.toggle('active', show);
+      const overlay = document.getElementById('loading-overlay');
+      if (overlay) overlay.classList.toggle('active', !!show);
     }
 
     function showScreen(screen) {
@@ -1015,16 +1352,52 @@
       document.getElementById('screen-dashboard').style.display = screen === 'dashboard' ? 'block' : 'none';
     }
 
+    function showAuthError(elementId, err) {
+      const box = document.getElementById(elementId);
+      box.textContent = describeAuthError(err);
+      box.style.display = 'block';
+    }
+
+    // The 503 TELEGRAM_NOT_CONFIGURED case is an environment problem, not a
+    // credential problem, so it gets an actionable explanation instead of the
+    // raw error string.
+    function describeAuthError(err) {
+      if (err && err.code === 'TELEGRAM_NOT_CONFIGURED') {
+        return '2FA is enabled for this account, but this server has no Telegram bot credentials '
+          + 'configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID are placeholders), so the code cannot '
+          + 'be delivered. Ask an administrator to configure Telegram, or use an emergency break-glass '
+          + 'recovery key.';
+      }
+      if (err && err.code === 'INVALID_CREDENTIALS') {
+        return 'Invalid username or password.';
+      }
+      if (err && err.code === 'INVALID_2FA') {
+        return 'Invalid or expired code. Request a new one and try again.';
+      }
+      if (err && err.status === 0) {
+        return 'Cannot reach the CMS server. Check that it is running, then try again.';
+      }
+      if (err && err.status === 429) {
+        return 'Too many attempts. Wait a few minutes before trying again.';
+      }
+      return (err && err.message) || 'Something went wrong.';
+    }
+
     function showLogin() {
       showScreen('login');
       document.getElementById('login-form').reset();
       document.getElementById('login-error').style.display = 'none';
     }
 
-    function showOtp() {
+    function showOtp(info) {
       showScreen('otp');
       document.getElementById('otp-form').reset();
       document.getElementById('otp-error').style.display = 'none';
+      const delivery = info && info.delivery;
+      document.querySelector('#screen-otp .auth-header p').textContent =
+        delivery === 'simulated'
+          ? 'A 6-digit code was generated for this server (Telegram is not configured, so it was not actually delivered).'
+          : 'A 6-digit code has been sent to your Telegram.';
       document.getElementById('otp-code').focus();
     }
 
@@ -1032,41 +1405,39 @@
       showScreen('dashboard');
     }
 
+    // ==========================================================================
+    // AUTH FLOW
+    // ==========================================================================
     async function handleLogin(e) {
       e.preventDefault();
-      const formData = new FormData(e.target);
-      const data = Object.fromEntries(formData);
+      const form = e.target;
+      const username = form.username.value.trim();
+      const password = form.password.value;
 
       document.getElementById('login-error').style.display = 'none';
       showLoading(true);
 
       try {
-        const res = await fetch('/api/auth/login', {
+        const result = await api('/api/auth/login', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data)
+          auth: false,
+          body: JSON.stringify({ username: username, password: password })
         });
-        const result = await res.json();
 
-        if (!res.ok) {
-          throw new Error(result.error || 'Login failed');
-        }
-
-        if (result.require2FA) {
-          // 2FA required - store tempToken and show OTP screen
+        if (result && result.require2FA) {
+          // 2FA path: this response carries NO access token, only a tempToken.
           state.tempToken = result.tempToken;
-          showOtp();
+          sessionStorage.setItem(TEMP_TOKEN_KEY, result.tempToken);
+          showOtp(result);
+          showToast('Verification code requested.', 'info');
         } else {
-          // Direct login - store JWT and show dashboard
-          state.token = result.token;
-          state.user = result.user;
-          sessionStorage.setItem('cms_token', result.token);
+          storeSession(result);
           await loadAllData();
           showDashboard();
+          showToast('Welcome back, ' + ((result.user && result.user.username) || 'user') + '!', 'success');
         }
       } catch (err) {
-        document.getElementById('login-error').textContent = err.message;
-        document.getElementById('login-error').style.display = 'block';
+        showAuthError('login-error', err);
       } finally {
         showLoading(false);
       }
@@ -1074,146 +1445,100 @@
 
     async function handleOtpVerify(e) {
       e.preventDefault();
-      const formData = new FormData(e.target);
-      const otp = formData.get('otp');
+      const otp = String(new FormData(e.target).get('otp') || '').trim();
+      const tempToken = state.tempToken || sessionStorage.getItem(TEMP_TOKEN_KEY);
+
+      if (!tempToken) {
+        showAuthError('otp-error', new ApiError('Your sign-in attempt expired. Please sign in again.', 401, 'NO_TEMP_TOKEN'));
+        return;
+      }
 
       document.getElementById('otp-error').style.display = 'none';
       showLoading(true);
 
       try {
-        const res = await fetch('/api/auth/2fa/verify', {
+        const result = await api('/api/auth/2fa/verify', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tempToken: state.tempToken, otp })
+          auth: false,
+          body: JSON.stringify({ tempToken: tempToken, otp: otp })
         });
-        const result = await res.json();
 
-        if (!res.ok) {
-          throw new Error(result.error || 'Invalid OTP');
-        }
-
-        // Success - store JWT and show dashboard
-        state.token = result.token;
-        state.user = result.user;
         state.tempToken = null;
-        sessionStorage.setItem('cms_token', result.token);
+        sessionStorage.removeItem(TEMP_TOKEN_KEY);
+        storeSession(result);
         await loadAllData();
         showDashboard();
+        showToast('Signed in.', 'success');
       } catch (err) {
-        document.getElementById('otp-error').textContent = err.message;
-        document.getElementById('otp-error').style.display = 'block';
+        showAuthError('otp-error', err);
       } finally {
         showLoading(false);
       }
     }
 
     async function resendOtp() {
+      const tempToken = state.tempToken || sessionStorage.getItem(TEMP_TOKEN_KEY);
+      if (!tempToken) {
+        showToast('Your sign-in attempt expired. Please sign in again.', 'error');
+        return;
+      }
       showLoading(true);
       try {
-        const res = await fetch('/api/auth/2fa/resend', {
+        const result = await api('/api/auth/2fa/resend', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tempToken: state.tempToken })
+          auth: false,
+          body: JSON.stringify({ tempToken: tempToken })
         });
-        const result = await res.json();
-        if (res.ok) {
-          showToast('New code sent to Telegram');
-        } else {
-          showToast(result.error || 'Failed to resend code');
-        }
+        showToast(result.message || 'A new code was sent.', 'success');
       } catch (err) {
-        showToast('Error resending code');
+        showToast(describeAuthError(err), 'error');
       } finally {
         showLoading(false);
       }
     }
 
-    function logout() {
-      state.token = null;
-      state.user = null;
-      state.tempToken = null;
-      state.costumes = [];
-      state.props = [];
-      state.lenses = [];
-      sessionStorage.removeItem('cms_token');
-      showLogin();
-    }
+    async function logout() {
+      const ok = await confirmAction({
+        title: 'Sign out?',
+        message: 'You will need your password (and a Telegram code, if 2FA is on) to sign back in.',
+        confirmLabel: 'Sign out'
+      });
+      if (!ok) return;
 
-    async function loadAllData() {
-      await Promise.all([
-        loadCostumes(),
-        loadProps(),
-        loadLenses()
-      ]);
-      updateMetrics();
-      populateCostumeSelects();
-      updateSecurityTab();
-    }
-
-    async function init() {
-      bindGridEvents();
-
-      // Check for existing session
-      const savedToken = sessionStorage.getItem('cms_token');
-      if (savedToken) {
-        state.token = savedToken;
-        showLoading(true);
-        try {
-          // Validate token by fetching profile
-          const res = await fetch('/api/auth/profile', {
-            headers: { 'Authorization': `Bearer ${savedToken}` }
+      const refreshToken = state.refreshToken || sessionStorage.getItem(REFRESH_TOKEN_KEY);
+      try {
+        if (state.token) {
+          await api('/api/auth/logout', {
+            method: 'POST',
+            body: JSON.stringify({ refreshToken: refreshToken })
           });
-          if (res.ok) {
-            const data = await res.json();
-            state.user = data.user;
-            await loadAllData();
-            showDashboard();
-          } else {
-            // Token invalid
-            sessionStorage.removeItem('cms_token');
-            state.token = null;
-            showLogin();
-          }
-        } catch (err) {
-          sessionStorage.removeItem('cms_token');
-          state.token = null;
-          showLogin();
-        } finally {
-          showLoading(false);
         }
-      } else {
+      } catch (err) {
+        console.warn('Server-side logout failed (ignored):', err.message);
+      } finally {
+        clearSession();
         showLogin();
+        showToast('Signed out.', 'info');
       }
     }
 
     // ==========================================================================
-    // RENDER HELPERS (skeletons, empty states, safe element building)
+    // LOADER / RENDER HELPERS
     // ==========================================================================
-
     function makeEl(tag, className, text) {
       const node = document.createElement(tag);
       if (className) node.className = className;
-      if (text !== undefined && text !== null && text !== '') {
-        node.textContent = String(text);
-      }
+      if (text !== undefined && text !== null && text !== '') node.textContent = String(text);
       return node;
     }
 
-    // Only allow safe URL schemes for href/src values coming from the database
-    function safeUrl(value) {
-      if (!value) return null;
-      const raw = String(value).trim();
-      if (/^https?:\/\//i.test(raw) || /^\/uploads\//.test(raw)) return raw;
-      return null;
-    }
-
-    // 6 shimmer cards while a grid is loading
-    function renderSkeletons(gridId, count = 6) {
+    function renderSkeletons(gridId, count) {
       const grid = document.getElementById(gridId);
       if (!grid) return;
       grid.innerHTML = '';
       const frag = document.createDocumentFragment();
-      for (let i = 0; i < count; i++) {
+      const total = count || 6;
+      for (let i = 0; i < total; i++) {
         const card = makeEl('div', 'item-card');
         card.appendChild(makeEl('div', 'skeleton skeleton-media'));
         card.appendChild(makeEl('div', 'skeleton skeleton-title'));
@@ -1225,15 +1550,16 @@
       grid.appendChild(frag);
     }
 
-    function createEmptyState({ icon, title, text, ctaLabel, ctaAction }) {
+    function createEmptyState(config) {
+      const cfg = config || {};
       const wrap = makeEl('div', 'empty-state');
-      wrap.appendChild(makeEl('div', 'empty-state-icon', icon));
-      wrap.appendChild(makeEl('div', 'empty-state-title', title));
-      wrap.appendChild(makeEl('div', 'empty-state-text', text));
-      if (ctaLabel && typeof ctaAction === 'function') {
-        const btn = makeEl('button', 'btn btn-primary', ctaLabel);
+      wrap.appendChild(makeEl('div', 'empty-state-icon', cfg.icon || '📦'));
+      wrap.appendChild(makeEl('div', 'empty-state-title', cfg.title || 'Nothing here'));
+      wrap.appendChild(makeEl('div', 'empty-state-text', cfg.text || ''));
+      if (cfg.ctaLabel && typeof cfg.ctaAction === 'function') {
+        const btn = makeEl('button', 'btn btn-primary', cfg.ctaLabel);
         btn.type = 'button';
-        btn.addEventListener('click', ctaAction);
+        btn.addEventListener('click', cfg.ctaAction);
         wrap.appendChild(btn);
       }
       return wrap;
@@ -1247,32 +1573,76 @@
     }
 
     // ==========================================================================
-    // LOADERS (skeleton -> content | empty state | error state)
+    // DELEGATED GRID EVENTS
+    // Bound once at boot. The previous code called bindGridEvents() from init()
+    // but the function did not exist anywhere in the file, so every page load
+    // threw ReferenceError and the session-restore branch never ran.
     // ==========================================================================
+    function bindGridEvents() {
+      ['costumes-grid', 'props-grid', 'lenses-grid'].forEach(gridId => {
+        const grid = document.getElementById(gridId);
+        if (!grid) return;
 
+        grid.addEventListener('click', event => {
+          const trigger = event.target.closest('[data-action]');
+          if (!trigger || !grid.contains(trigger)) return;
+          const action = trigger.dataset.action;
+          const id = trigger.dataset.id;
+
+          if (action === 'upload') openImagePicker(id);
+          else if (action === 'delete') {
+            if (gridId === 'costumes-grid') deleteCostume(id);
+            else if (gridId === 'props-grid') deleteProp(id);
+            else deleteLens(id);
+          } else if (action === 'open-lens') markLensOpened(id);
+        });
+
+        // Broken thumbnail -> graceful placeholder (capture phase, non-bubbling).
+        grid.addEventListener('error', event => {
+          const img = event.target;
+          if (!img || img.tagName !== 'IMG') return;
+          const holder = img.parentElement;
+          if (holder) holder.innerHTML = MEDIA_PLACEHOLDER_HTML;
+        }, true);
+      });
+
+      document.getElementById('confirm-cancel').addEventListener('click', () => settleConfirm(false));
+      document.getElementById('confirm-accept').addEventListener('click', () => settleConfirm(true));
+      const dialog = document.getElementById('modal-confirm');
+      if (dialog) {
+        // Esc must resolve the pending promise too.
+        dialog.addEventListener('cancel', event => { event.preventDefault(); settleConfirm(false); });
+      }
+
+      const fileInput = document.getElementById('costume-image-input');
+      if (fileInput) fileInput.addEventListener('change', onImagePicked);
+
+      // Clear an inline field error as soon as the user edits that field.
+      document.querySelectorAll('.field-error').forEach(holder => {
+        const input = document.querySelector('[name="' + holder.dataset.errorFor + '"]');
+        if (!input) return;
+        input.addEventListener('input', () => setFieldError(holder, input, ''));
+      });
+    }
+
+    // ==========================================================================
+    // DATA LOADERS
+    // ==========================================================================
     async function loadCostumes() {
       renderSkeletons('costumes-grid');
       try {
         const data = await api('/api/costumes');
-        if (data === null) return; // 401 -> logged out
-        if (data.error) {
-          renderEmptyState('costumes-grid', {
-            icon: '⚠️',
-            title: 'Could not load costumes',
-            text: data.error,
-            ctaLabel: 'Retry',
-            ctaAction: loadCostumes
-          });
-          return;
-        }
-        state.costumes = data.costumes || [];
+        state.costumes = Array.isArray(data.costumes) ? data.costumes : [];
+        state.costumes.forEach(seedImageCache);
         renderCostumes(getFilteredCostumes());
-      } catch (e) {
-        console.error('Failed to load costumes:', e);
+      } catch (err) {
+        if (err.status === 401) return;   // forceLogout already ran
         renderEmptyState('costumes-grid', {
           icon: '⚠️',
           title: 'Could not load costumes',
-          text: 'The server did not respond. Check that it is running, then retry.'
+          text: err.message,
+          ctaLabel: 'Retry',
+          ctaAction: loadCostumes
         });
       }
     }
@@ -1281,25 +1651,16 @@
       renderSkeletons('props-grid');
       try {
         const data = await api('/api/props');
-        if (data === null) return;
-        if (data.error) {
-          renderEmptyState('props-grid', {
-            icon: '⚠️',
-            title: 'Could not load props',
-            text: data.error,
-            ctaLabel: 'Retry',
-            ctaAction: loadProps
-          });
-          return;
-        }
-        state.props = data.props || [];
+        state.props = Array.isArray(data.props) ? data.props : [];
         renderProps(getFilteredProps());
-      } catch (e) {
-        console.error('Failed to load props:', e);
+      } catch (err) {
+        if (err.status === 401) return;
         renderEmptyState('props-grid', {
           icon: '⚠️',
           title: 'Could not load props',
-          text: 'The server did not respond. Check that it is running, then retry.'
+          text: err.message,
+          ctaLabel: 'Retry',
+          ctaAction: loadProps
         });
       }
     }
@@ -1308,390 +1669,849 @@
       renderSkeletons('lenses-grid');
       try {
         const data = await api('/api/lenses');
-        if (data === null) return;
-        if (data.error) {
-          renderEmptyState('lenses-grid', {
-            icon: '⚠️',
-            title: 'Could not load lenses',
-            text: data.error,
-            ctaLabel: 'Retry',
-            ctaAction: loadLenses
-          });
-          return;
-        }
-        state.lenses = data.lenses || [];
+        state.lenses = Array.isArray(data.lenses) ? data.lenses : [];
         renderLenses(getFilteredLenses());
-      } catch (e) {
-        console.error('Failed to load lenses:', e);
+      } catch (err) {
+        if (err.status === 401) return;
         renderEmptyState('lenses-grid', {
           icon: '⚠️',
           title: 'Could not load lenses',
-          text: 'The server did not respond. Check that it is running, then retry.'
+          text: err.message,
+          ctaLabel: 'Retry',
+          ctaAction: loadLenses
         });
       }
     }
 
+    async function loadAllData() {
+      await Promise.all([loadCostumes(), loadProps(), loadLenses()]);
+      updateMetrics();
+      populateCostumeSelects();
+      updateSecurityTab();
+    }
+
+    // ==========================================================================
+    // METRICS
+    // ==========================================================================
     function calculateCompletion(item) {
-      const fullset = item.isFullset === '1' || item.isFullset === 1 || item.isFullset === true ? 1 : 0;
-      const costest = item.doneCostest === '1' || item.doneCostest === 1 || item.doneCostest === true ? 1 : 0;
-      const event = item.doneEvent === '1' || item.doneEvent === 1 || item.doneEvent === true ? 1 : 0;
-      const photo = item.donePhotoSession === '1' || item.donePhotoSession === 1 || item.donePhotoSession === true ? 1 : 0;
+      const fullset = toBool(item.isFullset) ? 1 : 0;
+      const costest = toBool(item.doneCostest) ? 1 : 0;
+      const event = toBool(item.doneEvent) ? 1 : 0;
+      const photo = toBool(item.donePhotoSession) ? 1 : 0;
       return Math.round(((fullset + costest + event + photo) / 4) * 100);
     }
 
     function updateMetrics() {
       document.getElementById('metric-total-costumes').textContent = state.costumes.length;
-      
-      const fullsets = state.costumes.filter(c => c.isFullset === '1' || c.isFullset === 1 || c.isFullset === true).length;
-      document.getElementById('metric-fullset-count').textContent = `${fullsets} fullset ready`;
+
+      const fullsets = state.costumes.filter(c => toBool(c.isFullset)).length;
+      document.getElementById('metric-fullset-count').textContent = fullsets + ' fullset ready';
 
       const onRent = state.costumes.filter(c => c.status === 'ON_RENT').length;
       document.getElementById('metric-rent-costumes').textContent = onRent;
 
-      const activeLenses = state.lenses.filter(l => l.status === 'ACTIVE').length;
+      const activeLenses = state.lenses.filter(l => toBool(l.isOpened) && lensDisplayStatus(l) === 'ACTIVE').length;
       document.getElementById('metric-active-lenses').textContent = activeLenses;
 
-      const expiringSoon = state.lenses.filter(l => l.status === 'EXPIRING_SOON').length;
-      document.getElementById('metric-expiring-lenses').textContent = expiringSoon;
+      // Client-side 14-day rule (see the LENS_WARN_DAYS note).
+      const expiring = state.lenses.filter(l => {
+        const days = daysUntil(l.expiryDate);
+        return days !== null && days >= 0 && days <= LENS_WARN_DAYS;
+      }).length;
+      document.getElementById('metric-expiring-lenses').textContent = expiring;
 
-      const expired = state.lenses.filter(l => l.status === 'EXPIRED').length;
-      document.getElementById('metric-expired-lenses').textContent = `${expired} expired`;
+      const expired = state.lenses.filter(l => {
+        const days = daysUntil(l.expiryDate);
+        return days !== null && days < 0;
+      }).length;
+      document.getElementById('metric-expired-lenses').textContent = expired + ' expired (warn ≤' + LENS_WARN_DAYS + 'd)';
     }
 
-    function renderCostumes(items = state.costumes) {
+    // ==========================================================================
+    // RENDERERS (every DB value escaped; every URL scheme-validated)
+    // ==========================================================================
+    function seedImageCache(costume) {
+      const urls = parseImageUrls(costume.imageUrls);
+      if (urls.length) state.imageUrlsCache[costume.id] = urls;
+    }
+
+    function costumeImages(costume) {
+      const cached = state.imageUrlsCache[costume.id] || [];
+      const stored = parseImageUrls(costume.imageUrls);
+      return stored.concat(cached.filter(url => stored.indexOf(url) === -1));
+    }
+
+    function milestoneChip(label, rawValue) {
+      const active = toBool(rawValue);
+      return '<span class="tag-chip' + (active ? ' active' : '') + '">' + (active ? '✅ ' : '') + label + '</span>';
+    }
+
+    function renderCostumes(items) {
       const grid = document.getElementById('costumes-grid');
-      if (!items.length) {
-        grid.innerHTML = '<div class="empty-state">No costumes found matching criteria.</div>';
+      if (!grid) return;
+      if (!items || !items.length) {
+        renderEmptyState('costumes-grid', {
+          icon: '👘',
+          title: 'No costumes found',
+          text: 'Nothing matches the current search and filters.'
+        });
         return;
       }
 
       grid.innerHTML = items.map(c => {
         const pct = calculateCompletion(c);
-        const statusClass = `badge-${(c.status || 'IN_POSSESSION').toLowerCase()}`;
-        return `
-          <div class="item-card">
-            <div>
-              <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:8px;">
-                <h3 style="font-size:1.15rem; font-weight:700;">${c.character}</h3>
-                <span class="badge ${statusClass}">${(c.status || 'IN_POSSESSION').replace('_', ' ')}</span>
-              </div>
-              <div style="color:var(--text-muted); font-size:0.85rem; margin-bottom:12px;">${c.fandom}</div>
-              
-              <div class="tags-group">
-                ${c.brand ? `<span class="tag-chip">🏷️ ${c.brand}</span>` : ''}
-                ${c.size ? `<span class="tag-chip">📏 ${c.size}</span>` : ''}
-                ${c.buyPrice ? `<span class="tag-chip">💰 Rp ${Number(c.buyPrice).toLocaleString()}</span>` : ''}
-              </div>
+        const status = clean(c.status).toUpperCase() || 'IN_POSSESSION';
+        const statusClass = 'badge-' + status.toLowerCase();
+        const images = costumeImages(c);
+        const thumb = images.length
+          ? '<img src="' + escapeHtml(images[0]) + '" alt="' + escapeHtml(clean(c.character) || 'Costume') + '" loading="lazy">'
+          : MEDIA_PLACEHOLDER_HTML;
+        const refUrl = safeUrl(c.referenceUrl);
+        const price = formatMoney(c.buyPrice);
+        const notes = clean(c.notes);
+        const extraImages = images.length > 1
+          ? '<span class="media-count">' + images.length + ' images</span>'
+          : '';
 
-              <div class="progress-container">
-                <div class="progress-header">
-                  <span>Milestone Progress</span>
-                  <span>${pct}%</span>
-                </div>
-                <div class="progress-bar-bg">
-                  <div class="progress-bar-fill" style="width: ${pct}%;"></div>
-                </div>
-              </div>
-
-              <div class="tags-group">
-                <span class="tag-chip ${c.isFullset ? 'active' : ''}">Fullset</span>
-                <span class="tag-chip ${c.doneCostest ? 'active' : ''}">Costest</span>
-                <span class="tag-chip ${c.doneEvent ? 'active' : ''}">Event</span>
-                <span class="tag-chip ${c.donePhotoSession ? 'active' : ''}">Photoshoot</span>
-              </div>
-            </div>
-
-            <div style="margin-top:14px; display:flex; justify-content:space-between; align-items:center;">
-              ${c.referenceUrl ? `<a href="${c.referenceUrl}" target="_blank" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 12px;">Taobao / Link ↗</a>` : '<span></span>'}
-              <button class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" onclick="deleteCostume('${c.id}')">Delete</button>
-            </div>
-          </div>
-        `;
+        return [
+          '<div class="item-card">',
+          '  <div class="item-media">',
+          thumb,
+          '    <button type="button" class="media-upload-btn" data-action="upload" data-id="' + idAttr(c.id) + '" title="Upload a photo of this costume">📷</button>',
+          extraImages,
+          '  </div>',
+          '  <div>',
+          '    <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:8px;">',
+          '      <h3 style="font-size:1.15rem; font-weight:700;">' + escapeHtml(clean(c.character) || 'Unnamed') + '</h3>',
+          '      <span class="badge ' + statusClass + '">' + escapeHtml(status.replace(/_/g, ' ')) + '</span>',
+          '    </div>',
+          '    <div style="color:var(--text-muted); font-size:0.85rem; margin-bottom:12px;">' + escapeHtml(clean(c.fandom)) + '</div>',
+          '    <div class="tags-group">',
+          clean(c.brand) ? '<span class="tag-chip">🏷️ ' + escapeHtml(clean(c.brand)) + '</span>' : '',
+          clean(c.size) ? '<span class="tag-chip">📏 ' + escapeHtml(clean(c.size)) + '</span>' : '',
+          price ? '<span class="tag-chip">💰 ' + escapeHtml(price) + '</span>' : '',
+          '    </div>',
+          '    <div class="progress-container">',
+          '      <div class="progress-header"><span>Milestone Progress</span><span>' + pct + '%</span></div>',
+          '      <div class="progress-bar-bg"><div class="progress-bar-fill" style="width: ' + pct + '%;"></div></div>',
+          '    </div>',
+          '    <div class="tags-group">',
+          milestoneChip('Fullset', c.isFullset),
+          milestoneChip('Costest', c.doneCostest),
+          milestoneChip('Event', c.doneEvent),
+          milestoneChip('Photoshoot', c.donePhotoSession),
+          '    </div>',
+          notes ? '<p style="font-size:0.82rem; color:var(--text-muted); margin-top:10px;">' + escapeHtml(notes) + '</p>' : '',
+          '  </div>',
+          '  <div class="card-actions">',
+          refUrl
+            ? '<a href="' + escapeHtml(refUrl) + '" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 12px;">Reference ↗</a>'
+            : '<span></span>',
+          '    <button type="button" class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" data-action="delete" data-id="' + idAttr(c.id) + '">Delete</button>',
+          '  </div>',
+          '</div>'
+        ].join('');
       }).join('');
     }
 
-    function renderProps(items = state.props) {
+    function renderProps(items) {
       const grid = document.getElementById('props-grid');
-      if (!items.length) {
-        grid.innerHTML = '<div class="empty-state">No props or accessories recorded yet.</div>';
+      if (!grid) return;
+      if (!items || !items.length) {
+        renderEmptyState('props-grid', {
+          icon: '⚔️',
+          title: 'No props or accessories recorded',
+          text: 'Props you add will appear here.'
+        });
         return;
       }
 
-      grid.innerHTML = items.map(p => `
-        <div class="item-card">
-          <div>
-            <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:8px;">
-              <h3 style="font-size:1.15rem; font-weight:700;">${p.name}</h3>
-              <span class="badge" style="background:rgba(139,92,246,0.15); color:#c084fc;">${p.category || 'Accessory'}</span>
-            </div>
-            
-            <div class="tags-group">
-              ${p.location ? `<span class="tag-chip">📍 ${p.location}</span>` : ''}
-              ${p.condition ? `<span class="tag-chip">✨ Condition: ${p.condition}</span>` : ''}
-            </div>
-
-            ${p.notes ? `<p style="font-size:0.85rem; color:var(--text-muted); margin-top:8px;">${p.notes}</p>` : ''}
-          </div>
-
-          <div style="margin-top:14px; text-align:right;">
-            <button class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" onclick="deleteProp('${p.id}')">Delete</button>
-          </div>
-        </div>
-      `).join('');
+      grid.innerHTML = items.map(p => {
+        const notes = clean(p.notes);
+        const costumeName = clean(p.costumeName);
+        return [
+          '<div class="item-card">',
+          '  <div>',
+          '    <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:8px;">',
+          '      <h3 style="font-size:1.15rem; font-weight:700;">' + escapeHtml(clean(p.name) || 'Unnamed') + '</h3>',
+          '      <span class="badge" style="background:rgba(139,92,246,0.15); color:#c084fc;">' + escapeHtml(clean(p.category) || 'Accessory') + '</span>',
+          '    </div>',
+          '    <div class="tags-group">',
+          clean(p.location) ? '<span class="tag-chip">📍 ' + escapeHtml(clean(p.location)) + '</span>' : '',
+          clean(p.condition) ? '<span class="tag-chip">✨ ' + escapeHtml(clean(p.condition)) + '</span>' : '',
+          costumeName ? '<span class="tag-chip active">👘 ' + escapeHtml(costumeName) + '</span>' : '',
+          '    </div>',
+          notes ? '<p style="font-size:0.85rem; color:var(--text-muted); margin-top:8px;">' + escapeHtml(notes) + '</p>' : '',
+          '  </div>',
+          '  <div class="card-actions">',
+          '    <span></span>',
+          '    <button type="button" class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" data-action="delete" data-id="' + idAttr(p.id) + '">Delete</button>',
+          '  </div>',
+          '</div>'
+        ].join('');
+      }).join('');
     }
 
-    function renderLenses(items = state.lenses) {
+    function lensDisplayStatus(lens) {
+      const server = clean(lens.status).toUpperCase();
+      const days = daysUntil(lens.expiryDate);
+      if (days !== null) {
+        if (days < 0) return 'EXPIRED';
+        if (days <= LENS_WARN_DAYS) return 'EXPIRING_SOON';
+      }
+      if (server === 'UNOPENED') return 'UNOPENED';
+      if (server === 'EXPIRED') return 'EXPIRED';
+      if (server === 'DISPOSED') return 'DISPOSED';
+      return 'ACTIVE';
+    }
+
+    function renderLenses(items) {
       const grid = document.getElementById('lenses-grid');
-      if (!items.length) {
-        grid.innerHTML = '<div class="empty-state">No contact lenses registered.</div>';
+      if (!grid) return;
+      if (!items || !items.length) {
+        renderEmptyState('lenses-grid', {
+          icon: '👁️',
+          title: 'No contact lenses registered',
+          text: 'Register a lens to track its expiry countdown.'
+        });
         return;
       }
 
       grid.innerHTML = items.map(l => {
-        const statusClass = `badge-${(l.status || 'UNOPENED').toLowerCase()}`;
-        return `
-          <div class="item-card">
-            <div>
-              <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:8px;">
-                <h3 style="font-size:1.15rem; font-weight:700;">${l.character || 'Generic'} (${l.color})</h3>
-                <span class="badge ${statusClass}">${(l.status || 'UNOPENED').replace('_', ' ')}</span>
-              </div>
+        const status = lensDisplayStatus(l);
+        const statusClass = 'badge-' + status.toLowerCase();
+        const days = daysUntil(l.expiryDate);
+        const expiryRaw = clean(l.expiryDate);
+        const expiryText = expiryRaw ? expiryRaw.split('T')[0] : 'N/A';
 
-              <div class="tags-group">
-                ${l.brand ? `<span class="tag-chip">🏷️ ${l.brand}</span>` : ''}
-                ${l.prescription ? `<span class="tag-chip">👓 Power: ${l.prescription}</span>` : ''}
-                <span class="tag-chip">📅 Exp: ${l.expiryDate ? l.expiryDate.split('T')[0] : 'N/A'}</span>
-              </div>
-            </div>
+        let countdown;
+        if (days === null) {
+          countdown = '<span class="tag-chip">📅 Exp: ' + escapeHtml(expiryText) + '</span>';
+        } else if (days < 0) {
+          countdown = '<span class="tag-chip" style="border-color:rgba(239,68,68,0.4); color:#f87171;">🔴 Expired ' + Math.abs(days) + 'd ago</span>';
+        } else if (days === 0) {
+          countdown = '<span class="tag-chip" style="border-color:rgba(239,68,68,0.4); color:#f87171;">🔴 Expires today</span>';
+        } else if (days <= LENS_WARN_DAYS) {
+          countdown = '<span class="tag-chip" style="border-color:rgba(245,158,11,0.4); color:#fbbf24;">⏳ ' + days + 'd left</span>';
+        } else {
+          countdown = '<span class="tag-chip">⏳ ' + days + 'd left</span>';
+        }
 
-            <div style="margin-top:14px; display:flex; justify-content:space-between; align-items:center;">
-              ${l.status === 'UNOPENED' ? `<button class="btn btn-primary" style="font-size:0.8rem; padding:6px 12px;" onclick="markLensOpened('${l.id}')">Open Vial</button>` : '<span></span>'}
-              <button class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" onclick="deleteLens('${l.id}')">Delete</button>
-            </div>
-          </div>
-        `;
+        const showOpenButton = clean(l.isOpened) === '0' || (!toBool(l.isOpened) && status === 'UNOPENED');
+
+        return [
+          '<div class="item-card">',
+          '  <div>',
+          '    <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:8px;">',
+          '      <h3 style="font-size:1.15rem; font-weight:700;">' + escapeHtml(clean(l.character) || 'Generic') + ' (' + escapeHtml(clean(l.color) || 'n/a') + ')</h3>',
+          '      <span class="badge ' + statusClass + '">' + escapeHtml(status.replace(/_/g, ' ')) + '</span>',
+          '    </div>',
+          '    <div class="tags-group">',
+          clean(l.brand) ? '<span class="tag-chip">🏷️ ' + escapeHtml(clean(l.brand)) + '</span>' : '',
+          clean(l.prescription) ? '<span class="tag-chip">👓 Power: ' + escapeHtml(clean(l.prescription)) + '</span>' : '',
+          '<span class="tag-chip">📅 Exp: ' + escapeHtml(expiryText) + '</span>',
+          countdown,
+          '    </div>',
+          clean(l.notes) ? '<p style="font-size:0.85rem; color:var(--text-muted); margin-top:8px;">' + escapeHtml(clean(l.notes)) + '</p>' : '',
+          '  </div>',
+          '  <div class="card-actions">',
+          showOpenButton
+            ? '<button type="button" class="btn btn-primary" style="font-size:0.8rem; padding:6px 12px;" data-action="open-lens" data-id="' + idAttr(l.id) + '">Mark as Opened</button>'
+            : '<span></span>',
+          '    <button type="button" class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" data-action="delete" data-id="' + idAttr(l.id) + '">Delete</button>',
+          '  </div>',
+          '</div>'
+        ].join('');
       }).join('');
     }
 
-    function filterItems() {
-      const q = document.getElementById('search-input').value.toLowerCase();
-      const status = document.getElementById('status-filter').value;
+    // ==========================================================================
+    // FILTERING
+    // ==========================================================================
+    const FILTER_OPTIONS = {
+      costumes: {
+        status: [['', 'All Statuses'], ['IN_POSSESSION', 'In Possession'], ['ON_RENT', 'On Rent'], ['TO_BE_SOLD', 'To Be Sold'], ['WISHLIST', 'Wishlist']],
+        placeholder: 'Search by character or fandom...',
+        showLocation: false
+      },
+      props: {
+        status: [['', 'All Categories'], ['Weapon', 'Weapon'], ['Armor', 'Armor'], ['Headpiece', 'Headpiece'], ['Wig', 'Wig'], ['Accessory', 'Accessory'], ['Shoes', 'Shoes']],
+        placeholder: 'Search props by name or category...',
+        showLocation: true
+      },
+      lenses: {
+        status: [['', 'All Statuses'], ['UNOPENED', 'Unopened'], ['ACTIVE', 'Active'], ['EXPIRING_SOON', 'Expiring Soon'], ['EXPIRED', 'Expired'], ['DISPOSED', 'Disposed']],
+        placeholder: 'Search lenses by character or color...',
+        showLocation: false
+      },
+      security: null
+    };
 
-      if (state.currentTab === 'costumes') {
-        const filtered = state.costumes.filter(c => {
-          const matchQ = (c.character && c.character.toLowerCase().includes(q)) || (c.fandom && c.fandom.toLowerCase().includes(q));
-          const matchStatus = !status || c.status === status;
-          return matchQ && matchStatus;
-        });
-        renderCostumes(filtered);
-      } else if (state.currentTab === 'props') {
-        const filtered = state.props.filter(p => p.name.toLowerCase().includes(q) || (p.category && p.category.toLowerCase().includes(q)));
-        renderProps(filtered);
-      } else if (state.currentTab === 'lenses') {
-        const filtered = state.lenses.filter(l => (l.character && l.character.toLowerCase().includes(q)) || (l.color && l.color.toLowerCase().includes(q)));
-        renderLenses(filtered);
+    function syncFilterControls() {
+      const config = FILTER_OPTIONS[state.currentTab];
+      const statusSelect = document.getElementById('status-filter');
+      const locationInput = document.getElementById('location-filter');
+      const searchInput = document.getElementById('search-input');
+
+      if (!config) {
+        statusSelect.style.display = 'none';
+        locationInput.style.display = 'none';
+        searchInput.style.display = 'none';
+        return;
       }
+
+      // Built with DOM APIs (never innerHTML) so nothing can be injected.
+      statusSelect.innerHTML = '';
+      config.status.forEach(pair => {
+        const option = document.createElement('option');
+        option.value = pair[0];
+        option.textContent = pair[1];
+        statusSelect.appendChild(option);
+      });
+      statusSelect.style.display = 'inline-block';
+      searchInput.style.display = 'block';
+      searchInput.placeholder = config.placeholder;
+      searchInput.value = '';
+      locationInput.style.display = config.showLocation ? 'block' : 'none';
+      locationInput.value = '';
+      state.filterStatus = '';
+      state.filterQuery = '';
+      state.filterLocation = '';
+    }
+
+    function filterItems() {
+      state.filterQuery = (document.getElementById('search-input').value || '').toLowerCase();
+      state.filterStatus = document.getElementById('status-filter').value || '';
+      state.filterLocation = (document.getElementById('location-filter').value || '').toLowerCase();
+
+      if (state.currentTab === 'costumes') renderCostumes(getFilteredCostumes());
+      else if (state.currentTab === 'props') renderProps(getFilteredProps());
+      else if (state.currentTab === 'lenses') renderLenses(getFilteredLenses());
+    }
+
+    function getFilteredCostumes() {
+      const q = state.filterQuery;
+      const status = state.filterStatus;
+      return state.costumes.filter(c => {
+        const matchQuery = !q
+          || clean(c.character).toLowerCase().indexOf(q) !== -1
+          || clean(c.fandom).toLowerCase().indexOf(q) !== -1
+          || clean(c.brand).toLowerCase().indexOf(q) !== -1;
+        const matchStatus = !status || c.status === status;
+        return matchQuery && matchStatus;
+      });
+    }
+
+    function getFilteredProps() {
+      const q = state.filterQuery;
+      const status = state.filterStatus;      // doubles as the category filter
+      const location = state.filterLocation;  // the missing "location" dimension
+      return state.props.filter(p => {
+        const matchQuery = !q
+          || clean(p.name).toLowerCase().indexOf(q) !== -1
+          || clean(p.category).toLowerCase().indexOf(q) !== -1
+          || clean(p.costumeName).toLowerCase().indexOf(q) !== -1;
+        const matchStatus = !status || p.category === status;
+        const matchLocation = !location || clean(p.location).toLowerCase().indexOf(location) !== -1;
+        return matchQuery && matchStatus && matchLocation;
+      });
+    }
+
+    function getFilteredLenses() {
+      const q = state.filterQuery;
+      const status = state.filterStatus;
+      return state.lenses.filter(l => {
+        const matchQuery = !q
+          || clean(l.character).toLowerCase().indexOf(q) !== -1
+          || clean(l.color).toLowerCase().indexOf(q) !== -1
+          || clean(l.brand).toLowerCase().indexOf(q) !== -1;
+        const matchStatus = !status || lensDisplayStatus(l) === status;
+        return matchQuery && matchStatus;
+      });
     }
 
     function switchTab(tab) {
       state.currentTab = tab;
-      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-      event.target.classList.add('active');
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tab);
+      });
 
       document.getElementById('tab-costumes').style.display = tab === 'costumes' ? 'block' : 'none';
       document.getElementById('tab-props').style.display = tab === 'props' ? 'block' : 'none';
       document.getElementById('tab-lenses').style.display = tab === 'lenses' ? 'block' : 'none';
       document.getElementById('tab-security').style.display = tab === 'security' ? 'block' : 'none';
-
       document.getElementById('filter-bar').style.display = tab === 'security' ? 'none' : 'flex';
+
+      syncFilterControls();
+      filterItems();
     }
 
     function populateCostumeSelects() {
       const select = document.getElementById('prop-costume-select');
-      select.innerHTML = '<option value="">Standalone Prop</option>' + 
-        state.costumes.map(c => `<option value="${c.id}">${c.character} (${c.fandom})</option>`).join('');
+      if (!select) return;
+      const previous = select.value;
+      select.innerHTML = '';                       // never interpolate into innerHTML
+      const blank = document.createElement('option');
+      blank.value = '';
+      blank.textContent = '-- Select a costume --';
+      select.appendChild(blank);
+      state.costumes.forEach(c => {
+        const option = document.createElement('option');
+        option.value = clean(c.id);
+        option.textContent = clean(c.character) + ' (' + clean(c.fandom) + ')';
+        select.appendChild(option);
+      });
+      if (previous) select.value = previous;
     }
 
+    // ==========================================================================
+    // FORM VALIDATION
+    // ==========================================================================
+    function setFieldError(holder, input, message) {
+      if (holder) {
+        holder.textContent = message || '';
+        holder.style.display = message ? 'block' : 'none';
+      }
+      if (input) input.classList.toggle('is-invalid', !!message);
+    }
+
+    function clearFormErrors(form) {
+      form.querySelectorAll('.field-error').forEach(holder => {
+        const input = form.querySelector('[name="' + holder.dataset.errorFor + '"]');
+        setFieldError(holder, input, '');
+      });
+    }
+
+    /**
+     * The forms deliberately keep `novalidate`: native constraint validation
+     * blocks submit() before our handler runs, which would make the inline
+     * `.field-error` messages unreachable. This JS layer replaces it.
+     */
+    function validateForm(form, rules) {
+      clearFormErrors(form);
+      let ok = true;
+      let firstInvalid = null;
+
+      rules.forEach(rule => {
+        const input = form.querySelector('[name="' + rule.name + '"]');
+        if (!input) return;
+        const holder = form.querySelector('[data-error-for="' + rule.name + '"]');
+        const raw = (input.value || '').trim();
+        let message = '';
+
+        if (rule.required && !raw) {
+          message = 'This field is required.';
+        } else if (raw && rule.type === 'url' && !/^https?:\/\/\S+$/i.test(raw)) {
+          message = 'Enter a full URL starting with http:// or https://';
+        } else if (raw && rule.type === 'date') {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+            message = 'Enter a valid date.';
+          } else {
+            const days = daysUntil(raw);
+            if (rule.notPast && days !== null && days < 0) message = 'That date is in the past.';
+            if (rule.notFuture && days !== null && days > 0) message = 'That date cannot be in the future.';
+          }
+        } else if (raw && rule.maxLength && raw.length > rule.maxLength) {
+          message = 'Must be ' + rule.maxLength + ' characters or fewer.';
+        } else if (raw && typeof rule.custom === 'function') {
+          message = rule.custom(raw, form) || '';
+        }
+
+        setFieldError(holder, input, message);
+        if (message) {
+          ok = false;
+          if (!firstInvalid) firstInvalid = input;
+        }
+      });
+
+      if (firstInvalid) firstInvalid.focus();
+      return ok;
+    }
+
+    // ==========================================================================
+    // CREATE HANDLERS
+    // ==========================================================================
     async function handleCreateCostume(e) {
       e.preventDefault();
-      const formData = new FormData(e.target);
-      const data = Object.fromEntries(formData);
+      const form = e.target;
 
+      const valid = validateForm(form, [
+        { name: 'character', required: true, maxLength: 120 },
+        { name: 'fandom', required: true, maxLength: 120 },
+        { name: 'referenceUrl', type: 'url' },
+        { name: 'notes', maxLength: 2000 }
+      ]);
+      if (!valid) {
+        showToast('Please fix the highlighted fields.', 'error');
+        return;
+      }
+
+      const data = Object.fromEntries(new FormData(form));
       try {
-        const res = await api('/api/costumes', {
-          method: 'POST',
-          body: JSON.stringify(data)
-        });
-        if (res) {
-          showToast('Costume added successfully!');
-          closeModal('modal-add-costume');
-          e.target.reset();
-          await loadCostumes();
-          updateMetrics();
-          populateCostumeSelects();
-        }
+        await api('/api/costumes', { method: 'POST', body: JSON.stringify(data) });
+        showToast('Costume added successfully!', 'success');
+        closeModal('modal-add-costume');
+        form.reset();
+        await loadCostumes();
+        updateMetrics();
+        populateCostumeSelects();
       } catch (err) {
-        showToast('Error creating costume');
+        showToast('Could not add costume: ' + err.message, 'error');
       }
     }
 
     async function handleCreateProp(e) {
       e.preventDefault();
-      const formData = new FormData(e.target);
-      const data = Object.fromEntries(formData);
+      const form = e.target;
 
+      // POST /api/props rejects a prop with no costumeId (src/routes/props.js:106),
+      // so a linked costume is mandatory in the UI as well.
+      const valid = validateForm(form, [
+        { name: 'costumeId', required: true },
+        { name: 'name', required: true, maxLength: 120 },
+        { name: 'location', maxLength: 160 },
+        { name: 'notes', maxLength: 2000 }
+      ]);
+      if (!valid) {
+        showToast('Please fix the highlighted fields.', 'error');
+        return;
+      }
+
+      const data = Object.fromEntries(new FormData(form));
       try {
-        const res = await api('/api/props', {
-          method: 'POST',
-          body: JSON.stringify(data)
-        });
-        if (res) {
-          showToast('Prop added successfully!');
-          closeModal('modal-add-prop');
-          e.target.reset();
-          await loadProps();
-        }
+        await api('/api/props', { method: 'POST', body: JSON.stringify(data) });
+        showToast('Prop added successfully!', 'success');
+        closeModal('modal-add-prop');
+        form.reset();
+        populateCostumeSelects();
+        await loadProps();
       } catch (err) {
-        showToast('Error creating prop');
+        showToast('Could not add prop: ' + err.message, 'error');
       }
     }
 
     async function handleCreateLens(e) {
       e.preventDefault();
-      const formData = new FormData(e.target);
-      const data = Object.fromEntries(formData);
+      const form = e.target;
 
+      const valid = validateForm(form, [
+        { name: 'character', required: true, maxLength: 120 },
+        { name: 'color', required: true, maxLength: 80 },
+        {
+          name: 'prescription',
+          maxLength: 40,
+          custom: value => (/^-?\d+(\.\d+)?$/.test(value) ? '' : 'Use a number, e.g. -1.50')
+        },
+        { name: 'expiryDate', required: true, type: 'date', notPast: true }
+      ]);
+      if (!valid) {
+        showToast('Please fix the highlighted fields.', 'error');
+        return;
+      }
+
+      const data = Object.fromEntries(new FormData(form));
       try {
-        const res = await api('/api/lenses', {
-          method: 'POST',
-          body: JSON.stringify(data)
-        });
-        if (res) {
-          showToast('Contact lens registered!');
-          closeModal('modal-add-lens');
-          e.target.reset();
-          await loadLenses();
-          updateMetrics();
-        }
+        await api('/api/lenses', { method: 'POST', body: JSON.stringify(data) });
+        showToast('Contact lens registered!', 'success');
+        closeModal('modal-add-lens');
+        form.reset();
+        await loadLenses();
+        updateMetrics();
       } catch (err) {
-        showToast('Error creating lens');
+        showToast('Could not register lens: ' + err.message, 'error');
       }
     }
 
+    // ==========================================================================
+    // DESTRUCTIVE / MUTATING ACTIONS
+    // ==========================================================================
     async function deleteCostume(id) {
-      if (!confirm('Are you sure you want to delete this costume?')) return;
-      const res = await api(`/api/costumes/${id}`, { method: 'DELETE' });
-      if (res !== null) {
-        showToast('Costume deleted');
+      const ok = await confirmAction({
+        title: 'Delete this costume?',
+        message: 'The costume and its milestone flags will be removed. This cannot be undone.',
+        confirmLabel: 'Delete costume'
+      });
+      if (!ok) return;
+      try {
+        await api('/api/costumes/' + encodeURIComponent(id), { method: 'DELETE' });
+        showToast('Costume deleted.', 'success');
         await loadCostumes();
         updateMetrics();
+        populateCostumeSelects();
+      } catch (err) {
+        showToast('Could not delete costume: ' + err.message, 'error');
       }
     }
 
     async function deleteProp(id) {
-      if (!confirm('Delete this prop?')) return;
-      const res = await api(`/api/props/${id}`, { method: 'DELETE' });
-      if (res !== null) {
-        showToast('Prop deleted');
+      const ok = await confirmAction({
+        title: 'Delete this prop?',
+        message: 'This prop record will be removed. This cannot be undone.',
+        confirmLabel: 'Delete prop'
+      });
+      if (!ok) return;
+      try {
+        await api('/api/props/' + encodeURIComponent(id), { method: 'DELETE' });
+        showToast('Prop deleted.', 'success');
         await loadProps();
+      } catch (err) {
+        showToast('Could not delete prop: ' + err.message, 'error');
       }
     }
 
     async function deleteLens(id) {
-      if (!confirm('Delete this contact lens record?')) return;
-      const res = await api(`/api/lenses/${id}`, { method: 'DELETE' });
-      if (res !== null) {
-        showToast('Lens deleted');
+      const ok = await confirmAction({
+        title: 'Delete this lens record?',
+        message: 'The contact lens record will be removed. This cannot be undone.',
+        confirmLabel: 'Delete lens'
+      });
+      if (!ok) return;
+      try {
+        await api('/api/lenses/' + encodeURIComponent(id), { method: 'DELETE' });
+        showToast('Lens deleted.', 'success');
         await loadLenses();
         updateMetrics();
+      } catch (err) {
+        showToast('Could not delete lens: ' + err.message, 'error');
       }
     }
 
     async function markLensOpened(id) {
-      const res = await api(`/api/lenses/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          status: 'ACTIVE',
-          isOpened: 1,
-          openedDate: new Date().toISOString()
-        })
-      });
-      if (res !== null) {
-        showToast('Vial marked as OPEN & ACTIVE');
+      try {
+        // The dedicated endpoint is idempotent and also rolls the expiry to
+        // +12 months (src/routes/lenses.js:181-231).
+        const result = await api('/api/lenses/' + encodeURIComponent(id) + '/open', { method: 'PATCH' });
+        showToast(result.message || 'Lens marked as opened.', 'success');
         await loadLenses();
         updateMetrics();
+      } catch (err) {
+        showToast('Could not open the vial: ' + err.message, 'error');
       }
     }
 
-    function openModal(id) {
-      document.getElementById(id).showModal();
-    }
-    function closeModal(id) {
-      document.getElementById(id).close();
-    }
-
-    function showToast(msg) {
-      const toast = document.getElementById('toast');
-      toast.textContent = msg;
-      toast.style.display = 'block';
-      setTimeout(() => { toast.style.display = 'none'; }, 3000);
+    // ==========================================================================
+    // IMAGE UPLOAD
+    // ==========================================================================
+    function openImagePicker(costumeId) {
+      state.imageUploadTargetId = costumeId;
+      const input = document.getElementById('costume-image-input');
+      input.value = '';
+      input.click();
     }
 
-    function generateNewBreakGlassKey() {
-      alert('To generate a new key while logged in, call POST /api/auth/break-glass/generate with your auth token. The new key will be printed and returned securely.');
-    }
+    async function onImagePicked(event) {
+      const input = event.target;
+      const costumeId = state.imageUploadTargetId;
+      const file = input.files && input.files[0];
+      state.imageUploadTargetId = null;
+      if (!costumeId || !file) return;
 
-    async function showBreakGlassKey() {
+      if (ALLOWED_UPLOAD_TYPES.indexOf(file.type) === -1) {
+        showToast('Only JPEG, PNG, WebP or GIF images are accepted.', 'error');
+        return;
+      }
+      if (file.size > MAX_UPLOAD_BYTES) {
+        showToast('That image is too large (' + (file.size / 1048576).toFixed(1)
+          + ' MB). Maximum is ' + (MAX_UPLOAD_BYTES / 1048576) + ' MB.', 'error');
+        return;
+      }
+
+      const button = findUploadButton(costumeId);
+      if (button) {
+        button.disabled = true;
+        button.textContent = '…';
+      }
+
+      const form = new FormData();
+      form.append('image', file);          // field name is fixed by the backend
+
       try {
-        const res = await api('/api/auth/break-glass/generate', { method: 'POST' });
-        if (res && res.recoveryKey) {
-          document.getElementById('break-glass-key').textContent = res.recoveryKey;
-          document.getElementById('break-glass-display').style.display = 'block';
-          showToast('New emergency key generated! Save it securely.');
+        const result = await api('/api/images/upload', { method: 'POST', body: form });
+        const url = safeUrl(result.url || result.processedUrl);
+        if (!url) throw new ApiError('The server did not return a usable image URL.', 500, 'BAD_UPLOAD_RESPONSE');
+
+        // Show the thumbnail for this session immediately...
+        const existing = state.imageUrlsCache[costumeId] || [];
+        if (existing.indexOf(url) === -1) state.imageUrlsCache[costumeId] = existing.concat([url]);
+        await loadCostumes();
+
+        // ...then try to persist it. NOTE: the current backend
+        // (src/routes/costumes.js:150-180) does NOT persist `imageUrls`, so the
+        // result is reported honestly instead of pretending the save worked.
+        try {
+          const merged = costumeImages({ id: costumeId, imageUrls: JSON.stringify([url]) });
+          await api('/api/costumes/' + encodeURIComponent(costumeId), {
+            method: 'PUT',
+            body: JSON.stringify({ imageUrls: JSON.stringify(merged) })
+          });
+          await loadCostumes();
+          const refreshed = state.costumes.find(c => c.id === costumeId) || {};
+          const persisted = parseImageUrls(refreshed.imageUrls);
+          if (persisted.indexOf(url) === -1) {
+            showToast('Image uploaded, but the server did not store it (PUT /api/costumes/:id ignores imageUrls) — it will only show for this session.', 'warning');
+          } else {
+            showToast('Image uploaded and saved.', 'success');
+          }
+        } catch (persistErr) {
+          showToast('Image uploaded, but saving it to the costume failed ('
+            + persistErr.message + '). It will only show for this session.', 'warning');
         }
       } catch (err) {
-        showToast('Error generating key');
+        showToast('Upload failed: ' + err.message, 'error');
+      } finally {
+        if (button) {
+          button.disabled = false;
+          button.textContent = '📷';
+        }
+        input.value = '';
+      }
+    }
+
+    function findUploadButton(costumeId) {
+      const buttons = document.querySelectorAll('#costumes-grid [data-action="upload"]');
+      for (let i = 0; i < buttons.length; i++) {
+        if (buttons[i].dataset.id === costumeId) return buttons[i];
+      }
+      return null;
+    }
+
+    // ==========================================================================
+    // MODALS
+    // ==========================================================================
+    function openModal(id) {
+      const dialog = document.getElementById(id);
+      if (!dialog) return;
+      const form = dialog.querySelector('form');
+      if (form) clearFormErrors(form);
+      dialog.showModal();
+    }
+
+    function closeModal(id) {
+      const dialog = document.getElementById(id);
+      if (dialog && dialog.open) dialog.close();
+    }
+
+    // ==========================================================================
+    // SECURITY TAB
+    // ==========================================================================
+    async function generateNewBreakGlassKey() {
+      const ok = await confirmAction({
+        title: 'Generate a new emergency key?',
+        message: 'The current recovery key (if you saved one) is invalidated immediately. The new key is shown exactly once.',
+        confirmLabel: 'Generate key'
+      });
+      if (!ok) return;
+
+      try {
+        const result = await api('/api/auth/break-glass/generate', { method: 'POST' });
+        if (!result.recoveryKey) throw new ApiError('The server did not return a recovery key.', 500, 'NO_KEY');
+
+        document.getElementById('break-glass-key').textContent = result.recoveryKey;
+        document.getElementById('break-glass-display').style.display = 'block';
+        showToast('Emergency key generated. Copy it now — it is shown once.', 'success');
+      } catch (err) {
+        showToast('Could not generate a recovery key: ' + err.message, 'error');
       }
     }
 
     function copyBreakGlassKey() {
       const key = document.getElementById('break-glass-key').textContent;
-      navigator.clipboard.writeText(key).then(() => {
-        showToast('Emergency key copied to clipboard!');
-      });
+      if (!key) {
+        showToast('There is no key to copy yet.', 'error');
+        return;
+      }
+      if (!navigator.clipboard || !navigator.clipboard.writeText) {
+        showToast('Clipboard is unavailable — select and copy the key manually.', 'error');
+        return;
+      }
+      navigator.clipboard.writeText(key).then(
+        () => showToast('Emergency key copied to clipboard.', 'success'),
+        () => showToast('Could not copy automatically — select the key and copy it manually.', 'error')
+      );
     }
 
     async function toggle2FA() {
+      const current = !!(state.user && toBool(state.user.telegram2FAEnabled));
       try {
-        const res = await api('/api/auth/2fa/toggle', { method: 'POST' });
-        if (res) {
-          state.user = res.user;
-          updateSecurityTab();
-          showToast(res.message || '2FA status updated');
+        // PATCH (the phase-5 spec verb) with an explicit flag, so the badge
+        // reflects the server response instead of a hardcoded string.
+        const result = await api('/api/auth/2fa/toggle', {
+          method: 'PATCH',
+          body: JSON.stringify({ enabled: !current })
+        });
+        const fromTop = toBool(result.telegram2FAEnabled);
+        const enabled = result.telegram2FAEnabled !== undefined
+          ? fromTop
+          : toBool(result.user && result.user.telegram2FAEnabled);
+        if (result.user) {
+          state.user = Object.assign({}, result.user, { telegram2FAEnabled: enabled });
+          sessionStorage.setItem(USER_KEY, JSON.stringify(state.user));
         }
+        updateSecurityTab();
+        showToast(result.message || ('2FA ' + (enabled ? 'enabled' : 'disabled')), enabled ? 'success' : 'info');
       } catch (err) {
-        showToast('Error toggling 2FA');
+        showToast(describeAuthError(err), 'error');
       }
     }
 
-    async function updateSecurityTab() {
-      if (!state.user) return;
-      
+    function updateSecurityTab() {
+      const user = state.user || {};
+
       const badge = document.getElementById('2fa-status-badge');
-      if (badge) {
-        if (state.user.telegram2FAEnabled) {
-          badge.textContent = 'Enabled';
-          badge.className = 'badge badge-in_possession';
-        } else {
-          badge.textContent = 'Disabled';
-          badge.className = 'badge badge-wishlist';
-        }
+      const enabled = toBool(user.telegram2FAEnabled);
+      badge.textContent = enabled ? 'Enabled' : 'Disabled';
+      badge.className = enabled ? 'badge badge-in_possession' : 'badge badge-wishlist';
+
+      const chatId = clean(user.telegramChatId);
+      document.getElementById('sec-username').textContent = clean(user.username) || '-';
+      document.getElementById('sec-email').textContent = clean(user.email) || '-';
+      document.getElementById('sec-telegram-id').textContent = chatId || 'Not linked';
+      document.getElementById('sec-role').textContent = clean(user.role) || 'user';
+
+      // 2FA can only be enabled when Telegram is configured server-side.
+      document.getElementById('sec-telegram-warning').style.display = (enabled || chatId) ? 'none' : 'block';
+    }
+
+    // ==========================================================================
+    // BOOT
+    // ==========================================================================
+    async function init() {
+      bindGridEvents();
+      showLoading(false);
+
+      const savedToken = sessionStorage.getItem(TOKEN_KEY);
+      const savedRefresh = sessionStorage.getItem(REFRESH_TOKEN_KEY);
+      const savedUser = sessionStorage.getItem(USER_KEY);
+
+      if (savedRefresh) state.refreshToken = savedRefresh;
+      if (savedUser) {
+        try { state.user = JSON.parse(savedUser); } catch (_) { state.user = null; }
       }
 
-      document.getElementById('sec-username').textContent = state.user.username || '-';
-      document.getElementById('sec-email').textContent = state.user.email || '-';
-      document.getElementById('sec-telegram-id').textContent = state.user.telegramChatId || 'Not linked';
-      document.getElementById('sec-role').textContent = state.user.role || 'user';
+      if (!savedToken) {
+        showLogin();
+        return;
+      }
+
+      state.token = savedToken;
+      showLoading(true);
+      try {
+        // api() transparently performs ONE silent refresh + single retry if the
+        // access token has expired, so a stale 15-minute-old token still restores.
+        const data = await api('/api/auth/profile');
+        // The backend returns BOTH flat fields and a `user` object.
+        state.user = data.user || data;
+        sessionStorage.setItem(USER_KEY, JSON.stringify(state.user));
+        await loadAllData();
+        showDashboard();
+      } catch (err) {
+        if (err.status !== 401) console.warn('Session restore failed:', err.message);
+        clearSession();
+        showLogin();
+        if (err.status !== 401) showToast('Could not restore your session: ' + err.message, 'error');
+      } finally {
+        showLoading(false);
+      }
     }
 
     init();

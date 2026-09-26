@@ -3,6 +3,7 @@ const router = express.Router();
 const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
 
+
 // Execute SQL queries helper
 async function queryDb(sql) {
   return new Promise((resolve, reject) => {
@@ -22,6 +23,14 @@ async function queryDb(sql) {
   });
 }
 
+// Full column list of the "Prop" table (see init_db.sql / live schema).
+// This file SELECTs `p.*, c.character AS costumeName`, so the parse order
+// must match exactly — a mismatch silently mislabels fields in the UI.
+const PROP_COLUMNS = [
+  'id', 'costumeId', 'name', 'category', 'location', 'condition',
+  'notes', 'imageUrls', 'createdAt', 'updatedAt', 'costumeName'
+];
+
 // Parse SQLite output
 function parseSqlResult(output, columns) {
   if (!output) return [];
@@ -36,18 +45,25 @@ function parseSqlResult(output, columns) {
 // ============================================================================
 // GET /api/props - List all props with filtering
 // ============================================================================
-router.get('/props', async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { costumeId, category, condition } = req.query;
-    
-    let where = '1=1';
-    if (costumeId) where += ` AND costumeId = '${costumeId}'`;
-    if (category) where += ` AND category = '${category}'`;
-    if (condition) where += ` AND condition = '${condition}'`;
 
-    const sql = `SELECT id, costumeId, name, category, condition, location FROM "Prop" WHERE ${where} ORDER BY name ASC;`;
+    // Columns are aliased with the `p.` prefix because the query joins "Costume".
+    let where = '1=1';
+    if (costumeId) where += ` AND p.costumeId = '${costumeId}'`;
+    if (category) where += ` AND p.category = '${category}'`;
+    if (condition) where += ` AND p.condition = '${condition}'`;
+
+    // Left join so each prop also carries the display name of its costume.
+    // `p.*` restores notes/imageUrls, which the narrow column list omitted.
+    const sql = `SELECT p.*, c.character AS costumeName
+                 FROM "Prop" p
+                 LEFT JOIN "Costume" c ON c.id = p.costumeId
+                 WHERE ${where}
+                 ORDER BY p.name ASC;`;
     const result = await queryDb(sql);
-    const props = parseSqlResult(result, ['id', 'costumeId', 'name', 'category', 'condition', 'location']);
+    const props = parseSqlResult(result, PROP_COLUMNS);
 
     res.json({
       count: props.length,
@@ -62,15 +78,18 @@ router.get('/props', async (req, res) => {
 // ============================================================================
 // GET /api/props/:id - Get single prop
 // ============================================================================
-router.get('/props/:id', async (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const sql = `SELECT * FROM "Prop" WHERE id = '${id}' LIMIT 1;`;
+    const sql = `SELECT p.*, c.character AS costumeName
+                 FROM "Prop" p
+                 LEFT JOIN "Costume" c ON c.id = p.costumeId
+                 WHERE p.id = '${id}' LIMIT 1;`;
     const result = await queryDb(sql);
 
     if (!result) return res.status(404).json({ error: 'Prop not found' });
 
-    const prop = parseSqlResult(result, ['id', 'costumeId', 'name', 'category', 'location', 'condition', 'notes', 'imageUrls', 'createdAt', 'updatedAt'])[0];
+    const prop = parseSqlResult(result, PROP_COLUMNS)[0];
     res.json(prop);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -80,12 +99,30 @@ router.get('/props/:id', async (req, res) => {
 // ============================================================================
 // POST /api/props - Create new prop
 // ============================================================================
-router.post('/props', async (req, res) => {
+// "Prop".costumeId is `TEXT` with `FOREIGN KEY (costumeId) REFERENCES
+// "Costume"(id) ON DELETE SET NULL` (init_db.sql) and the Prisma model declares
+// `costumeId String?` / `costume Costume?`. A standalone prop — one that
+// belongs to no costume — is therefore a legitimate row in this data model, so
+// costumeId is optional here and stored as NULL when it is absent. The
+// dashboard's prop form currently marks the select as required; that is a UI
+// constraint, not an API rule, and it is not enforced server-side.
+router.post('/', async (req, res) => {
   try {
     const { costumeId, name, category, location, condition, notes } = req.body;
 
-    if (!costumeId || !name || !category) {
-      return res.status(400).json({ error: 'costumeId, name, and category are required' });
+    if (!name || !category) {
+      return res.status(400).json({ error: 'name and category are required' });
+    }
+
+    // Normalise the optional link: '' / null / undefined all mean "standalone".
+    const linkedCostumeId = typeof costumeId === 'string' && costumeId.trim() !== ''
+      ? costumeId.trim()
+      : null;
+    if (costumeId !== undefined && costumeId !== null && typeof costumeId !== 'string') {
+      return res.status(400).json({ error: 'costumeId must be a string' });
+    }
+    if (linkedCostumeId && linkedCostumeId.length > 64) {
+      return res.status(400).json({ error: 'costumeId is too long' });
     }
 
     const id = randomUUID();
@@ -95,13 +132,13 @@ router.post('/props', async (req, res) => {
     const escapedLocation = location ? location.replace(/'/g, "''") : null;
 
     const sql = `INSERT INTO "Prop" (id, costumeId, name, category, location, condition, notes, createdAt, updatedAt)
-                 VALUES ('${id}', '${costumeId}', '${escapedName}', '${category}', ${escapedLocation ? `'${escapedLocation}'` : 'NULL'}, ${condition ? `'${condition}'` : 'NULL'}, ${escapedNotes ? `'${escapedNotes}'` : 'NULL'}, '${now}', '${now}');`;
+                 VALUES ('${id}', ${linkedCostumeId ? `'${linkedCostumeId.replace(/'/g, "''")}'` : 'NULL'}, '${escapedName}', '${category}', ${escapedLocation ? `'${escapedLocation}'` : 'NULL'}, ${condition ? `'${condition}'` : 'NULL'}, ${escapedNotes ? `'${escapedNotes}'` : 'NULL'}, '${now}', '${now}');`;
     
     await queryDb(sql);
 
     res.status(201).json({
       id,
-      costumeId,
+      costumeId: linkedCostumeId,
       name,
       category,
       location: location || null,
@@ -116,7 +153,7 @@ router.post('/props', async (req, res) => {
 // ============================================================================
 // PUT /api/props/:id - Update prop
 // ============================================================================
-router.put('/props/:id', async (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { location, condition, notes } = req.body;
@@ -144,7 +181,7 @@ router.put('/props/:id', async (req, res) => {
 // ============================================================================
 // DELETE /api/props/:id - Delete prop
 // ============================================================================
-router.delete('/props/:id', async (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const sql = `DELETE FROM "Prop" WHERE id = '${id}';`;
