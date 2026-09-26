@@ -149,21 +149,36 @@ router.get('/:id', async (req, res) => {
 // ============================================================================
 // POST /api/lenses - Create new lens
 // ============================================================================
+// `character` IS OPTIONAL. It used to be required, which was a contract the UI
+// could not honour once the field was removed from both lens modals: a form
+// that does not collect the value cannot send it, and a server that refuses to
+// create a row without it makes lens registration impossible.
+//
+// NO MIGRATION IS NEEDED. `character` is declared `character TEXT` with no NOT
+// NULL in init_db.sql and `character String?` in prisma/schema.prisma, and the
+// live schema agrees (`sqlite3 data/db/cms.db ".schema ContactLens"`). The
+// column has always been physically capable of holding NULL; only this route's
+// validation pretended otherwise. So the fix is to stop requiring it and to
+// write SQL NULL — not '' — when it is absent, so "no character" stays
+// distinguishable from "a character whose name is the empty string" for any
+// future reader. The existing row(s) keep their stored value untouched.
 router.post('/', async (req, res) => {
   try {
     const { character, color, colorHex, brand, prescription, purchaseDate, expiryDate, notes } = req.body;
 
-    if (!character || !color) {
-      return res.status(400).json({ error: 'character and color are required' });
+    if (!color) {
+      return res.status(400).json({ error: 'color is required' });
     }
 
     // `prescription`, `purchaseDate` and `expiryDate` used to be interpolated with
     // NO escaping into the INSERT — the clearest injection on this route, since
     // the dashboard's expiryDate is a free <input type="date"> string.
+    // Optional, but still fully validated WHEN SUPPLIED: a non-string or an
+    // over-long value is a 400, not a silent drop.
     const normalizedCharacter = textParam(character, { name: 'character', maxLength: MAX_LENS_CHARACTER_LENGTH, noSeparator: true });
     const normalizedColor = textParam(color, { name: 'color', maxLength: MAX_LENS_COLOR_LENGTH, noSeparator: true });
-    if (!normalizedCharacter || !normalizedColor) {
-      return res.status(400).json({ error: 'character and color are required' });
+    if (!normalizedColor) {
+      return res.status(400).json({ error: 'color is required' });
     }
     const normalizedColorHex = hexColorParam(colorHex, { name: 'colorHex' });
     const normalizedBrand = textParam(brand, { name: 'brand', maxLength: MAX_LENS_BRAND_LENGTH, noSeparator: true });
@@ -181,13 +196,14 @@ router.post('/', async (req, res) => {
     const status = checkExpiryStatus(normalizedExpiryDate || new Date().toISOString());
 
     const sql = `INSERT INTO "ContactLens" (id, character, color, colorHex, brand, prescription, purchaseDate, expiryDate, isOpened, status, notes, createdAt, updatedAt)
-                 VALUES (${esc(id)}, ${esc(normalizedCharacter)}, ${esc(normalizedColor)}, ${normalizedColorHex ? esc(normalizedColorHex) : 'NULL'}, ${normalizedBrand ? esc(normalizedBrand) : 'NULL'}, ${normalizedPrescription ? esc(normalizedPrescription) : 'NULL'}, ${normalizedPurchaseDate ? esc(normalizedPurchaseDate) : 'NULL'}, ${normalizedExpiryDate ? esc(normalizedExpiryDate) : 'NULL'}, 0, ${esc(status)}, ${normalizedNotes ? esc(normalizedNotes) : 'NULL'}, ${esc(now)}, ${esc(now)});`;
+                 VALUES (${esc(id)}, ${normalizedCharacter ? esc(normalizedCharacter) : 'NULL'}, ${esc(normalizedColor)}, ${normalizedColorHex ? esc(normalizedColorHex) : 'NULL'}, ${normalizedBrand ? esc(normalizedBrand) : 'NULL'}, ${normalizedPrescription ? esc(normalizedPrescription) : 'NULL'}, ${normalizedPurchaseDate ? esc(normalizedPurchaseDate) : 'NULL'}, ${normalizedExpiryDate ? esc(normalizedExpiryDate) : 'NULL'}, 0, ${esc(status)}, ${normalizedNotes ? esc(normalizedNotes) : 'NULL'}, ${esc(now)}, ${esc(now)});`;
 
     await queryDb(sql);
 
     res.status(201).json({
       id,
-      character: normalizedCharacter,
+      // null, not '', when absent — the same distinction the row now stores.
+      character: normalizedCharacter || null,
       color: normalizedColor,
       colorHex: normalizedColorHex || null,
       brand: normalizedBrand || null,
@@ -207,7 +223,13 @@ router.post('/', async (req, res) => {
 // PUT /api/lenses/:id - Update lens
 // ============================================================================
 // CONTRACT (the edit modal in public/index.html submits exactly these keys)
-//   character     string <= 120
+//   character     string <= 120   LEGACY / NO LONGER COLLECTED BY THE UI.
+//                            The field was removed from the edit modal, so the
+//                            dashboard does not send it and "absent means leave
+//                            the column alone" therefore preserves whatever a
+//                            pre-existing row stored. It is still accepted and
+//                            still validated so a scripted client (and the n8n
+//                            workflow) that sets it keeps working.
 //   color         string <= 80
 //   brand         string <= 120
 //   prescription  string <= 40

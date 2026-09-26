@@ -126,6 +126,33 @@
       justify-content: space-between;
     }
 
+    /* The two Reference Lists panels (Brand, Fandom) reuse .metric-card only for
+       its box look — background, border, padding, radius, shadow. They must NOT
+       reuse its `justify-content: space-between`, and the reason is a real bug
+       that was reported from a browser:
+
+       .metric-card is a flex column whose ONLY correct layout is "title pinned
+       top, big number pinned bottom" — that is what space-between is for, and
+       for a 2-child metric card there is no free space to misplace. The two
+       reference panels are 5 children tall (heading, form, search, message,
+       grid) and live side by side in a 2-column grid whose default
+       `align-items: stretch` makes BOTH cards exactly as tall as the taller
+       one. The Fandom card is the tall one, so the Brand card inherits ~hundreds
+       of px of free space — and in the NO-MATCH state (empty grid, hidden
+       message) it inherits nearly all of it. space-between then distributes that
+       free space evenly BETWEEN the children, which is why the Brand column
+       showed: a big empty gap under the heading, the "Add Brand" form floating
+       in the middle, and "Search brands" pinned near the bottom. The Fandom
+       column looked correct only because it is the column that DEFINES the
+       height, so its own content filled the space.
+
+       `flex-start` restores the intended order for BOTH states: form at the
+       top, search beneath it, list beneath that, and zero gap whether the grid
+       holds 23 cards or none. */
+    .ref-panel {
+      justify-content: flex-start;
+    }
+
     .metric-title {
       font-size: 0.85rem;
       text-transform: uppercase;
@@ -869,9 +896,15 @@
           </p>
         </div>
 
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+        <!-- `align-items: start` so neither panel is stretched to the height of
+             the other: the two lists hold very different numbers of rows (23
+             brands vs 24 fandoms, and either can be filtered to none), and a
+             stretched card is what turned the leftover height into the gap
+             described on .ref-panel. Each card is now its own height, and
+             .ref-panel keeps their children packed to the top. -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;">
           <!-- Brands -->
-          <div class="metric-card">
+          <div class="metric-card ref-panel">
             <h3 style="font-size: 1rem; margin-bottom: 12px;">Brands & Makers</h3>
             <form onsubmit="handleCreateBrand(event)" novalidate>
               <div class="form-group">
@@ -915,7 +948,7 @@
           </div>
 
           <!-- Fandoms -->
-          <div class="metric-card">
+          <div class="metric-card ref-panel">
             <h3 style="font-size: 1rem; margin-bottom: 12px;">Fandoms</h3>
             <form onsubmit="handleCreateFandom(event)" novalidate>
               <div class="form-group">
@@ -1266,11 +1299,11 @@
   <dialog id="modal-add-lens">
     <h3 style="margin-bottom: 16px;">Register Contact Lens</h3>
     <form onsubmit="handleCreateLens(event)" novalidate>
-      <div class="form-group">
-        <label>Character *</label>
-        <input type="text" class="form-control" name="character" required placeholder="e.g. Fischl">
-        <div class="field-error" data-error-for="character"></div>
-      </div>
+      <!-- NO `character` FIELD. Lenses are not bound to a character, so the
+           field was misleading and the server no longer requires it. The column
+           still exists and is still nullable (see src/routes/lenses.js), and any
+           legacy value already stored is left untouched — it is simply not part
+           of the form. -->
       <div class="form-group">
         <label>Color *</label>
         <!-- COLOUR PICKER. A row of preset swatches plus a native
@@ -1338,11 +1371,8 @@
           Derived from the expiry date and from "Mark as Opened". It is not editable by hand.
         </p>
       </div>
-      <div class="form-group">
-        <label for="edit-lens-character">Character *</label>
-        <input type="text" class="form-control" name="character" id="edit-lens-character" required maxlength="120" placeholder="e.g. Fischl">
-        <div class="field-error" data-error-for="character"></div>
-      </div>
+      <!-- NO `character` FIELD HERE EITHER — see the note in the Add Lens modal.
+           openEditLens() must therefore never query for it either. -->
       <div class="form-group">
         <label for="edit-lens-color">Color *</label>
         <!-- Same picker as the Add Lens modal — see the note there. openEditLens()
@@ -3286,7 +3316,13 @@
           '<div class="item-card">',
           '  <div>',
           '    <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:8px;">',
-          '      <h3 style="font-size:1.15rem; font-weight:700;">' + escapeHtml(clean(l.character) || 'Generic') + ' (' + colorDot + escapeHtml(colorName || 'n/a') + ')</h3>',
+          // The heading used to be the character name, which is why a lens with
+          // no character rendered as a bare "Generic". The colour — dot plus
+          // name — is now the heading: it is the field the card is about, it is
+          // always present (the column is NOT NULL), and the 'n/a' fallback
+          // means a row that somehow has no colour still shows a real label
+          // rather than a blank or "undefined".
+          '      <h3 style="font-size:1.15rem; font-weight:700;">' + colorDot + escapeHtml(colorName || 'n/a') + '</h3>',
           '      <span class="badge ' + statusClass + '">' + escapeHtml(status.replace(/_/g, ' ')) + '</span>',
           '    </div>',
           '    <div class="tags-group">',
@@ -4062,7 +4098,6 @@
       const form = e.target;
 
       const valid = validateForm(form, [
-        { name: 'character', required: true, maxLength: 120 },
         { name: 'color', required: true, maxLength: 80 },
         {
           name: 'prescription',
@@ -4387,12 +4422,14 @@
       const form = dialog.querySelector('form');
       clearFormErrors(form);
 
+      // Subtitle via textContent, never innerHTML. Identifies the lens by
+      // colour + brand, since there is no character to name it by.
+      const lensBrand = clean(lens.brand);
       document.getElementById('edit-lens-subtitle').textContent =
-        (clean(lens.character) || 'Unnamed') + ' — ' + (clean(lens.color) || 'no colour');
+        (clean(lens.color) || 'no colour') + (lensBrand ? ' — ' + lensBrand : '');
       document.getElementById('edit-lens-status').textContent =
         lensDisplayStatus(lens).replace(/_/g, ' ');
 
-      form.querySelector('[name="character"]').value = clean(lens.character);
       form.querySelector('[name="color"]').value = clean(lens.color);
       // Light the swatch that matches the stored colour. For a row written before
       // the picker existed colorHex is NULL, so this falls back to the preset
@@ -4419,7 +4456,6 @@
       }
 
       const valid = validateForm(form, [
-        { name: 'character', required: true, maxLength: 120 },
         { name: 'color', required: true, maxLength: 80 },
         { name: 'brand', maxLength: 120 },
         {
@@ -4437,8 +4473,10 @@
       }
 
       // `status` is deliberately NOT part of this payload — see the note above.
+      // `character` is deliberately absent: the field is gone from the form, and
+      // PUT's contract is "absent means leave the column alone", so a legacy
+      // value stored on an old row survives an unrelated edit untouched.
       const payload = {
-        character: form.querySelector('[name="character"]').value.trim(),
         color: form.querySelector('[name="color"]').value.trim(),
         brand: form.querySelector('[name="brand"]').value.trim(),
         prescription: form.querySelector('[name="prescription"]').value.trim(),

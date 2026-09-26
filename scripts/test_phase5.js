@@ -1312,10 +1312,19 @@ function testFrontend() {
   logTest('escapeHtml( is actually applied across the renderers', escapeUses >= 20,
     `${escapeUses} call sites`);
 
+  // The lens marker changed from `escapeHtml(clean(l.character)` to
+  // `escapeHtml(colorName || 'n/a')`. The old expectation encoded a card heading
+  // that no longer exists: `character` was removed from the lens UI (lenses are
+  // not bound to a character), so the heading is now the colour name. The
+  // assertion's PURPOSE — "the lens renderer escapes a DB-derived string" — is
+  // unchanged, and the replacement is the same call on a still-DB-derived value,
+  // so this is a re-point, not a weakening. `l.character` itself is still
+  // covered elsewhere: the costume renderer marker above is the identical
+  // expression on the costume card.
   for (const [label, marker] of [
     ['costume renderer', 'escapeHtml(clean(c.character)'],
     ['prop renderer', 'escapeHtml(clean(p.name)'],
-    ['lens renderer', 'escapeHtml(clean(l.character)']
+    ['lens renderer', "escapeHtml(colorName || 'n/a')"]
   ]) {
     logTest(`escapeHtml is applied in the ${label}`, html.includes(marker), `marker: ${marker}`);
   }
