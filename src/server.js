@@ -487,6 +487,32 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 });
 
 // ============================================================================
+// PROCESS SAFETY NET
+// ============================================================================
+// Without these, Node's default behaviour on an unhandled rejection or an
+// uncaught exception is to print an opaque stack and die, or — worse for a
+// rejected promise nobody awaited — to print a warning and keep running with
+// whatever half-applied state caused it. In a container neither is useful: the
+// process must exit with a NON-ZERO code so the orchestrator's restart policy
+// brings up a clean one, and the reason must be in the logs.
+//
+// uncaughtException is not recoverable by definition — the stack is in an
+// unknown state — so that handler MUST terminate rather than swallow the error.
+process.on('unhandledRejection', (reason) => {
+  console.error('\n❌ UNHANDLED PROMISE REJECTION');
+  console.error(reason instanceof Error ? (reason.stack || reason.message) : reason);
+  console.error('   The process cannot be trusted to continue; exiting (code 1).\n');
+  process.exit(1);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('\n❌ UNCAUGHT EXCEPTION — process state is undefined');
+  console.error(error && (error.stack || error.message) ? (error.stack || error.message) : error);
+  console.error('   Terminating immediately (code 1). Any in-flight request is lost.\n');
+  process.exit(1);
+});
+
+// ============================================================================
 // GRACEFUL SHUTDOWN
 // ============================================================================
 // `docker stop` sends SIGTERM and then SIGKILLs after 10s. The old handlers
