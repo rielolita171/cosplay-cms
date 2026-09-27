@@ -45,36 +45,37 @@ anywhere. See section 4.
 
 Run these four steps from the repository root. They are copy-pasteable as-is.
 
-### Step 1 — create your `.env` with real secrets
+### Step 1 — create your `.env`
 
 ```bash
 cp .env.example .env
 
-JWT_SECRET=$(openssl rand -hex 32)
 API_KEY=$(openssl rand -hex 24)
 
-# Write the generated values into .env, replacing the two placeholder lines.
-sed -i "s|^JWT_SECRET=.*|JWT_SECRET=${JWT_SECRET}|"  .env
-sed -i "s|^API_KEY=.*|API_KEY=${API_KEY}|"          .env
+# Write the generated value into .env, replacing the placeholder line.
+sed -i "s|^API_KEY=.*|API_KEY=${API_KEY}|" .env
 ```
 
-Verify they landed, without echoing the secrets themselves:
+Verify it landed, without echoing the secret itself:
 
 ```bash
-grep -E '^(JWT_SECRET|API_KEY)=' .env | sed 's/=.*/=<set>/'
-# JWT_SECRET=<set>
+grep -E '^API_KEY=' .env | sed 's/=.*/=<set>/'
 # API_KEY=<set>
 ```
 
-> `JWT_SECRET` must be at least 32 characters or the process refuses to start
-> ([`src/middleware/auth.js:86-88`](src/middleware/auth.js:86)).
-> `openssl rand -hex 32` prints 64 hex characters, which comfortably clears it.
+> There is no `JWT_SECRET` any more. The app has no login, so there is no token to
+> sign. If your existing `.env` still carries a `JWT_SECRET` line, it is inert and
+> can be deleted. The server does not read it and will not complain about it.
 >
 > `API_KEY` must not contain the literal substrings `your_`, `here` or `$(` — a key
 > matching any of those is treated as an unfilled placeholder and rejected even if
 > the client sends it back byte for byte
 > ([`src/middleware/apiKeyAuth.js:28-30`](src/middleware/apiKeyAuth.js:28)).
 > A hex string from `openssl rand` never will.
+>
+> **`API_KEY` is not a login.** It is the only credential in the app and it guards
+> exactly two things: the n8n notification endpoints, for server-to-server calls.
+> It does not protect the CMS. See the warning in section 1 and section 8.
 
 `.env` is excluded from git by [`.gitignore:3`](.gitignore:3) and from the Docker
 build context by [`.dockerignore:25`](.dockerignore:25). See section 8.
@@ -158,8 +159,7 @@ In Docker, that file is supplied by compose's `env_file` block
 | Variable | Purpose | Required? | Default | Read at |
 |---|---|---|---|---|
 | `PORT` | Port the server binds **inside** the container. | No | `4001` | [`src/server.js:12`](src/server.js:12) |
-| `NODE_ENV` | Switches on production-only guards. | Yes, in practice — compose forces `production` | *(unset ⇒ development)* | [`src/server.js:25`](src/server.js:25), [`src/middleware/auth.js:25`](src/middleware/auth.js:25) |
-| `JWT_SECRET` | Signs every session token. | **Yes** — the process will not start without it in production | *(none; dev-only placeholder off-production)* | [`src/middleware/auth.js:20-35`](src/middleware/auth.js:20), validated by [`src/middleware/auth.js:76-111`](src/middleware/auth.js:76) from [`src/server.js:20-36`](src/server.js:20) |
+| `NODE_ENV` | Marks the process as a production deployment. | Yes, in practice — compose forces `production` | *(unset ⇒ development)* | [`src/server.js:25`](src/server.js:25) |
 | `DATABASE_PATH` | Absolute path to the SQLite file. | No | `data/db/cms.db` (relative to cwd) | [`src/services/db.js:34`](src/services/db.js:34) |
 | `API_KEY` | Authenticates server-to-server calls via the `X-CMS-API-KEY` header. | **Strongly recommended** — unset means every caller gets 403 | *(none; fails closed)* | [`src/middleware/apiKeyAuth.js:24-31`](src/middleware/apiKeyAuth.js:24) |
 | `CORS_ORIGIN` | Comma-separated allowlist of browser origins. | No | *(empty ⇒ same-origin default)* | [`src/services/settings.js:260`](src/services/settings.js:260) |
@@ -182,9 +182,11 @@ Notes on the ones that surprise people:
   [`src/server.js:466-471`](src/server.js:466). You do not need to set
   `CORS_ORIGIN` at all if the UI is served by this same process, which it is.
 
-- **`TELEGRAM_CHAT_ID` is not a variable** — see below. The per-user chat id is a
-  column (`"User".telegramChatId` in [`init_db.sql:51`](init_db.sql:51)), not an
-  environment setting.
+- **`TELEGRAM_CHAT_ID` is not a variable** — see below. The chat id is a row in
+  the `TelegramChat` table ([`init_db.sql:58`](init_db.sql:58)), not an
+  environment setting. On an upgrade from a pre-auth-removal volume the app
+  migrates your existing value out of the old `"User"` table on first boot; see
+  section 5.4.
 
 ### Dead variables — set nothing, nothing reads them
 
@@ -199,8 +201,9 @@ impression that they configure something. Do not spend time on them.
 | `IMPORT_DIR` | **Not read.** The importer resolves its input relative to the repo root at [`scripts/import_excel.js:95`](scripts/import_excel.js:95). |
 | `SESSION_SECRET` | **Not read.** A real secret may sit in your live `.env` doing nothing; it is safe to delete from there. |
 | `TELEGRAM_CHAT_ID` | **Not read.** The one mention in the codebase is inside a warning *string* at [`src/server.js:437`](src/server.js:437) that tells the operator to set the `telegramChatId` **column** on their `"User"` row. Do exactly that, and ignore the env var. |
+| `JWT_SECRET` | **Not read, and no longer documented anywhere else.** It signed session tokens; there are no sessions. Safe to delete from a live `.env`. |
 
-This is why [`.env.example`](.env.example) deliberately omits all five: it lists
+This is why [`.env.example`](.env.example) deliberately omits all of them: it lists
 only variables that are genuinely read.
 
 ---
@@ -610,6 +613,58 @@ docker run --rm --user 0:0 \
 docker compose start
 ```
 
+### 5.4 What happens to your Telegram chat id on upgrade
+
+If you are upgrading a volume that was created **before** the login system was
+removed, one piece of data needs to move: the Telegram chat id used for
+notifications lived in a column on your `"User"` table. A fresh install has no
+`"User"` table at all — [`init_db.sql`](init_db.sql) no longer creates one — but
+your old volume still carries it, and that is the copy your notifications depend
+on.
+
+It is migrated for you. On first boot after the upgrade, `initSchema()` creates a
+`TelegramChat` table and copies the value across, if and only if that table is
+still empty and the old `"User"` table still exists
+([`src/services/db.js:164-200`](src/services/db.js:164)). The conditions are
+checked in JavaScript before the insert runs, not with a `WHERE … NOT EXISTS`
+clause — that guard is evaluated per source row, so with more than one `"User"`
+row it can pass for the first row and then collide on the primary key for the
+second. Checking first is the only formulation that is correct for a table that
+may have several accounts in it.
+
+The migration runs **once**. After that your chat id is yours, and a later boot
+will never overwrite a value you have changed.
+
+To check what it did:
+
+```bash
+docker compose exec cms sqlite3 /app/data/db/cms.db \
+  "SELECT slot, telegramChatId FROM TelegramChat;"
+# default|<your chat id>
+```
+
+If the result is empty, your old value was `NULL` or blank to begin with — there
+was nothing to carry over. To set one by hand:
+
+```bash
+docker compose exec cms sqlite3 /app/data/db/cms.db \
+  "INSERT OR REPLACE INTO TelegramChat (slot, telegramChatId, createdAt, updatedAt)
+   VALUES ('default', 'YOUR_CHAT_ID', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);"
+```
+
+Restart the container afterwards so the app re-reads it.
+
+The old `"User"` table is **left in place, not dropped**. Deleting a table is not
+something a boot-time migration should do to data it did not create, and SQLite
+gives no cheap way to undo it. If you want it gone, drop it yourself once you
+have confirmed the chat id carried across:
+
+```bash
+docker compose exec cms sqlite3 /app/data/db/cms.db 'DROP TABLE "User";'
+```
+
+Nothing in the application reads it after this point.
+
 ---
 
 ## 6. Operations
@@ -662,7 +717,7 @@ The `STATUS` column is the healthcheck result:
 | `starting` | Within the 20-second start period. Not yet a verdict. |
 | `healthy` | The last probe returned 200 from `/health`. **Proves Node is alive only — it does not touch the database.** |
 | `unhealthy` | Three consecutive failed probes (30s apart, after the 20s start period). |
-| `Exited (1)` | The process exited with code 1 — usually the JWT guard or an entrypoint `FATAL`. |
+| `Exited (1)` | The process exited with code 1 — usually an entrypoint `FATAL`, most often a missing `sqlite3` driver. |
 | `Exited (137)` | SIGKILL — the graceful shutdown did not finish in 15s. |
 
 Full health history:
@@ -741,16 +796,16 @@ tells you nothing about the database. Get the 200 first, then investigate.
 | **`/health` returns 200 but every data route 500s** | Two distinct causes with the same symptom. **(a)** The `sqlite3` binary is missing — the app has no in-process driver, it shells out to `sqlite3` per query. **(b)** The schema was never applied — the app never applies `init_db.sql` itself. | The entrypoint already guards both, so **read the logs first**: a missing driver prints `[entrypoint] FATAL: sqlite3 CLI not found` and a schema failure prints `expected at least 10 tables...`, both causing an immediate exit. If the container is running and healthy, then neither of those fired and the failure is elsewhere — capture the real error from `docker compose logs cms`. Verify directly with `docker compose exec cms sqlite3 /app/data/db/cms.db ".tables"`. |
 | **Container healthy, dashboard shows no data at all** | Fresh named volume. Expected, not a bug — see section 5. | Follow [5.1](#51-seed-a-new-volume-from-the-hosts-data). |
 | **`EACCES: permission denied, open '/app/data/uploads/...'`** | Volume ownership. The `node` user is UID 1000 and cannot write to a root-owned directory. Almost always caused by a **bind mount** of a host directory, or by a restore that skipped the `chown`. | `docker compose exec -u 0 cms chown -R 1000:1000 /app/data` then `docker compose restart`. Long-term, use the named volume (whose ownership is inherited from the image, [`Dockerfile:105-113`](Dockerfile:105)) rather than a host bind mount. |
-| **Container exits immediately, restart loop** | Missing or weak `JWT_SECRET`. With `NODE_ENV=production` (which compose forces, [`docker-compose.yml:47`](docker-compose.yml:47)), an unset secret **throws while loading** the auth module ([`src/middleware/auth.js:25-30`](src/middleware/auth.js:25)) and a weak one **exits 1 at boot** ([`src/server.js:25-30`](src/server.js:25)). | Logs show `FATAL: JWT_SECRET is not set` or `JWT_SECRET is too short (N chars, need >= 32)`. Generate a real one: `openssl rand -hex 32`, put it in `.env`, `docker compose up -d --force-recreated`. |
+| **Container exits immediately, restart loop** | The `sqlite3` driver is missing or the database directory is not writable by UID 1000. | Check the logs: `sqlite3 driver not found` means the image is damaged; `unable to open database file` or `EACCES` means the volume is not owned by 1000:1000. Fix with `docker compose exec -u 0 cms chown -R 1000:1000 /app/data` then `docker compose restart`. |
 | **API key rejected with 403 even though you set it** | Placeholder rejection, or a value that got truncated. | A key containing `your_`, `here` or `$(` is refused unconditionally ([`src/middleware/apiKeyAuth.js:28-30`](src/middleware/apiKeyAuth.js:28)). Note the value is `.trim()`ed on both sides, so a trailing newline is harmless but a leading space inside quotes is not. Compare byte for byte: `docker compose exec cms sh -c 'echo -n "$API_KEY" \| wc -c'`. |
-| **Lost access after changing `JWT_SECRET`** | Every token is signed with it, so every existing session is now invalid. This is a feature, not a bug. | Users log in again. The 2FA secrets in `"User".twoFactorSecret` are stored separately and are unaffected, so nobody is locked out of their account — only out of their session. |
+| **Anyone on the network can edit your data** | There is no authentication. This is the deployment model, not a bug (section 8). | Constrain the exposure: bind the port to `127.0.0.1`, or put an authenticating reverse proxy in front, or keep the service on a trusted LAN. |
 | **`database is locked` / `SQLITE_BUSY` under concurrent writes** | **Expected behaviour, and it is a real limitation.** Each query is a separate `sqlite3` process, and the application sets **no global `busy_timeout`** — the only `PRAGMA busy_timeout = 5000` in the codebase is inside one specific multi-statement transaction at [`src/services/db.js:578-593`](src/services/db.js:578). Ordinary single-statement writes therefore take a lock or fail immediately. | Under normal single-user use you will not hit it. If you do, it means genuinely concurrent writes. The honest fix is a code change — a global busy timeout in [`src/services/db.js:44-60`](src/services/db.js:44), or moving to a real in-process driver — and both are out of scope for this deployment guide. Do not "fix" it with SQLite pragmas at runtime; there is no supported hook for that here. |
 | **Everything restarted when you ran `docker compose down`** | `down` stops *and removes* containers. That is what it is for. | `docker compose up -d`. The **data** is unaffected — `down` does not touch the volume unless you pass `-v`. See section 6. |
 | **Data appears to have vanished after a rebuild** | You ran `docker compose down -v`, or removed the volume by hand. | Restore from a backup (section 5.2). If you have no backup, the data is gone — the image never contained it. |
 | **Wrong port — `curl: connection refused`, or n8n cannot reach the CMS** | Host/container port confusion. The **container** port is always `4001`; only the **host** side is remapped by `CMS_PORT` ([`docker-compose.yml:32`](docker-compose.yml:32)). | Use `http://localhost:${CMS_PORT:-4001}` from the host, and `http://cms:4001` from another container. Never change `PORT` to move a host port — it silently breaks the n8n workflow. |
 | **Browser CORS errors, or the SPA loads but no data** | UI and API on different origins. | Set `CORS_ORIGIN` in `.env` to a comma-separated list of **exact** origins and recreate the container. Remember the database `ServerSetting` row **overrides** the env var ([`src/services/settings.js:13-15`](src/services/settings.js:13)) — the boot banner says which source won. |
 | **Uploads 404 but rows exist** | The database restored but the uploads did not. The `imageUrls` column holds filenames that resolve inside `data/uploads`. | Restore the **whole** volume (section 5.2), not just the database. This is the failure mode that the single-volume design exists to prevent. |
-| **Rate limited (429) when testing repeatedly** | The in-memory limiter in [`src/middleware/rateLimit.js:32-42`](src/middleware/rateLimit.js:32) is a fixed window, per process. Login routes are capped especially low. | Wait out the window. The `Retry-After` and `RateLimit-*` response headers say when. |
+| **Rate limited (429) when testing repeatedly** | The in-memory limiter in [`src/middleware/rateLimit.js:29-41`](src/middleware/rateLimit.js:29) is a fixed window, per process, and it does not survive a restart. | Wait out the window. The `Retry-After` and `RateLimit-*` response headers say when. |
 | **`docker compose ps` shows `Exited (137)`** | SIGKILL — graceful shutdown exceeded the 15s grace period ([`docker-compose.yml:92`](docker-compose.yml:92)). | Normally this means a client held a keep-alive socket open past the app's own 9s failsafe ([`src/server.js:532`](src/server.js:532)). Rare; check the logs for the `failsafe` message. |
 | **Build fails with `npm ci` errors** | `package.json` and `package-lock.json` out of sync, or the lockfile was excluded. | The lockfile must be in the build context — the `deps` stage installs strictly from it ([`Dockerfile:45-49`](Dockerfile:45)). Restore it from git and rebuild. |
 
@@ -758,38 +813,69 @@ tells you nothing about the database. Get the 200 first, then investigate.
 
 ## 8. Security notes
 
-**`/health` is public by design.** It is unauthenticated, not rate-limited, and
-returns only `status`, `timestamp`, `uptime` and `environment`
-([`src/server.js:158-166`](src/server.js:158)). It exposes nothing sensitive and
-it makes the container's health observable to Docker without credentials. That
-is a deliberate trade: a healthcheck that needs a secret is a healthcheck that
-fails for the wrong reason.
+### This deployment has no authentication
 
-**`API_KEY` fails closed.** If `API_KEY` is unset, `requireApiKey()` refuses
-every caller — 403 when a key is present and invalid, 401 when none is
-([`src/middleware/apiKeyAuth.js:34-49`](src/middleware/apiKeyAuth.js:34)). There
-is no default and no bypass. Comparison is constant-time over SHA-256 digests
-([`src/middleware/apiKeyAuth.js:10-16`](src/middleware/apiKeyAuth.js:10)), so it
-does not leak the key through response timing. This is the only path into
-`/api/notifications` and into image reads for server-to-server clients.
+Read this before you decide where to put the container. It is the single most
+important fact in this document.
 
-**Uploaded images are not world-readable.** The `/uploads` static mount sits
-behind `requireUploadAccess` ([`src/server.js:145-146`](src/server.js:145),
-[`src/middleware/uploadAccess.js:35-69`](src/middleware/uploadAccess.js:35)),
-which requires either a valid **access** token or a valid API key in the header.
-A refresh token or a 2FA-pending token is refused. The API key is accepted from
-the header only for image reads — never from a query string, which would put a
-long-lived secret into browser history, logs and `Referer` headers.
+**Anyone who can reach the published port can read and change everything.** There
+is no login, no account, no session, no role and no API credential on the CMS
+itself. A `curl` with no headers can list every costume, create one, delete one,
+upload an image, and edit your CORS settings. The login system, the role ladder
+and the per-user 2FA were removed on purpose — this is a private single-user
+CMS — and the server prints a warning about it at every boot
+([`src/server.js:385-388`](src/server.js:385)).
 
-**`JWT_SECRET` must never be committed.** Anyone holding it can mint a valid
-admin token. The application enforces this from both directions: unset in
-production **throws at module load**
-([`src/middleware/auth.js:25-30`](src/middleware/auth.js:25)), and a value that
-is too short, matches a known-weak list, or is an unexpanded `$(...)`
-placeholder causes `exit(1)` at boot
-([`src/middleware/auth.js:76-111`](src/middleware/auth.js:76),
-[`src/server.js:20-36`](src/server.js:20)). A repetitive secret produces a
-warning, not a failure.
+`GET /api/version` states this in machine-readable form, so monitoring can
+assert on it rather than on a human having read this file
+([`src/server.js:170-174`](src/server.js:170)):
+
+```json
+"authentication": { "required": false, "scheme": "none" }
+```
+
+**What the network boundary now has to do.** Pick one of these:
+
+1. **Keep it on a trusted LAN or a VPN** and do not route to it from anywhere
+   else. Simplest, and what this deployment is built for.
+2. **Put an authenticating reverse proxy in front of it** — nginx, Caddy,
+   Traefik — terminating TLS and doing the login that the app no longer does.
+   Point the proxy at the container, never publish the container's port.
+3. **Bind to loopback only** and reach it through an SSH tunnel:
+   `ssh -L 4001:127.0.0.1:4001 user@host`, then browse
+   `http://127.0.0.1:4001`. This gives you the same protection as a password with
+   no extra services to run.
+
+**Do not** publish this port to the internet, and do not assume a firewall rule
+you have not tested. If the container runs with a published port
+(`${CMS_PORT:-4001}:4001`) on a host with a default `ufw` or `firewalld` policy,
+it is reachable by every device on that network — including guest devices and
+anything else running on it.
+
+If you need the container to be invisible on the network, change the compose
+ports block to `"127.0.0.1:${CMS_PORT:-4001}:4001"`. The left-hand address is the
+interface Docker binds on the host, so this confines the service to the host
+itself.
+
+### The credentials that do still exist
+
+**`API_KEY` guards exactly two things: the n8n notification endpoints, and
+nothing else.** It is not a login and does not protect the CMS. If it is unset,
+`requireApiKey()` refuses every caller — 403 when a key is present and invalid,
+401 when none is ([`src/middleware/apiKeyAuth.js:41-56`](src/middleware/apiKeyAuth.js:41)).
+There is no default and no bypass. Comparison is constant-time over SHA-256
+digests ([`src/middleware/apiKeyAuth.js:17-24`](src/middleware/apiKeyAuth.js:17)),
+so it does not leak the key through response timing.
+
+**`/uploads` is world-readable, and this is a real change from earlier versions.**
+The static image mount used to sit behind a token-checking middleware
+(`src/middleware/uploadAccess.js`). That file was deleted along with the rest of
+the auth system, so any image whose filename is known — or whose URL has simply
+been shared — is now fetchable by anyone who can reach the port
+([`src/server.js:132-139`](src/server.js:132)). Treat costume photos as
+**private to your network**. If that is not acceptable, either keep the service
+off the open network per the three options above, or restore an authenticating
+layer in front of it; there is no in-app switch, by design.
 
 **`TELEGRAM_BOT_TOKEN` is a real credential.** It is read at
 [`src/services/telegramService.js:32`](src/services/telegramService.js:32) and
@@ -797,6 +883,19 @@ gives full control of the bot. It is strictly on-demand: never called at boot,
 5-second timeout, and it cannot reject into the request path — a broken Telegram
 integration can neither delay startup nor take the server down. Leaving it empty
 disables Telegram entirely and changes nothing else.
+
+**`JWT_SECRET` is gone.** Anyone who still has the old value can do nothing with
+it: there is no token format, no signing and no verification left in the
+codebase. It may be deleted from a live `.env` with no effect on the running app.
+
+### What is still enforced
+
+**`/health` is public by design.** It is unauthenticated, not rate-limited, and
+returns only `status`, `timestamp`, `uptime` and `environment`
+([`src/server.js:158-166`](src/server.js:158)). It exposes nothing sensitive and
+it makes the container's health observable to Docker without credentials. That
+is a deliberate trade: a healthcheck that needs a secret is a healthcheck that
+fails for the wrong reason.
 
 **`.env` is excluded from both git and the build context.** It is gitignored
 ([`.gitignore:3`](.gitignore:3)) and excluded by [`.dockerignore:25-26`](.dockerignore:25).
@@ -807,12 +906,6 @@ the image or inspect its layer history. The build context additionally excludes
 [`.dockerignore:5-7`](.dockerignore:5) states a hard rule of never adding a `!`
 negation for it, because `data/` plus a negation is the classic way to
 accidentally ship a production database.
-
-**What happens if `JWT_SECRET` changes:** every existing session token instantly
-becomes invalid and every logged-in user is signed out. Nothing is lost — the
-`"User"` rows, their `passwordHash` and their `twoFactorSecret` are stored in the
-database, not derived from the signing key, so users simply log in again. Treat
-rotation as a deliberate mass-logout and schedule it accordingly.
 
 **Open, pre-existing, out of scope: `npm audit` reports 2 high-severity
 advisories.** `npm audit` flags exactly two packages, and **`multer` is neither
@@ -883,28 +976,24 @@ Use [`docker-compose.yml`](docker-compose.yml). It is the deployment of record.
 **Pre-existing test failures, unrelated to Docker.** Do not chase these while
 working on the container:
 
-| Suite | Reported failures | Relevance |
+| Suite | Status | Relevance |
 |---|---|---|
-| `scripts/test_api.js` (`npm test`) | 2 | None — pre-dates the Docker work. |
-| `scripts/test_phase3.js` (`npm run test:phase3`) | 8 | None — pre-dates the Docker work. |
+| `scripts/test_api.js` (`npm test`) | 25 passed / 0 failed | Green. |
+| `scripts/test_phase4.js` (`npm run test:phase4`) | 5 passed / 0 failed | Green. |
+| `scripts/test_phase5.js` (`npm run test:phase5`) | Not run | **Asserts against the removed auth system** — login, 2FA, role checks and the `/api/version` endpoint list. It will report a wall of failures that mean nothing. Treat it as historical; do not chase it during container work. |
+| `scripts/test_phase3.js` | **Deleted** | Tested only the 2FA lifecycle and break-glass recovery, both of which no longer exist. |
 
-> **Verified on 2026-09-27 under Node v22.23.3** against a live server on port
-> 4001: `test_api` 22 passed / 2 failed, `test_phase3` 0 passed / 8 failed,
-> `test_phase4` 5 passed / 0 failed, `test_phase5` 110 passed / 0 failed. These
-> are re-runs, not reported figures. All four failures groups are **stale test
-> expectations, not application defects** — `test_api` posts no body to
-> `/auth/refresh` ([`scripts/test_api.js:121`](scripts/test_api.js:121)) and
-> asserts 403 where the server correctly returns 401
-> ([`scripts/test_api.js:352`](scripts/test_api.js:352)); `test_phase3` expects
-> `recoveryKey` from `/api/auth/register`
-> ([`scripts/test_phase3.js:92`](scripts/test_phase3.js:92)), which now only
-> issues it from `/api/auth/break-glass/generate`
-> ([`src/routes/auth.js:567-577`](src/routes/auth.js:567)), so its 8 failures
-> are 1 root cause plus 7 cascades. None relate to Docker; none need chasing
-> during container work. Note also that [`README.md:450`](README.md)'s recorded
-> `109 passed / 0 failed / 2 skipped` is **stale**: the two skips were
-> data-driven (no `ContactLens` rows) and the database now holds 7, so the
-> current true figure is 110/0/0.
+> **Verified on 2026-09-27 under Node v22.23.3** against a freshly booted server
+> on port 4200, with a database built from [`init_db.sql`](init_db.sql):
+> `test_api` 25/0 and `test_phase4` 5/0, with no warnings in the boot log.
+>
+> A caution worth recording, because it produced genuinely misleading results
+> during this work: the suites default to port 4001, and a **stale container from
+> an older image was still listening there**, running the pre-removal code. The
+> old suite reported "22 passed / 2 failed" against it — a number that described
+> the wrong program entirely. Always point the suites at the server you actually
+> mean with `API_BASE=http://host:port`, and check which process owns the port
+> before believing any result.
 
 Also note that the test suites are **not shipped in the image** — the Dockerfile
 copies no `scripts/` directory ([`Dockerfile:90-99`](Dockerfile:90)) — and are not
@@ -1034,6 +1123,5 @@ Whichever you choose, the `X-CMS-API-KEY` value must be the real `API_KEY` from
 | [`src/server.js`](src/server.js) | App wiring, `/health`, boot guards, graceful shutdown. |
 | [`src/services/db.js`](src/services/db.js) | The `sqlite3` CLI transport and `DB_FILE` resolution. |
 | [`src/middleware/apiKeyAuth.js`](src/middleware/apiKeyAuth.js) | `X-CMS-API-KEY` verification, fail-closed. |
-| [`src/middleware/auth.js`](src/middleware/auth.js) | JWT handling and the production secret guards. |
 | [`workflows/n8n_contact_lens_expiry_alert.json`](workflows/n8n_contact_lens_expiry_alert.json) | The inbound n8n workflow. |
 | [`README.md`](README.md) | Application documentation. |
