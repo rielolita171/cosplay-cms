@@ -174,25 +174,70 @@ function verifyToken(req, res, next) {
 }
 
 // ============================================================================
-// Authorization Middleware - Check User Role
+// ROLES AND THE WRITE GUARD
 // ============================================================================
+/**
+ * THE ROLE LADDER
+ * ---------------
+ *   guest   0  no data access at all (cannot authenticate; kept for the ladder's
+ *              floor so an unknown role fails closed rather than throwing)
+ *   viewer  1  READ-ONLY. Every GET works; every write is 403. This is the tier
+ *              added for "can see the records but must not change them".
+ *   user    2  the default every self-registration gets; full CRUD on records.
+ *   curator 3  unchanged by the viewer work — kept so existing curator accounts
+ *              keep whatever they could already do.
+ *   admin   4  + user management (GET /auth/users, PATCH /auth/users/:id/role).
+ *
+ * WHY `viewer` SITS BELOW `user` AND NOT INSTEAD OF IT
+ * `authorize()` existed from the start but was never mounted on a single route, so
+ * before this change the ladder was decorative: every authenticated account could
+ * write everything. `viewer` is therefore not a rename of `user`, it is a strictly
+ * weaker tier, and the write guard below is what actually gives it teeth.
+ *
+ * WHY AN UNKNOWN ROLE MAPS TO 0
+ * `role` is a TEXT column that pre-dates this ladder, so a row can hold any string
+ * at all (and `createUser` defaults to 'user', but a hand-edited or imported row
+ * need not). Mapping an unrecognised value to the FLOOR means a role this code
+ * does not understand can never accidentally satisfy a `>= 'user'` check. The
+ * lookup uses hasOwnProperty rather than a `||` fallback so a role literally named
+ * 'toString' cannot resolve to a function off the prototype.
+ */
+const ROLE_LEVELS = Object.freeze({
+  guest: 0,
+  viewer: 1,
+  user: 2,
+  curator: 3,
+  admin: 4
+});
+
+// The roles a client may be told about. Ordered weakest-first so the admin panel's
+// <select> can be generated from it without hardcoding the ladder a second time.
+const ASSIGNABLE_ROLES = Object.freeze(['viewer', 'user', 'curator', 'admin']);
+
+// The tier at which an account may change data. `viewer` is deliberately below it.
+const WRITE_ROLE = 'user';
+
+function roleLevel(role) {
+  return Object.prototype.hasOwnProperty.call(ROLE_LEVELS, role) ? ROLE_LEVELS[role] : 0;
+}
+
+function hasRoleAtLeast(role, minimumRole) {
+  return roleLevel(role) >= roleLevel(minimumRole);
+}
+
+/**
+ * Authorization Middleware - Check User Role
+ *
+ * Kept as the general-purpose "at least this tier" guard. The ladder it reads is
+ * the shared ROLE_LEVELS above, so it can no longer drift from requireWriteAccess.
+ */
 function authorize(requiredRole) {
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const roleHierarchy = {
-      'admin': 3,
-      'curator': 2,
-      'user': 1,
-      'guest': 0
-    };
-
-    const userLevel = roleHierarchy[req.user.role] || 0;
-    const requiredLevel = roleHierarchy[requiredRole] || 0;
-
-    if (userLevel < requiredLevel) {
+    if (!hasRoleAtLeast(req.user.role, requiredRole)) {
       return res.status(403).json({
         error: `Access denied. Required role: ${requiredRole}`
       });
@@ -200,6 +245,54 @@ function authorize(requiredRole) {
 
     next();
   };
+}
+
+/**
+ * The read/write split, as one METHOD-based middleware.
+ *
+ * WHY METHOD-BASED RATHER THAN ONE MOUNT PER WRITE ROUTE
+ * A viewer has to be stopped from POST, PUT, PATCH and DELETE on five routers plus
+ * the two upload endpoints. Enumerating those per route is the shape of bug this
+ * project has already been bitten by once (see the prefix-scoped-guard warning in
+ * server.js: a guard mounted too broadly starts 401ing unrelated routes). Deciding
+ * from `req.method` instead means the guard covers every mutating handler that
+ * exists NOW and every one added to the same router later, with nothing to remember
+ * and no per-route list to fall out of date.
+ *
+ * Safe methods pass through untouched — a viewer must be able to READ everything,
+ * which is the whole point of the tier.
+ *
+ * WHY req.apiKeyAuth IS AN EXPLICIT PASS
+ * The image endpoints accept EITHER a user JWT OR the X-CMS-API-KEY header (n8n).
+ * An API-key request never populates req.user, so "no req.user" is ambiguous
+ * between "machine caller" and "somebody forgot to authenticate". apiKeyAuth.js
+ * sets the marker only after the key has been verified in constant time, so this
+ * check cannot be satisfied by merely sending the header.
+ *
+ * MOUNT ORDER MATTERS: this must come AFTER an authentication guard. Mounted on its
+ * own it would 401 every anonymous request, which is correct, but it would also
+ * 403 a legitimate viewer on a route that never authenticated them — the 401
+ * branch below is a fail-closed safety net, not the primary check.
+ */
+const READ_ONLY_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+function requireWriteAccess(req, res, next) {
+  if (READ_ONLY_METHODS.has(req.method)) return next();
+  if (req.apiKeyAuth) return next();
+
+  if (!req.user) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  if (!hasRoleAtLeast(req.user.role, WRITE_ROLE)) {
+    return res.status(403).json({
+      error: 'Your account has read-only access. Editing records requires an editor account.',
+      code: 'READ_ONLY_ROLE',
+      role: req.user.role,
+      requiredRole: WRITE_ROLE
+    });
+  }
+
+  next();
 }
 
 // ============================================================================
@@ -227,7 +320,13 @@ module.exports = {
   verifyJwt,
   verifyToken,
   authorize,
+  requireWriteAccess,
+  hasRoleAtLeast,
+  roleLevel,
   optionalAuth,
+  ROLE_LEVELS,
+  ASSIGNABLE_ROLES,
+  WRITE_ROLE,
   validateJwtSecret,
   extractBearerToken,
   TOKEN_TYPE,

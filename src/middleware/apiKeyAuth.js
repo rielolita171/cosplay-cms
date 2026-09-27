@@ -48,6 +48,15 @@ function requireApiKey(req, res, next) {
     });
   }
 
+  // Mark the request as machine-authenticated. Set ONLY here, i.e. only after the
+  // key has passed the constant-time comparison above, so it cannot be obtained by
+  // merely sending the header. requireWriteAccess() (middleware/auth.js) reads this
+  // to let an n8n caller through the read/write split: a viewer is a human without
+  // edit rights, whereas an API key is a server-to-server integration that has no
+  // role at all. Without the marker the two would be indistinguishable, because a
+  // key-authenticated request never populates req.user.
+  req.apiKeyAuth = true;
+
   next();
 }
 

@@ -215,8 +215,17 @@ app.get('/api/version', (req, res) => {
       'DELETE /api/lenses/:id',
       'POST /api/images/upload',
       'POST /api/images/upload-multiple',
-      'GET /api/images/stats'
-    ]
+      'GET /api/images/stats',
+      'DELETE /api/costumes/:id/images',
+      'GET /api/auth/users (admin)',
+      'PATCH /api/auth/users/:id/role (admin)'
+    ],
+    roles: {
+      note: 'Roles are a ladder. Read the first tier at or above your own to learn what you may do.',
+      ladder: ['guest (0, no data access)', 'viewer (1, read-only)', 'user (2, full record CRUD)', 'curator (3)', 'admin (4, + user management)'],
+      write_tier: 'user',
+      read_only_error: '403 { code: "READ_ONLY_ROLE" } is returned to a viewer on any POST/PUT/PATCH/DELETE.'
+    }
   });
 });
 
@@ -242,42 +251,65 @@ app.use('/', authRoutes);
 // Scoping the mount to the resource keeps the guard applied to exactly the
 // routes it protects, and no later edit can mount one ahead of it.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// THE READ/WRITE SPLIT
+// ---------------------------------------------------------------------------
+// requireWriteAccess is the second guard on every data mount. It reads the HTTP
+// method: GET/HEAD/OPTIONS pass, and every mutating method (POST/PUT/PATCH/DELETE)
+// requires the 'user' tier or above. That is what makes a `viewer` account
+// read-only instead of merely labelled read-only.
+//
+// It is mounted PER RESOURCE, immediately after verifyToken, for the same reason
+// the auth guard is (see the WARNING above): the order in this list is the order
+// the request passes through, and there is exactly one line per resource so a
+// route added later cannot accidentally be mounted without it.
+//
+//   verifyToken  ->  who are you          (401 if not)
+//
+//   requireWriteAccess -> may you change it (403 READ_ONLY_ROLE if a viewer)
+//
+// An API-key caller carries no role at all, so requireWriteAccess lets it through
+// on the strength of the marker apiKeyAuth.js sets after verifying the key. That
+// is deliberate: the n8n workflow is a server-to-server integration, not a person
+// whose permissions should be a tier.
 const authMiddleware = require('./middleware/auth');
 const { verifyTokenOrApiKey } = require('./middleware/apiKeyAuth');
+const { requireWriteAccess } = authMiddleware;
 
 const costumeRoutes = require('./routes/costumes');
-app.use('/api/costumes', authMiddleware.verifyToken, costumeRoutes);
-app.use('/costumes', authMiddleware.verifyToken, costumeRoutes);
+app.use('/api/costumes', authMiddleware.verifyToken, requireWriteAccess, costumeRoutes);
+app.use('/costumes', authMiddleware.verifyToken, requireWriteAccess, costumeRoutes);
 
 // Brand / Fandom reference lists. Same prefix-scoped guard as the other data
 // routes — see the WARNING above about mounting on '/' or '/api'.
 const brandRoutes = require('./routes/brands');
-app.use('/api/brands', authMiddleware.verifyToken, brandRoutes);
-app.use('/brands', authMiddleware.verifyToken, brandRoutes);
+app.use('/api/brands', authMiddleware.verifyToken, requireWriteAccess, brandRoutes);
+app.use('/brands', authMiddleware.verifyToken, requireWriteAccess, brandRoutes);
 
 const fandomRoutes = require('./routes/fandoms');
-app.use('/api/fandoms', authMiddleware.verifyToken, fandomRoutes);
-app.use('/fandoms', authMiddleware.verifyToken, fandomRoutes);
+app.use('/api/fandoms', authMiddleware.verifyToken, requireWriteAccess, fandomRoutes);
+app.use('/fandoms', authMiddleware.verifyToken, requireWriteAccess, fandomRoutes);
 
 const propsRoutes = require('./routes/props');
-app.use('/api/props', authMiddleware.verifyToken, propsRoutes);
-app.use('/props', authMiddleware.verifyToken, propsRoutes);
+app.use('/api/props', authMiddleware.verifyToken, requireWriteAccess, propsRoutes);
+app.use('/props', authMiddleware.verifyToken, requireWriteAccess, propsRoutes);
 
 const lensesRoutes = require('./routes/lenses');
-app.use('/api/lenses', authMiddleware.verifyToken, lensesRoutes);
-app.use('/lenses', authMiddleware.verifyToken, lensesRoutes);
+app.use('/api/lenses', authMiddleware.verifyToken, requireWriteAccess, lensesRoutes);
+app.use('/lenses', authMiddleware.verifyToken, requireWriteAccess, lensesRoutes);
 
 // Image endpoints are used by the browser SPA *and* by n8n (X-CMS-API-KEY), so
-// they accept either credential.
+// they accept either credential. Uploading IS a write, so the same split applies —
+// a viewer may keep looking at the photos but cannot add any.
 const imageRoutes = require('./routes/images');
-app.use('/api/images', verifyTokenOrApiKey, imageRoutes);
-app.use('/images', verifyTokenOrApiKey, imageRoutes);
+app.use('/api/images', verifyTokenOrApiKey, requireWriteAccess, imageRoutes);
+app.use('/images', verifyTokenOrApiKey, requireWriteAccess, imageRoutes);
 
 // Alias kept for the phase-5 frontend spec (`POST /api/upload`). Same handler,
 // same guard, same response shape as the canonical /api/images/upload.
 // Mounted with app.post (not app.use) so the guard is scoped to this one path.
-app.post('/api/upload', verifyTokenOrApiKey, imageRoutes.singleUploadChain);
-app.post('/upload', verifyTokenOrApiKey, imageRoutes.singleUploadChain);
+app.post('/api/upload', verifyTokenOrApiKey, requireWriteAccess, imageRoutes.singleUploadChain);
+app.post('/upload', verifyTokenOrApiKey, requireWriteAccess, imageRoutes.singleUploadChain);
 
 // Notification endpoints are machine-to-machine only (n8n); they keep the
 // stricter X-CMS-API-KEY guard defined inside the router.
