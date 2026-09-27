@@ -3,9 +3,9 @@
  *
  * WHY A SEPARATE MODULE
  * The project has no bind-parameter API: every route file spawns the `sqlite3`
- * binary and pipes a SQL string to stdin (see the header of src/services/db.js;
- * `better-sqlite3` is unusable on this Node 18 runtime). "Use prepared
- * statements" is therefore not available, and the equivalent safety has to come
+ * binary and pipes a SQL string to stdin — that CLI is the only driver, there is
+ * no in-process SQLite binding (see the header of src/services/db.js). "Use
+ * prepared statements" is therefore not available, and safety has to come
  * from the text that reaches the statement. The route files each carry their own
  * copy of the spawn/parse helpers, so without a shared home it is trivially easy
  * for one file to gain a fourth, slightly different, escaping rule. This module

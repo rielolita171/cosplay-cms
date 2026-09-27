@@ -9,9 +9,11 @@
  * helper with a consistent escaping + row-parsing contract, and a home for the
  * migration statements.
  *
- * NOTE ON better-sqlite3: it is listed in package.json, but the prebuilt native
- * binding segfaults under this project's Node 18 runtime, so the established
- * `sqlite3` CLI pattern is used here instead of introducing a runtime crash.
+ * THE DRIVER: there is no in-process SQLite binding. Every query in this project
+ * is a short-lived `spawn('sqlite3', [DB_FILE])` child process fed SQL on stdin.
+ * `better-sqlite3` was declared in package.json but required by zero lines of app
+ * code, and it cannot install in a slim container image (no prebuilds, gypfile
+ * disabled, no install script), so it has been removed as a dependency.
  */
 const { spawn } = require('child_process');
 
