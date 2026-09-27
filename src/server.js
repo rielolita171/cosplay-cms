@@ -443,7 +443,14 @@ async function reportTelegram2FAConfig() {
   }
 }
 
-app.listen(PORT, () => {
+// The host is explicit rather than relying on the no-host overload. Without it
+// Node binds `::` (the unspecified IPv6 address, dual-stack), which is correct on
+// a normal Linux host but is exactly the kind of implicit default that a
+// container runtime, a hardened sysctl, or a future base-image change can turn
+// into a listen-only-on-loopback. Naming 0.0.0.0 states the intent: reachable
+// from outside this network namespace, which is what a published container port
+// needs.
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n${'='.repeat(60)}`);
   console.log('✅ Express Server Started');
   console.log(`${'='.repeat(60)}`);
@@ -479,14 +486,53 @@ app.listen(PORT, () => {
   console.log('\nℹ️  Frontend SPA: public/index.html\n');
 });
 
-process.on('SIGTERM', () => {
-  console.log('🛑 SIGTERM received, shutting down gracefully...');
-  process.exit(0);
-});
+// ============================================================================
+// GRACEFUL SHUTDOWN
+// ============================================================================
+// `docker stop` sends SIGTERM and then SIGKILLs after 10s. The old handlers
+// called process.exit(0) the instant the signal arrived, which tore down sockets
+// that in-flight requests were still writing to — the client sees a truncated
+// response even though the work completed server-side.
+//
+// server.close() stops the listener and waits for existing connections to
+// drain, which is what "graceful" means here. There is no connection pool or
+// long-lived handle to close beyond the HTTP server: each query is its own
+// short-lived `sqlite3` child process that has already exited by the time its
+// promise settles, so there is nothing to close on that side.
+//
+// The 9s failsafe exists because server.close() waits forever if a client holds
+// a keep-alive socket open. Without it the container would sit until Docker's
+// 10s SIGKILL and be reported as a failed stop (exit 137) rather than a clean 0.
+const SHUTDOWN_FAILSAFE_MS = 9000;
 
-process.on('SIGINT', () => {
-  console.log('\n🛑 Server interrupted, shutting down...');
-  process.exit(0);
-});
+let shuttingDown = false;
+
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  console.log(`\n🛑 ${signal} received, draining connections (max ${SHUTDOWN_FAILSAFE_MS}ms)...`);
+
+  const failsafe = setTimeout(() => {
+    console.error(`   ⏱️  ${SHUTDOWN_FAILSAFE_MS}ms elapsed with connections still open, forcing exit (code 1).`);
+    process.exit(1);
+  }, SHUTDOWN_FAILSAFE_MS);
+
+  // server.close() reports its error argument; there is no error to expect here,
+  // but an explicit handler keeps a future failure from becoming an unhandled
+  // 'error' event on the http.Server.
+  server.close((err) => {
+    clearTimeout(failsafe);
+    if (err) {
+      console.error('   Error while closing the server:', err.message || err);
+      process.exit(1);
+    }
+    console.log('✅ All connections closed. Shutdown complete.');
+    process.exit(0);
+  });
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 module.exports = app;
