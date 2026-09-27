@@ -18,7 +18,8 @@ const {
   authorize,
   ASSIGNABLE_ROLES,
   TOKEN_TYPE,
-  TEMP_2FA_TTL_SECONDS
+  TEMP_2FA_TTL_SECONDS,
+  JWT_SECRET
 } = require('../middleware/auth');
 
 // ============================================================================
@@ -265,9 +266,17 @@ function generateOtp() {
 /**
  * The OTP is never stored in plaintext: only an HMAC keyed with a per-user
  * server secret. Verification is a constant-time compare of HMACs.
+ *
+ * The pepper is the same secret the JWT layer uses, so it is resolved through
+ * src/middleware/auth.js rather than re-read from the environment here. That
+ * module already throws in production when JWT_SECRET is missing instead of
+ * falling back to a public literal — re-reading process.env.JWT_SECRET with a
+ * second `||` fallback would silently reintroduce that exact hole, since this
+ * pepper protects the stored OTP hash. Outside production the dev placeholder
+ * is still used, so local dev and the test suites are unaffected.
  */
 function otpPepper() {
-  return process.env.JWT_SECRET || 'dev-secret-key-change-in-production';
+  return JWT_SECRET;
 }
 
 function hashOtp(userId, otp) {

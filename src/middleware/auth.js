@@ -2,7 +2,37 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const db = require('../services/db');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-key-change-in-production';
+/**
+ * The dev placeholder below is a deliberate convenience for local work and for
+ * the test suites, which run with no real secret. It must never be usable in
+ * production: signing production tokens with a public literal means anybody can
+ * mint a valid admin token, so the fallback is gated on NODE_ENV and THROWS in
+ * production rather than silently substituting.
+ *
+ * The full strength check (length, entropy, known-weak list) lives in
+ * validateJwtSecret() below and is run once by the boot guard in server.js,
+ * which is the single place that decides whether this process may serve. This
+ * guard exists only so that an unset/placeholder secret can never become a
+ * signing key at all, even if this module is required outside that boot path.
+ */
+const DEV_JWT_SECRET = 'dev-secret-key-change-in-production';
+
+function resolveJwtSecret() {
+  const secret = process.env.JWT_SECRET;
+
+  if (secret) return secret;
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'FATAL: JWT_SECRET is not set. Refusing to sign tokens with a placeholder. ' +
+      'Set a strong secret before starting in production, e.g. JWT_SECRET=$(openssl rand -hex 32).'
+    );
+  }
+
+  return DEV_JWT_SECRET;
+}
+
+const JWT_SECRET = resolveJwtSecret();
 
 // Token type claims — every token we issue carries exactly one of these.
 const TOKEN_TYPE = {
@@ -328,6 +358,7 @@ module.exports = {
   ASSIGNABLE_ROLES,
   WRITE_ROLE,
   validateJwtSecret,
+  JWT_SECRET,
   extractBearerToken,
   TOKEN_TYPE,
   ACCESS_TTL,
