@@ -4157,7 +4157,13 @@
     // ==========================================================================
     function seedImageCache(costume) {
       const urls = parseImageUrls(costume.imageUrls);
-      if (urls.length) state.imageUrlsCache[costume.id] = urls;
+      // ALWAYS sync the cache with the server, even when empty.
+      // The old code only overwrote when non-empty, so a delete that
+      // left the server with [] would leave the stale cache intact.
+      // Then upload would merge new URLs into that stale cache, and
+      // costumeImages() would union them back -> 3 photos when the
+      // server only has 2. This makes the server the source of truth.
+      state.imageUrlsCache[costume.id] = urls;
     }
 
     function costumeImages(costume) {
@@ -6647,8 +6653,11 @@
 
         // ...then persist the WHOLE set in one PUT.
         try {
-          const current = state.costumes.find(c => clean(c.id) === clean(costumeId)) || { id: costumeId };
-          const merged = costumeImages(current);
+          // Use mergedCache (which has the new URLs) instead of re-reading
+          // from state.costumes, because loadCostumes() above refreshed the
+          // cache with the OLD server list (without the new URLs). mergedCache
+          // is the correct union of old + new for this session.
+          const merged = mergedCache.slice();
           // Belt and braces against the server's per-url length cap: a url that
           // arrived here but is over the limit would make the whole PUT 400 and
           // cost the user every photo in the batch, not just the bad one.
