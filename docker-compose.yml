@@ -1,8 +1,14 @@
 # ==============================================================================
 # cosplay-cms — single-service deployment stack
 #
-#   cp .env.example .env   # fill in JWT_SECRET and API_KEY
+#   cp .env.example .env   # fill in API_KEY
 #   docker compose up -d --build
+#
+# This service is UNAUTHENTICATED by design. There is no login, no account and
+# no session; anyone who can reach the published port can read and change every
+# costume, prop, lens, brand, fandom and image. Bind it to a trusted network or
+# put it behind an authenticating reverse proxy — do not publish it to the
+# internet. DOCKER.md explains the boundary in full.
 #
 # The project's own docker-compose sketch in
 # cosplay_cms_phase_by_phase_implementation_server_setup_guide.md:419-426 is
@@ -41,9 +47,6 @@ services:
     environment:
       # Matches the image's EXPOSE and src/server.js. Do not remap internally.
       PORT: "4001"
-      # Drives the production-only guards: JWT_SECRET is mandatory
-      # (src/middleware/auth.js:5 throws at load) and must be strong
-      # (src/server.js:20-36 exits(1) on a placeholder).
       NODE_ENV: "production"
       # Absolute, on the volume below. db.js's own default is the relative
       # 'data/db/cms.db' resolved against cwd=/app, which points here too; this

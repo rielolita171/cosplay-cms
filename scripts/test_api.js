@@ -5,8 +5,6 @@ const { parse } = require('url');
 // Test configuration
 const PORT = process.env.PORT || 4001;
 const API_BASE = process.env.API_BASE || `http://localhost:${PORT}`;
-let TOKEN = null;
-let TEST_USER_ID = null;
 let TEST_COSTUME_ID = null;
 let TEST_PROP_ID = null;
 let TEST_LENS_ID = null;
@@ -32,9 +30,9 @@ function makeRequest(method, path, data = null) {
       }
     };
 
-    if (TOKEN) {
-      options.headers.Authorization = `Bearer ${TOKEN}`;
-    }
+    // NOTE: no Authorization header. This deployment has no login and no
+    // session tokens (see testNoAuthentication for why), so sending one would
+    // only ever be a header the server ignores.
 
     const req = http.request(options, (res) => {
       let body = '';
@@ -74,59 +72,62 @@ function logTest(name, passed, details = '') {
 }
 
 // ============================================================================
-// PHASE 1: AUTHENTICATION TESTS
+// PHASE 1: NO-AUTHENTICATION DEPLOYMENT
 // ============================================================================
-async function testAuthentication() {
-  console.log('\n=== PHASE 1: AUTHENTICATION ===\n');
+// This app is deliberately unauthenticated: it is a private single-user CMS
+// and the operator secures it at the network/reverse-proxy boundary. These
+// tests assert that CONTRACT, not a previous one.
+//
+// Asserting 404 on the old login routes is deliberate, not leftover cruft. It
+// is the only thing that catches a partially-completed removal — if someone
+// re-adds a route or a middleware that is no longer documented, /api/version's
+// `authentication.scheme` still says "none" while the routes work, and this
+// test is what makes that disagreement loud.
+async function testNoAuthentication() {
+  console.log('\n=== PHASE 1: NO-AUTHENTICATION DEPLOYMENT ===\n');
 
-  // Register user
-  const registerRes = await makeRequest('POST', '/auth/register', {
-    username: `testuser${Date.now()}`,
-    email: `test${Date.now()}@example.com`,
-    password: 'TestPassword123!'
-  });
+  const versionRes = await makeRequest('GET', '/api/version');
+  const auth = (versionRes.body && versionRes.body.authentication) || {};
 
   logTest(
-    'Register new user',
-    registerRes.status === 201 && registerRes.body.token,
-    `Status: ${registerRes.status}`
+    'Version endpoint declares authentication is not required',
+    versionRes.status === 200 && auth.required === false && auth.scheme === 'none',
+    `required: ${auth.required}, scheme: ${auth.scheme}`
   );
 
-  if (registerRes.body && registerRes.body.token) {
-    TOKEN = registerRes.body.token;
-    TEST_USER_ID = registerRes.body.id;
+  // Every route the old auth module served must now be gone. `/auth/profile`
+  // is the one that matters most: it was the endpoint a viewer role was locked
+  // out of, so its disappearance is the clearest proof the role system went.
+  for (const route of ['/auth/register', '/auth/login', '/auth/profile', '/auth/refresh']) {
+    const res = await makeRequest('GET', route);
+    logTest(
+      `Removed auth route stays gone: ${route}`,
+      res.status === 404,
+      `Status: ${res.status}`
+    );
   }
 
-  // Login
-  const loginRes = await makeRequest('POST', '/auth/login', {
-    username: registerRes.body.username,
-    password: 'TestPassword123!'
+  // A read and a write, both with no credentials of any kind.
+  const unauthRead = await makeRequest('GET', '/costumes');
+  logTest(
+    'Allow unauthenticated read',
+    unauthRead.status === 200,
+    `Status: ${unauthRead.status}`
+  );
+
+  const unauthWrite = await makeRequest('POST', '/brands', {
+    name: 'Unauthenticated Write Probe',
+    slug: `unauth-probe-${Date.now()}`
   });
-
   logTest(
-    'Login with credentials',
-    loginRes.status === 200 && loginRes.body.token,
-    `Status: ${loginRes.status}`
+    'Allow unauthenticated write',
+    unauthWrite.status === 201,
+    `Status: ${unauthWrite.status}`
   );
 
-  // Get profile
-  const profileRes = await makeRequest('GET', '/auth/profile');
-  logTest(
-    'Get authenticated user profile',
-    profileRes.status === 200 && profileRes.body.username,
-    `User: ${profileRes.body.username}`
-  );
-
-  // Refresh token
-  const refreshRes = await makeRequest('POST', '/auth/refresh');
-  logTest(
-    'Refresh JWT token',
-    refreshRes.status === 200 && refreshRes.body.token,
-    `Status: ${refreshRes.status}`
-  );
-
-  if (refreshRes.body && refreshRes.body.token) {
-    TOKEN = refreshRes.body.token;
+  // Clean up the probe so a repeated run does not accumulate brands.
+  if (unauthWrite.status === 201 && unauthWrite.body && unauthWrite.body.id) {
+    await makeRequest('DELETE', `/brands/${unauthWrite.body.id}`);
   }
 }
 
@@ -331,29 +332,6 @@ async function testErrorHandling() {
     `Status: ${invalidIdRes.status}`
   );
 
-  // Unauthenticated access (remove token)
-  const savedToken = TOKEN;
-  TOKEN = null;
-
-  const unauthRes = await makeRequest('GET', '/auth/profile');
-  logTest(
-    'Reject unauthenticated access to protected endpoint',
-    unauthRes.status === 401,
-    `Status: ${unauthRes.status}`
-  );
-
-  TOKEN = savedToken;
-
-  // Invalid token
-  TOKEN = 'invalid.token.here';
-  const invalidTokenRes = await makeRequest('GET', '/auth/profile');
-  logTest(
-    'Reject invalid JWT token',
-    invalidTokenRes.status === 403,
-    `Status: ${invalidTokenRes.status}`
-  );
-
-  TOKEN = savedToken;
 }
 
 // ============================================================================
@@ -401,7 +379,7 @@ async function runAllTests() {
   console.log('='.repeat(50));
 
   try {
-    await testAuthentication();
+    await testNoAuthentication();
     await testCostumes();
     await testProps();
     await testLenses();

@@ -7,7 +7,6 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "test": "node scripts/test_api.js",
-    "test:phase3": "node scripts/test_phase3.js",
     "test:phase4": "node scripts/test_phase4.js",
     "test:phase5": "node scripts/test_phase5.js"
   },
@@ -18,17 +17,13 @@
     "node": ">=22"
   },
   "dependencies": {
-    "bcryptjs": "^2.4.3",
-    "body-parser": "^2.3.0",
     "cors": "^2.8.6",
     "dotenv": "^18.0.4",
     "express": "^5.2.1",
     "helmet": "^8.3.0",
-    "jsonwebtoken": "^9.0.2",
     "morgan": "^1.12.1",
     "multer": "^1.4.5-lts.1",
     "sharp": "^0.33.5",
-    "uuid": "^14.0.2",
     "xlsx": "^0.18.5"
   }
 }
