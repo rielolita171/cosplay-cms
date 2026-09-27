@@ -1427,8 +1427,12 @@
   </dialog>
 
   <!-- Modal: Edit Costume (opened from a card's Edit button via
-       bindGridEvents -> data-action="edit"). Every field here is one of the
-       seven accepted by PUT /api/costumes/:id. -->
+       bindGridEvents -> data-action="edit"). Every field here maps to a key
+       PUT /api/costumes/:id accepts: status, isFullset, doneCostest, doneEvent,
+       donePhotoSession, notes, buyPrice, brand, fandom, and size (or sizeOther
+       when the "Custom" option is chosen — never both). `character` is absent
+       on purpose: it is a POST/create-only column, so a typo here is ignored
+       rather than silently renaming a costume. -->
   <dialog id="modal-edit-costume">
     <h3 style="margin-bottom: 4px;">Edit Costume</h3>
     <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 16px;" id="edit-costume-subtitle"></p>
