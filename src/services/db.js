@@ -444,6 +444,56 @@ async function countUsersWith2FAEnabled(requireChatId) {
   return parseInt(String(output).trim(), 10) || 0;
 }
 
+/**
+ * Every account, for the admin panel.
+ *
+ * The projection is EXPLICIT rather than `USER_SELECT *` because the two columns
+ * that must never leave the process — passwordHash and twoFactorSecret — sit in
+ * the same table. Selecting a column list here is what guarantees a future
+ * `SELECT *` edit cannot start shipping bcrypt hashes and TOTP seeds to a
+ * browser-facing endpoint. `twoFactorEnabled` is derived from the raw column with
+ * toBool() for the same reason the rest of the codebase does it: over this pipe
+ * transport an INTEGER arrives as the string '1'/'0', and the string '0' is
+ * truthy in JavaScript.
+ */
+async function listUsers() {
+  await initSchema();
+  const columns = ['id', 'username', 'email', 'role', 'telegram2FAEnabled', 'createdAt', 'updatedAt'];
+  const rows = await parseRows(
+    await runSql(
+      `SELECT ${columns.map(c => `"${c}"`).join(', ')} FROM "User" ORDER BY LOWER(username) ASC;`
+    ),
+    columns
+  );
+  return rows.map(row => ({
+    id: row.id,
+    username: row.username,
+    email: row.email,
+    // A row predating the ladder, or a hand-edited one, can hold anything. Report
+    // the stored value verbatim rather than inventing one, and let the client show
+    // it as-is; roleLevel() already maps an unknown value to the floor, so an
+    // unrecognised role can never satisfy a write check.
+    role: row.role || 'user',
+    twoFactorEnabled: row.telegram2FAEnabled === '1',
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  }));
+}
+
+/**
+ * How many accounts currently hold the 'admin' role.
+ *
+ * The role endpoint refuses to demote the last admin. That check is only
+ * meaningful if it can count admins, and it has to count them the same way the
+ * ladder reads them — hence a string comparison against the literal rather than a
+ * numeric level.
+ */
+async function countAdmins() {
+  await initSchema();
+  const output = await runSql(`SELECT COUNT(*) FROM "User" WHERE role = 'admin';`);
+  return parseInt(String(output).trim(), 10) || 0;
+}
+
 async function updateUser(id, fields) {
   const keys = Object.keys(fields);
   if (keys.length === 0) return;
@@ -469,6 +519,8 @@ module.exports = {
   getUserById,
   getUserByUsername,
   createUser,
+  listUsers,
+  countAdmins,
   updateUser,
   countUsersWith2FAEnabled,
   DB_FILE

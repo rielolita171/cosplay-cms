@@ -8,12 +8,15 @@ const db = require('../services/db');
 const { send2FAOTP } = require('../services/telegramService');
 const { generateBreakGlassRecoveryKey, verifyRecoveryKey } = require('../services/recoveryService');
 const { rateLimit } = require('../middleware/rateLimit');
+const { enumParam, idParam } = require('../services/sqlSafety');
 const {
   generateToken,
   generateRefreshToken,
   generateTemp2FAToken,
   verifyJwt,
   verifyToken,
+  authorize,
+  ASSIGNABLE_ROLES,
   TOKEN_TYPE,
   TEMP_2FA_TTL_SECONDS
 } = require('../middleware/auth');
@@ -581,5 +584,116 @@ setInterval(() => {
     console.error('❌ token sweep failed:', error.message);
   });
 }, 60 * 60 * 1000).unref();
+
+// ============================================================================
+// GET /auth/users — list accounts (ADMIN ONLY)
+// ============================================================================
+// WHY A DEDICATED PROJECTION RATHER THAN publicUser()
+// publicUser() is the *own-profile* projection: it deliberately returns
+// telegramChatId, which is acceptable to hand back to the person it belongs to
+// but is nobody else's business. A user list is a different disclosure context,
+// so this endpoint does not reuse it — db.listUsers() already selects an
+// explicit column list that contains no passwordHash and no twoFactorSecret, and
+// the rows are returned as-is. There is no code path here that can widen that
+// projection, which is the property that matters: a future column added to the
+// table cannot leak by default, because the SELECT names its columns.
+router.get('/auth/users', verifyToken, authorize('admin'), async (req, res) => {
+  try {
+    const users = await db.listUsers();
+    res.json({ users, assignableRoles: ASSIGNABLE_ROLES });
+  } catch (error) {
+    console.error('❌ list users error:', error);
+    res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+  }
+});
+
+// ============================================================================
+// PATCH /auth/users/:id/role — change an account's role (ADMIN ONLY)
+// ============================================================================
+// Body: { role }
+//
+// Four rules, each of which exists because the obvious version of this endpoint
+// has a way to permanently lock the instance out of its own user management:
+//
+//  1. ROLE IS ALLOWLISTED, NOT ESCAPED. The value lands in a SQL string literal
+//     inside db.updateUser(). enumParam() rejects anything outside
+//     ASSIGNABLE_ROLES with a 400 rather than sanitising it into something inert,
+//     which is the strongest of the available defences for a genuinely finite
+//     domain.
+//  2. NO SELF-CHANGE. An admin demoting themselves would strand the account the
+//     new panel needs; combined with (3) that is a one-click permanent lockout.
+//  3. NO DEMOTING THE LAST ADMIN. countAdmins() is read BEFORE the write, so
+//     "is this the last one" is answered against the state the change applies
+//     to. Note it counts `role = 'admin'` as a string rather than via the
+//     numeric ladder, because the ladder's floor-mapping would quietly disagree
+//     with a literal comparison for any role value this code does not know.
+//  4. A NON-EXISTENT TARGET IS A 404, not a silent 200, so the admin panel can
+//     tell "applied" from "there was nothing to apply it to".
+//
+// Checks 1-3 are deliberately in the handler rather than in db.updateUser():
+// updateUser() is also used for non-role fields, and baking admin-lockout policy
+// into a generic column writer would either surprise its other callers or force
+// them to pass a flag to opt out of a rule that does not apply to them.
+router.patch('/auth/users/:id/role', verifyToken, authorize('admin'), async (req, res) => {
+  try {
+    const id = idParam(req.params.id);
+    if (!id) {
+      return res.status(400).json({ error: 'Invalid user id', code: 'INVALID_ID' });
+    }
+
+    // (1) allowlist — throws a 400-shaped error, caught below.
+    const role = enumParam(req.body ? req.body.role : undefined, ASSIGNABLE_ROLES, 'role');
+    if (!role) {
+      return res.status(400).json({
+        error: `role is required and must be one of: ${ASSIGNABLE_ROLES.join(', ')}`,
+        code: 'INVALID_ROLE'
+      });
+    }
+
+    const target = await db.getUserById(id);
+    if (!target) {
+      return res.status(404).json({ error: 'User not found', code: 'USER_NOT_FOUND' });
+    }
+
+    // (2) no self-change. Compared on id, not username: a username can be
+    // edited, and the token's id is the one thing that cannot be reassigned.
+    if (target.id === req.user.id) {
+      return res.status(400).json({
+        error: 'You cannot change your own role. Ask another administrator to do it.',
+        code: 'SELF_ROLE_CHANGE'
+      });
+    }
+
+    const currentRole = target.role || 'user';
+    if (currentRole === role) {
+      // Idempotent no-op. Reported as a success so a double-submit from the
+      // admin panel's <select> is not surfaced as an error.
+      return res.json({ user: { ...publicUser(target), role }, changed: false });
+    }
+
+    // (3) never demote the last admin. Checked only when the change actually
+    // removes an admin, so promoting or editing a non-admin is never blocked.
+    if (currentRole === 'admin' && role !== 'admin') {
+      const adminCount = await db.countAdmins();
+      if (adminCount <= 1) {
+        return res.status(400).json({
+          error: 'Cannot demote the last remaining administrator. Promote another account first.',
+          code: 'LAST_ADMIN'
+        });
+      }
+    }
+
+    await db.updateUser(id, { role });
+
+    const updated = await db.getUserById(id);
+    res.json({ user: { ...publicUser(updated), role }, changed: true });
+  } catch (error) {
+    if (error && error.status === 400) {
+      return res.status(400).json({ error: error.message, code: 'INVALID_ROLE' });
+    }
+    console.error('❌ update role error:', error);
+    res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+  }
+});
 
 module.exports = router;
