@@ -233,11 +233,39 @@ function collapseWhitespace(value) {
   return String(value).replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Whether `body` carries `key` at all, ignoring an explicit JSON null.
+ *
+ * This is the presence test textParam() cannot make on its own. textParam()
+ * collapses three different inputs — absent, null and '' — into the single
+ * value `null`, which a route then reads as "leave this column alone". That
+ * conflates two distinct caller intents:
+ *
+ *   1. the caller never mentioned the field  -> partial update, leave alone
+ *   2. the caller sent '' because the user cleared the input -> clear it
+ *
+ * Intent 1 must survive: a partial update should not blank fields the caller
+ * never mentioned. But intent 2 has to be expressible, or a cleared input is
+ * silently discarded — which is exactly the bug this fixes. So presence is
+ * decided on the KEY, and only here.
+ *
+ * `null` counts as absent so an explicit null keeps the historical
+ * "leave it alone" meaning rather than silently clearing a column.
+ *
+ * @param {object} body the parsed request body
+ * @param {string} key  the field name to test for
+ * @returns {boolean} true when the caller supplied a real value for `key`
+ */
+function textUpdate(body, key) {
+  return body[key] !== undefined && body[key] !== null;
+}
+
 module.exports = {
   esc,
   badRequest,
   enumParam,
   textParam,
+  textUpdate,
   numberParam,
   idParam,
   hexColorParam,

@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
-const { esc, enumParam, textParam, idParam, hexColorParam } = require('../services/sqlSafety');
+const { esc, enumParam, textParam, textUpdate, idParam, hexColorParam } = require('../services/sqlSafety');
 
 // The five states a lens can be in. The GET / filter allowlists against this
 // list, and PUT validates against it too, so a status can never be written that
@@ -288,19 +288,30 @@ router.put('/:id', async (req, res) => {
     const normalizedPrescription = textParam(prescription, { name: 'prescription', maxLength: MAX_PRESCRIPTION_LENGTH, noSeparator: true });
     const normalizedPurchaseDate = textParam(purchaseDate, { name: 'purchaseDate', maxLength: MAX_DATE_LENGTH, noSeparator: true });
 
+    // Presence is decided on the KEY (textUpdate), not on whether the trimmed
+    // value is non-empty. Gating on `!== null` made a user-cleared input
+    // indistinguishable from an untouched one, so clearing a field was silently
+    // discarded. colorHexSupplied above already worked this way; these did not.
+    //
+    // `color` is NOT NULL in the schema, so an empty value is a caller error
+    // rather than something to clear.
+    if (textUpdate(body, 'color') && !normalizedColor) {
+      throw Object.assign(new Error('color cannot be empty'), { status: 400 });
+    }
+
     let updates = [];
-    if (normalizedCharacter !== null) updates.push(`character = ${esc(normalizedCharacter)}`);
-    if (normalizedColor !== null) updates.push(`color = ${esc(normalizedColor)}`);
+    if (textUpdate(body, 'character')) updates.push(`character = ${esc(normalizedCharacter)}`);
+    if (textUpdate(body, 'color')) updates.push(`color = ${esc(normalizedColor)}`);
     if (colorHexSupplied) {
       updates.push(`colorHex = ${normalizedColorHex ? esc(normalizedColorHex) : 'NULL'}`);
     }
-    if (normalizedBrand !== null) updates.push(`brand = ${esc(normalizedBrand)}`);
-    if (normalizedPrescription !== null) updates.push(`prescription = ${esc(normalizedPrescription)}`);
-    if (normalizedPurchaseDate !== null) updates.push(`purchaseDate = ${esc(normalizedPurchaseDate)}`);
+    if (textUpdate(body, 'brand')) updates.push(`brand = ${esc(normalizedBrand)}`);
+    if (textUpdate(body, 'prescription')) updates.push(`prescription = ${esc(normalizedPrescription)}`);
+    if (textUpdate(body, 'purchaseDate')) updates.push(`purchaseDate = ${esc(normalizedPurchaseDate)}`);
     if (isOpened !== undefined) updates.push(`isOpened = ${isOpened ? 1 : 0}`);
-    if (normalizedOpenedDate !== null) updates.push(`openedDate = ${esc(normalizedOpenedDate)}`);
-    if (normalizedExpiryDate !== null) updates.push(`expiryDate = ${esc(normalizedExpiryDate)}`);
-    if (normalizedNotes !== null) updates.push(`notes = ${esc(normalizedNotes)}`);
+    if (textUpdate(body, 'openedDate')) updates.push(`openedDate = ${esc(normalizedOpenedDate)}`);
+    if (textUpdate(body, 'expiryDate')) updates.push(`expiryDate = ${esc(normalizedExpiryDate)}`);
+    if (textUpdate(body, 'notes')) updates.push(`notes = ${esc(normalizedNotes)}`);
 
     if (normalizedStatus !== null) {
       updates.push(`status = ${esc(normalizedStatus)}`);

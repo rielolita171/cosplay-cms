@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
-const { esc, enumParam, textParam, numberParam, idParam, collapseWhitespace } = require('../services/sqlSafety');
+const { esc, enumParam, textParam, textUpdate, numberParam, idParam, collapseWhitespace } = require('../services/sqlSafety');
 
 // Helper function to execute SQL queries
 async function queryDb(sql) {
@@ -546,8 +546,11 @@ router.put('/:id', async (req, res) => {
     }
 
     const normalizedNotes = normalizeNotes(notes);
-    if (normalizedNotes !== null) {
-      updates.push(`notes = ${esc(normalizedNotes)}`);
+    // Presence is decided on the KEY, not on whether the value is non-empty.
+    // Gating on `!== null` made a user-cleared description indistinguishable from
+    // an untouched one, so clearing the field silently kept the old text.
+    if (textUpdate(req.body, 'notes')) {
+      updates.push(`notes = ${normalizedNotes ? esc(normalizedNotes) : 'NULL'}`);
     }
 
     if (updates.length === 0) {

@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
-const { esc, textParam, idParam } = require('../services/sqlSafety');
+const { esc, textParam, textUpdate, idParam } = require('../services/sqlSafety');
 
 // Column caps. These mirror what public/index.html already enforces on the prop
 // form (name 120, location 160, notes 2000) so the server is never stricter than
@@ -235,15 +235,31 @@ router.put('/:id', async (req, res) => {
     const normalizedCondition = textParam(condition, { name: 'condition', maxLength: MAX_CONDITION_LENGTH, noSeparator: true });
     const normalizedNotes = textParam(notes, { name: 'notes', maxLength: MAX_PROP_NOTES_LENGTH, noSeparator: true });
 
+    // Presence is decided on the KEY, via textUpdate(), not on whether the
+    // trimmed value happens to be non-empty. Gating on `!== null` made a
+    // user-cleared input indistinguishable from an untouched one, so clearing
+    // the description silently kept the old text.
+    //
+    // A present-but-empty value clears the column to '' — the same end state
+    // NULL would give, since the sqlite3 pipe transport reads NULL back as an
+    // empty field. name and category are the exceptions: they are required by
+    // the schema, so an empty value is a caller error and stays a 400.
+    if (textUpdate(body, 'name') && !normalizedName) {
+      throw Object.assign(new Error('name cannot be empty'), { status: 400 });
+    }
+    if (textUpdate(body, 'category') && !normalizedCategory) {
+      throw Object.assign(new Error('category cannot be empty'), { status: 400 });
+    }
+
     let updates = [];
     if (linkedCostumeUpdate !== null) {
       updates.push(`costumeId = ${linkedCostumeUpdate === '' ? 'NULL' : esc(linkedCostumeUpdate)}`);
     }
-    if (normalizedName !== null) updates.push(`name = ${esc(normalizedName)}`);
-    if (normalizedCategory !== null) updates.push(`category = ${esc(normalizedCategory)}`);
-    if (normalizedLocation !== null) updates.push(`location = ${esc(normalizedLocation)}`);
-    if (normalizedCondition !== null) updates.push(`condition = ${esc(normalizedCondition)}`);
-    if (normalizedNotes !== null) updates.push(`notes = ${esc(normalizedNotes)}`);
+    if (textUpdate(body, 'name')) updates.push(`name = ${esc(normalizedName)}`);
+    if (textUpdate(body, 'category')) updates.push(`category = ${esc(normalizedCategory)}`);
+    if (textUpdate(body, 'location')) updates.push(`location = ${esc(normalizedLocation)}`);
+    if (textUpdate(body, 'condition')) updates.push(`condition = ${esc(normalizedCondition)}`);
+    if (textUpdate(body, 'notes')) updates.push(`notes = ${esc(normalizedNotes)}`);
 
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No fields to update', code: 'VALIDATION_ERROR' });
