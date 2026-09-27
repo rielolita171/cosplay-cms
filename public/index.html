@@ -789,6 +789,73 @@
     }
 
     /* -----------------------------------------------------------------------
+       PASSWORD RESET
+       `.reset-note` is the "there is no email here" explainer on the login
+       screen; `.reset-token-box` is the read-only preview of a generated reset
+       file in the admin panel. Both are deliberately plain and low-contrast
+       next to the actual controls, because in both cases the surrounding copy
+       is what stops a user doing something irreversible.
+    ----------------------------------------------------------------------- */
+    .auth-link {
+      display: block;
+      width: 100%;
+      margin-top: 14px;
+      background: none;
+      border: none;
+      color: var(--primary);
+      font-size: 0.85rem;
+      cursor: pointer;
+      text-align: center;
+      text-decoration: underline;
+    }
+    .auth-link:hover {
+      color: #93c5fd;
+    }
+    .reset-note {
+      margin-top: 12px;
+      padding: 12px 14px;
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      line-height: 1.55;
+      text-align: left;
+    }
+    .reset-note strong {
+      color: var(--text);
+    }
+    .reset-file-box {
+      width: 100%;
+      min-height: 150px;
+      padding: 12px;
+      border-radius: 8px;
+      background: #0f1220;
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.78rem;
+      line-height: 1.5;
+      resize: vertical;
+    }
+    .reset-warning {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.35);
+      color: #fca5a5;
+      font-size: 0.8rem;
+      line-height: 1.5;
+    }
+    .reset-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    /* -----------------------------------------------------------------------
        COSTUME GALLERY (thumbnail strip + lightbox)
        `.item-media` is a fixed 150px box with `overflow:hidden`, so the strip
        is a SIBLING of it rather than a child: a strip inside a 150px cropped
@@ -1002,6 +1069,74 @@
           </div>
           <div id="login-error" class="auth-error" style="display: none;"></div>
           <button type="submit" class="btn btn-primary btn-full">Sign In</button>
+        </form>
+        <button type="button" class="auth-link" onclick="showResetHelp()">Forgot your password?</button>
+        <!-- The explanation is written into the DOM by showResetHelp() rather
+             than shipped inline, so it can only appear on purpose. It says
+             plainly that there is NO EMAIL: this server has no mail transport,
+             and a "we emailed you a link" message would send the user hunting
+             for a mail that does not exist. -->
+        <div id="reset-help" class="reset-note is-hidden"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RESET PASSWORD SCREEN
+       Reachable only from the "Forgot your password?" link above, and it is a
+       two-step form: paste the file, then choose a new password. Step 1 exists
+       to show which account the file belongs to before the user commits to a
+       new password; it does not consume the token (see the server route). -->
+  <section id="screen-reset" class="screen" style="display: none;">
+    <div class="auth-container">
+      <div class="auth-card">
+        <div class="auth-header">
+          <h1>Reset your password</h1>
+          <p id="reset-subtitle">Paste the reset file an administrator gave you.</p>
+        </div>
+
+        <!-- Step 1: the token. -->
+        <form id="reset-token-form" onsubmit="handleResetToken(event)">
+          <div class="form-group">
+            <label for="reset-token">Reset file or token</label>
+            <!-- A textarea, not an input: the thing users actually have is a
+                 whole .txt file, and pasting the entire file into a one-line
+                 input would silently keep only the first line. -->
+            <textarea id="reset-token" class="form-control" rows="5" required
+                      autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+                      placeholder="Paste the whole .txt file, or just the token line"></textarea>
+            <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 6px;">
+              You can paste the entire file — the token is taken from the last line.
+            </p>
+          </div>
+          <div id="reset-token-error" class="auth-error" style="display: none;"></div>
+          <button type="submit" class="btn btn-primary btn-full">Continue</button>
+          <button type="button" class="auth-link" onclick="showLogin()">Back to sign in</button>
+        </form>
+
+        <!-- Step 2: the new password. Hidden until step 1 validates. -->
+        <form id="reset-password-form" onsubmit="handleResetPassword(event)" style="display: none;">
+          <div class="reset-note" style="margin-top: 0; margin-bottom: 16px;">
+            Resetting password for <strong id="reset-username">(unknown)</strong>.
+            <span id="reset-expiry-note"></span>
+          </div>
+          <div class="form-group">
+            <label for="reset-new-password">New password</label>
+            <input type="password" id="reset-new-password" class="form-control" required minlength="8"
+                   autocomplete="new-password" placeholder="At least 8 characters">
+            <div class="field-error" data-error-for="newPassword"></div>
+          </div>
+          <div class="form-group">
+            <label for="reset-confirm-password">Confirm new password</label>
+            <input type="password" id="reset-confirm-password" class="form-control" required minlength="8"
+                   autocomplete="new-password" placeholder="Type it again">
+            <div class="field-error" data-error-for="confirmPassword"></div>
+          </div>
+          <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: -4px;">
+            Setting a new password signs you out everywhere, including this browser.
+          </p>
+          <div id="reset-password-error" class="auth-error" style="display: none;"></div>
+          <button type="submit" class="btn btn-primary btn-full">Set new password</button>
+          <button type="button" class="auth-link" onclick="showReset()">Start over</button>
         </form>
       </div>
     </div>
@@ -1250,6 +1385,28 @@
           </p>
           <div id="users-error" class="auth-error" style="display: none; text-align: left;"></div>
           <div id="users-list" style="display: grid; gap: 10px;"></div>
+
+          <!-- Generated reset file. Populated ONLY by the mint call, and the
+               server never keeps the plaintext, so once this box is cleared the
+               token is gone for good. The panel is cleared on every repaint of
+               the list so a stale token cannot be re-read by the next admin who
+               opens the tab. -->
+          <div id="reset-file-panel" class="reset-note is-hidden" style="margin-top: 20px;">
+            <strong>Reset file for <span id="reset-file-username"></span></strong>
+            <textarea id="reset-file-contents" class="reset-file-box" readonly rows="9"
+                      aria-label="Generated reset file contents"></textarea>
+            <div class="reset-actions">
+              <button type="button" class="btn btn-secondary" onclick="downloadResetFile()">Download .txt</button>
+              <button type="button" class="btn btn-secondary" onclick="copyResetFile()">Copy</button>
+              <button type="button" class="btn btn-ghost" onclick="clearResetFilePanel()">Hide</button>
+            </div>
+            <p class="reset-warning">
+              ⚠️ This is shown <strong>once</strong>. The server stores only a hash of
+              the token, so it cannot be displayed again — if you lose it, generate a
+              new one (which immediately invalidates this one). Send the file to the
+              user over a channel you trust, and delete your copy afterwards.
+            </p>
+          </div>
         </div>
       </section>
 
@@ -2772,6 +2929,7 @@
       state.currentScreen = screen;
       document.getElementById('screen-login').style.display = screen === 'login' ? 'flex' : 'none';
       document.getElementById('screen-otp').style.display = screen === 'otp' ? 'flex' : 'none';
+      document.getElementById('screen-reset').style.display = screen === 'reset' ? 'flex' : 'none';
       document.getElementById('screen-dashboard').style.display = screen === 'dashboard' ? 'block' : 'none';
     }
 
@@ -2797,6 +2955,22 @@
       if (err && err.code === 'INVALID_2FA') {
         return 'Invalid or expired code. Request a new one and try again.';
       }
+      // The server sends ONE message for every reset failure (unknown, used,
+      // expired, malformed) so an attacker cannot tell them apart. The UI
+      // re-uses that same wording rather than inventing a more specific one:
+      // a client-side message that said "this one expired" where the server
+      // said "invalid" would hand the distinction straight back to an attacker
+      // reading the response in devtools.
+      if (err && err.code === 'INVALID_RESET_TOKEN') {
+        return (err.message || 'This reset file is invalid, expired, or already used.')
+          + ' Ask an administrator for a new one.';
+      }
+      if (err && err.code === 'WEAK_PASSWORD') {
+        return (err.message || 'Password must be at least 8 characters');
+      }
+      if (err && err.code === 'PASSWORD_MISMATCH') {
+        return 'The two passwords do not match.';
+      }
       if (err && err.status === 0) {
         return 'Cannot reach the CMS server. Check that it is running, then try again.';
       }
@@ -2810,6 +2984,208 @@
       showScreen('login');
       document.getElementById('login-form').reset();
       document.getElementById('login-error').style.display = 'none';
+      // The "no email is sent" explainer is tied to the login screen, so
+      // returning here puts it back the way it was found.
+      const help = document.getElementById('reset-help');
+      if (help) help.classList.add('is-hidden');
+      // Leaving the reset screen drops the pasted token. A user who abandons
+      // the flow and walks away must not leave a live credential sitting in
+      // this tab's memory.
+      clearResetState();
+    }
+
+    /**
+     * The "Forgot your password?" explainer.
+     *
+     * Its accuracy is the whole point. The obvious copy for a password-reset
+     * entry point is "we'll email you a link" — and it would be a lie here,
+     * because this server has no mail transport at all. A user who is told to
+     * check their inbox will check their inbox, find nothing, and conclude the
+     * account is unrecoverable. So it says what actually happens: an admin
+     * generates a one-time file and hands it over.
+     *
+     * Built from static strings with no interpolation, so there is nothing here
+     * for escapeHtml to be responsible for.
+     */
+    function showResetHelp() {
+      const help = document.getElementById('reset-help');
+      if (!help) return;
+      help.textContent = '';
+      const p1 = document.createElement('p');
+      p1.style.margin = '0 0 8px';
+      p1.appendChild(document.createTextNode('There is no email on this server. To reset your password, an '));
+      const strong = document.createElement('strong');
+      strong.textContent = 'administrator generates a one-time reset file';
+      p1.appendChild(strong);
+      p1.appendChild(document.createTextNode(' and gives it to you directly. You paste that file below and choose a new password. The file works once, then it stops working — delete it once you have used it.'));
+      const p2 = document.createElement('p');
+      p2.style.margin = '8px 0 0';
+      p2.textContent = 'If you use the emergency recovery key on the Security tab, that is a different thing and it still needs you to be signed in already.';
+      help.appendChild(p1);
+      help.appendChild(p2);
+      help.classList.remove('is-hidden');
+    }
+
+    // ==========================================================================
+    // PASSWORD RESET (user-facing)
+    // ==========================================================================
+    /** Forget any pasted token. Called on entering login and on a fresh start. */
+    function clearResetState() {
+      state.resetToken = null;
+      state.resetUsername = null;
+      state.resetExpiresAt = null;
+    }
+
+    /** Show the reset screen at step 1, with any previous attempt discarded. */
+    function showReset() {
+      showScreen('reset');
+      clearResetState();
+      document.getElementById('reset-token-form').reset();
+      document.getElementById('reset-password-form').reset();
+      document.getElementById('reset-token-form').style.display = '';
+      document.getElementById('reset-password-form').style.display = 'none';
+      document.getElementById('reset-token-error').style.display = 'none';
+      document.getElementById('reset-password-error').style.display = 'none';
+      document.getElementById('reset-subtitle').textContent = 'Paste the reset file an administrator gave you.';
+      document.getElementById('reset-token').focus();
+    }
+
+    /**
+     * Pull the token out of whatever was pasted.
+     *
+     * The common case is the ENTIRE .txt file, because that is what a user has
+     * and what people actually paste — nobody selects the last line on purpose.
+     * So: a single line is used as-is, and anything multi-line has its LAST
+     * non-empty line taken as the token, which discards the header, the account
+     * name, the expiry line and the blank lines above it.
+     *
+     * This is a convenience, not a security control. Everything it produces is
+     * still validated by the server against a stored hash, so a wrong guess is
+     * indistinguishable from a forged token. The server repeats the same parse
+     * so that pasting a whole file into the API works too, which is what makes
+     * this testable from curl.
+     */
+    function extractResetToken(raw) {
+      const text = clean(raw).trim();
+      if (!text) return '';
+      if (text.indexOf('\n') === -1 && text.indexOf('\r') === -1) return text;
+      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      return lines.length ? lines[lines.length - 1] : '';
+    }
+
+    /**
+     * Step 1: check the file, then reveal the new-password form.
+     *
+     * Both reset calls go through api() with `auth: false`. That flag is what
+     * makes api() skip the Authorization header AND skip the 401-refresh path —
+     * correct here, because a signed-in admin clicking this in another tab
+     * should not have their (irrelevant) session attached to a public
+     * unauthenticated request.
+     */
+    async function handleResetToken(e) {
+      e.preventDefault();
+      const pasted = document.getElementById('reset-token').value;
+      const token = extractResetToken(pasted);
+
+      document.getElementById('reset-token-error').style.display = 'none';
+      if (!token) {
+        showAuthError('reset-token-error', new ApiError('Paste the reset file or the token from it.', 400, 'NO_TOKEN'));
+        return;
+      }
+      showLoading(true);
+      try {
+        const result = await api('/api/auth/password-reset/validate', {
+          method: 'POST',
+          auth: false,
+          body: JSON.stringify({ token: token })
+        });
+
+        state.resetToken = token;
+        state.resetUsername = clean(result && result.username);
+        state.resetExpiresAt = clean(result && result.expiresAt);
+
+        // The username is DB-derived, so it goes in as textContent — never
+        // interpolated into the .reset-note innerHTML.
+        document.getElementById('reset-username').textContent = state.resetUsername || '(unknown)';
+
+        const expiry = Date.parse(state.resetExpiresAt);
+        const expiryNote = document.getElementById('reset-expiry-note');
+        if (!Number.isNaN(expiry)) {
+          expiryNote.textContent = 'This file expires at ' + state.resetExpiresAt.replace('T', ' ').replace(/\.\d+Z$/, ' UTC') + '.';
+        } else {
+          expiryNote.textContent = '';
+        }
+
+        // Step 1 done. The pasted text is no longer needed on screen, so the
+        // textarea is cleared and only the token itself is kept in memory.
+        document.getElementById('reset-token').value = '';
+        document.getElementById('reset-token-form').style.display = 'none';
+        document.getElementById('reset-password-form').style.display = '';
+        document.getElementById('reset-subtitle').textContent = 'Choose a new password.';
+        document.getElementById('reset-new-password').focus();
+      } catch (err) {
+        showAuthError('reset-token-error', err);
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    /**
+     * Step 2: spend the token.
+     *
+     * NO AUTO-LOGIN, deliberately. The server returns no session and this does
+     * not manufacture one; the user is returned to the login screen and has to
+     * sign in. That is both the safer behaviour (a token pasted on a shared
+     * machine must not leave a session behind) and the only real proof that the
+     * new password works.
+     *
+     * Only `token` and `newPassword` are sent. The server reads only those two
+     * fields, so there is nothing here that could set a role.
+     */
+    async function handleResetPassword(e) {
+      e.preventDefault();
+      const newPassword = document.getElementById('reset-new-password').value;
+      const confirmPassword = document.getElementById('reset-confirm-password').value;
+
+      document.getElementById('reset-password-error').style.display = 'none';
+
+      // The same rule the register form uses, checked client-side purely to
+      // avoid a pointless round trip. The server re-checks it; this is the
+      // second lock on the same door, not the only one.
+      if (newPassword.length < 8) {
+        showAuthError('reset-password-error', new ApiError('Password must be at least 8 characters', 400, 'WEAK_PASSWORD'));
+        return;
+      }
+      if (newPassword !== confirmPassword) {
+        showAuthError('reset-password-error', new ApiError('The two passwords do not match.', 400, 'PASSWORD_MISMATCH'));
+        return;
+      }
+      if (!state.resetToken) {
+        showAuthError('reset-password-error', new ApiError('Your reset attempt expired. Please paste the file again.', 400, 'NO_TOKEN'));
+        return;
+      }
+
+      showLoading(true);
+      try {
+        await api('/api/auth/password-reset', {
+          method: 'POST',
+          auth: false,
+          body: JSON.stringify({ token: state.resetToken, newPassword: newPassword })
+        });
+
+        // Nothing secret is left behind: the fields are cleared and the token
+        // dropped from state before the screen is torn down.
+        document.getElementById('reset-password-form').reset();
+        clearResetState();
+        showScreen('login');
+        document.getElementById('login-error').style.display = 'none';
+        showToast('Password reset. Delete the reset file, then sign in.', 'success');
+        document.getElementById('login-username').focus();
+      } catch (err) {
+        showAuthError('reset-password-error', err);
+      } finally {
+        showLoading(false);
+      }
     }
 
     function showOtp(info) {
@@ -4397,6 +4773,28 @@
 
       select.addEventListener('change', () => changeUserRole(user, select.value));
       row.appendChild(select);
+
+      // "Reset password" — mints a one-time reset file for THIS account.
+      //
+      // The button is marked data-write-only so applyRoleVisibility() hides it
+      // from anyone who is not a writer, exactly like the other admin actions,
+      // rather than introducing a second visibility rule. The click handler
+      // ALSO re-checks isAdmin() — see requestPasswordReset() — because a
+      // hidden button is still reachable from the keyboard, from devtools, or
+      // from a row rendered before the role changed. Hiding is presentation;
+      // refusing the call is the control.
+      const resetBtn = document.createElement('button');
+      resetBtn.type = 'button';
+      resetBtn.className = 'btn btn-secondary';
+      resetBtn.style.padding = '6px 12px';
+      resetBtn.style.fontSize = '0.8rem';
+      resetBtn.setAttribute('data-write-only', '');
+      // DB-derived text via textContent, never innerHTML.
+      resetBtn.textContent = 'Reset password';
+      resetBtn.title = 'Generate a one-time password reset file for this account.';
+      resetBtn.addEventListener('click', () => requestPasswordReset(user));
+      row.appendChild(resetBtn);
+
       return row;
     }
 
@@ -4405,6 +4803,12 @@
       const list = document.getElementById('users-list');
       if (!list) return;
       list.innerHTML = '';
+      // A repaint of the list clears the generated-file panel too. The token in
+      // it is single-use and shown once by design; leaving it on screen after
+      // the list is re-fetched (which loadUsers(true) does after a role change,
+      // for instance) would leave a live credential sitting in a panel the
+      // admin has stopped looking at.
+      clearResetFilePanel();
 
       if (!state.users.length) {
         list.appendChild(makeEl('p', 'user-meta', 'No accounts were returned.'));
@@ -4473,6 +4877,164 @@
       } catch (err) {
         showUsersError(describeAuthError(err));
         renderUsers();                        // snap the <select> back
+      }
+    }
+
+    // ==========================================================================
+    // ADMIN — MINT A PASSWORD RESET FILE
+    // ==========================================================================
+    /** Hide and empty the generated-file panel, and drop the token from state. */
+    function clearResetFilePanel() {
+      state.resetFileContents = null;
+      state.resetFileName = null;
+      const panel = document.getElementById('reset-file-panel');
+      const box = document.getElementById('reset-file-contents');
+      const name = document.getElementById('reset-file-username');
+      if (box) box.value = '';
+      if (name) name.textContent = '';
+      if (panel) panel.classList.add('is-hidden');
+    }
+
+    /**
+     * POST /api/auth/users/:id/password-reset — mint a one-time file.
+     *
+     * CONFIRMATION IS REQUIRED, because this is destructive in a way the other
+     * admin actions are not: pressing it INVALIDATES any reset file already
+     * outstanding for that account. An admin who mints one "to have a spare" and
+     * then mints another has silently broken the first — the user holding it
+     * will be told it is invalid, with no way to tell that from a typo. The
+     * confirm dialog says so, and the panel warns again afterwards.
+     *
+     * The admin check is repeated here even though the button is already
+     * data-write-only and the server enforces authorize('admin'). Same rule as
+     * changeUserRole(): the hidden button is not the control.
+     */
+    async function requestPasswordReset(user) {
+      if (!isAdmin() || !canWrite()) {
+        showUsersError('You are not permitted to generate reset files.');
+        return;
+      }
+      const id = clean(user && user.id);
+      const username = clean(user && user.username);
+      if (!id) return;
+
+      const ok = await confirmAction({
+        title: 'Generate a reset file?',
+        message: 'This creates a one-time password reset file for "' + (username || id) + '". '
+          + 'Any reset file already generated for this account stops working immediately, '
+          + 'and you will only be able to see the new file once.',
+        confirmLabel: 'Generate file'
+      });
+      if (!ok) return;
+
+      showUsersError('');
+      showLoading(true);
+      try {
+        const data = await api('/api/auth/users/' + encodeURIComponent(id) + '/password-reset', {
+          method: 'POST'
+        });
+
+        // Held in memory only — never sessionStorage, never localStorage. A
+        // token in a persisted store would still be live on a machine the admin
+        // has walked away from.
+        state.resetFileContents = String((data && data.fileContents) || '');
+        // The server already sanitises this for a filename, but it is still a
+        // value from the wire, so it is trimmed to something a download
+        // attribute can safely carry.
+        state.resetFileName = clean(data && data.fileName) || 'cosplay-cms-reset.txt';
+
+        document.getElementById('reset-file-contents').value = state.resetFileContents;
+        document.getElementById('reset-file-username').textContent = username;
+        document.getElementById('reset-file-panel').classList.remove('is-hidden');
+        showToast('Reset file generated. Download it now — it is not retrievable later.', 'success');
+      } catch (err) {
+        showUsersError(describeAuthError(err));
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    /**
+     * Save the generated file, built ENTIRELY IN THE BROWSER.
+     *
+     * Nothing is written on the server. The server returns the text; the .txt
+     * is assembled here from a Blob and handed to the browser through an object
+     * URL, so no file lands in data/uploads (which is served by the image
+     * routes and is not a place to put a credential) and no new endpoint is
+     * needed. The same Blob also backs the "Copy" button, so both read from
+     * one source.
+     *
+     * The object URL is revoked in a finally: a Blob URL pins its blob in
+     * memory until it is revoked or the document unloads, so leaking one per
+     * click would grow the page's footprint for the session.
+     */
+    function downloadResetFile() {
+      const contents = state.resetFileContents;
+      if (!contents) {
+        showToast('Generate a reset file first.', 'error');
+        return;
+      }
+      let url = null;
+      try {
+        // 'text/plain' + a Blob with a trailing newline: the file opens
+        // cleanly in a text editor instead of running the last line into EOF.
+        const blob = new Blob([contents + '\n'], { type: 'text/plain;charset=utf-8' });
+        url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = state.resetFileName || 'cosplay-cms-reset.txt';
+        // Not appended to the document: a synthetic anchor fires a download in
+        // every current browser without ever joining the live DOM.
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } catch (err) {
+        showToast('Could not create the download. Use Copy instead.', 'error');
+      } finally {
+        if (url) URL.revokeObjectURL(url);
+      }
+    }
+
+    /**
+     * Copy the file text to the clipboard.
+     *
+     * navigator.clipboard needs a secure context; on plain http:// it is simply
+     * absent, so the legacy execCommand path is kept as a fallback rather than
+     * leaving the button dead on the LAN deployment this app actually runs on.
+     */
+    function copyResetFile() {
+      const contents = state.resetFileContents;
+      if (!contents) {
+        showToast('Generate a reset file first.', 'error');
+        return;
+      }
+      const done = () => showToast('Reset file copied to the clipboard.', 'success');
+      const failed = () => showToast('Could not copy automatically — select the text and copy it manually.', 'error');
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(contents).then(done, () => legacyCopy(contents, done, failed));
+        return;
+      }
+      legacyCopy(contents, done, failed);
+    }
+
+    function legacyCopy(text, done, failed) {
+      try {
+        const holder = document.createElement('textarea');
+        holder.value = text;
+        // Off-screen but NOT display:none — a hidden element cannot be
+        // selected, and execCommand('copy') copies the selection.
+        holder.setAttribute('readonly', '');
+        holder.style.position = 'fixed';
+        holder.style.top = '-1000px';
+        holder.style.opacity = '0';
+        document.body.appendChild(holder);
+        holder.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(holder);
+        ok ? done() : failed();
+      } catch (_) {
+        failed();
       }
     }
 

@@ -138,6 +138,48 @@ async function initSchema() {
       console.warn('⚠️  token tables not created:', error.message);
     });
 
+    // Admin-minted, single-use password-reset tokens.
+    //
+    // A TABLE, NOT NEW COLUMNS ON "User". Several tokens must be able to exist
+    // per user, each with its own expiry, so that a superseded one can be
+    // revoked and the history audited rather than silently overwritten. A column
+    // on "User" can only ever hold the most recent token, which would make both
+    // of those impossible.
+    //
+    // `createdBy` records WHICH admin minted it. This is a single-admin instance
+    // today, but the column makes the audit question ("who issued this?")
+    // answerable later, and it is nullable so a row inserted by any other means
+    // (a test fixture, a manual fix) is still legal.
+    //
+    // createdAt/expiresAt/usedAt are ISO-8601 TEXT, not INTEGER epoch, because
+    // this table is read by humans (the admin panel shows the expiry; the .txt
+    // file prints it) and every other timestamp column in this schema that a
+    // human reads is ISO text. It is also what makes the expiry comparison in
+    // completePasswordReset() a correct lexicographic compare: `toISOString()`
+    // is fixed-width, zero-padded and always UTC with a 'Z', so byte order IS
+    // chronological order. Anything written in that same format — including by
+    // a test using strftime('%Y-%m-%dT%H:%M:%fZ', ...) — compares correctly.
+    //
+    // The index is on userId because that is the only column ever filtered on
+    // (revoke-the-prior-token, and the admin panel's lookups).
+    await runSql(`
+      CREATE TABLE IF NOT EXISTS "PasswordResetToken" (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL,
+        tokenHash TEXT NOT NULL,
+        createdBy TEXT,
+        createdAt TEXT,
+        expiresAt TEXT NOT NULL,
+        usedAt TEXT
+      );
+      CREATE INDEX IF NOT EXISTS "idx_PasswordResetToken_user" ON "PasswordResetToken"(userId);
+    `).catch((error) => {
+      // Its own catch, like every migration in this function: a failure here
+      // must never stop the server booting. The routes that need this table
+      // fail loudly at call time instead.
+      console.warn('⚠️  PasswordResetToken table not created:', error.message);
+    });
+
     // -----------------------------------------------------------------------
     // Managed reference lists + the one-time backfill of "Costume".brand/fandom.
     //
@@ -331,6 +373,10 @@ async function sweepExpired() {
   const now = Date.now();
   await exec(`DELETE FROM "RefreshToken" WHERE expiresAt < ${now};`);
   await exec(`DELETE FROM "ConsumedToken" WHERE expiresAt < ${now};`);
+  // Reset tokens get a much longer retention than a refresh token: the row is
+  // the audit record of a completed reset, so it is kept for 30 days past
+  // expiry rather than swept the moment it lapses.
+  await sweepPasswordResetTokens(30 * 24 * 60 * 60 * 1000);
 }
 
 // ============================================================================
@@ -362,6 +408,153 @@ async function revokeFamily(familyId) {
 
 async function revokeAllForUser(userId) {
   return exec(`UPDATE "RefreshToken" SET revokedAt = ${Date.now()} WHERE userId = ${esc(userId)} AND revokedAt IS NULL;`);
+}
+
+/**
+ * Destroy EVERY session for a user — not just the family of one presented token.
+ *
+ * Used by the password-reset completion. The reason a reset must go this far: a
+ * password change is the user's statement that "whoever had my old credentials
+ * should no longer have my account". Revoking only the family that happened to
+ * present the refresh token would leave every other device signed in, which is
+ * precisely the session an attacker who phished the old password is holding.
+ * DELETE rather than the revokedAt soft-delete used elsewhere, because a
+ * consumed session row has no further use and this is a credential-compromise
+ * response, not a routine logout.
+ */
+async function destroyAllSessionsForUser(userId) {
+  return exec(`DELETE FROM "RefreshToken" WHERE userId = ${esc(userId)};`);
+}
+
+// ============================================================================
+// Password-reset token store
+// ============================================================================
+/**
+ * Record a freshly minted reset token.
+ *
+ * `tokenHash` is a SHA-256 hex digest, NOT the token. The plaintext exists only
+ * in the response that mints it and in the .txt file the admin hands over; it is
+ * never persisted, so a database disclosure does not yield a usable token even
+ * though every row is "valid". See the hashing note in src/routes/auth.js.
+ */
+async function createPasswordResetToken({ id, userId, tokenHash, createdBy, createdAt, expiresAt }) {
+  await initSchema();
+  await exec(
+    `INSERT INTO "PasswordResetToken" (id, userId, tokenHash, createdBy, createdAt, expiresAt, usedAt)
+     VALUES (${esc(id)}, ${esc(userId)}, ${esc(tokenHash)}, ${esc(createdBy)}, ${esc(createdAt)}, ${esc(expiresAt)}, NULL);`
+  );
+}
+
+/**
+ * Look a token up BY HASH, returning the raw row with no validity filtering.
+ *
+ * WHY THIS DELIBERATELY DOES NOT FILTER ON usedAt / expiresAt
+ * Both public reset endpoints must answer "unknown token", "already used" and
+ * "expired" with ONE identical response, so that the status code, the body and
+ * the amount of work done are identical for all three. If this query filtered
+ * them out in SQL, the three cases would travel through different code and
+ * could drift apart (different error text, a different status, a row present
+ * vs absent changing a later `.length` check). Returning the row and letting the
+ * CALLER apply the predicate in JS keeps all three on one code path, which is
+ * what actually makes them indistinguishable.
+ */
+async function findPasswordResetTokenByHash(tokenHash) {
+  await initSchema();
+  return queryRow(
+    `SELECT id, userId, tokenHash, createdBy, createdAt, expiresAt, usedAt
+       FROM "PasswordResetToken" WHERE tokenHash = ${esc(tokenHash)} LIMIT 1;`,
+    ['id', 'userId', 'tokenHash', 'createdBy', 'createdAt', 'expiresAt', 'usedAt']
+  );
+}
+
+/**
+ * Drop the user's UNUSED tokens so only one can ever be live.
+ *
+ * WHY DELETE AND NOT "mark used"
+ * The table has no revokedAt column, and the only spare flag is usedAt — which
+ * means "this token completed a reset". Writing it here would forge a
+ * completion record for a reset that never happened, and the audit trail is the
+ * main reason this is a table rather than a column on "User". Deleting is
+ * honest: a revoked token simply stops existing, and rows for resets that DID
+ * complete are retained.
+ */
+async function revokeUnusedPasswordResetTokens(userId) {
+  await initSchema();
+  return exec(
+    `DELETE FROM "PasswordResetToken" WHERE userId = ${esc(userId)} AND usedAt IS NULL;`
+  );
+}
+
+/**
+ * Complete a reset: burn the token, set the new password, kill every session —
+ * atomically, or not at all.
+ *
+ * WHY ALL THREE ARE IN ONE TRANSACTION
+ * The single-use property is the whole security value of this endpoint, and it
+ * is enforced by the `usedAt IS NULL` predicate on the first UPDATE. SQLite
+ * applies a write under an exclusive lock, so of N concurrent submissions of
+ * the same token exactly one sees changes() = 1; the rest match nothing. The
+ * two dependent writes are then gated on `usedAt = <claimStamp>`, where
+ * claimStamp is a per-request value, so a request that LOST the claim cannot
+ * drive them. That closes the one race a "claim, then check the result, then
+ * write" implementation would leave open: two requests landing in the same
+ * millisecond, where the loser would otherwise see the winner's timestamp and
+ * proceed. It also means there is no window in which the password is set but
+ * the token is still live (replayable), or the token is burned but the
+ * password never changed (which would silently lock the user out).
+ *
+ * The dependent writes select the userId from the row rather than taking it as
+ * a parameter, so the user the password is changed on is the user the token
+ * actually belongs to — never one derived from the request.
+ *
+ * @param {{tokenHash: string, passwordHash: string, claimStamp: string}} args
+ * @returns {Promise<{ok: boolean, userId: string|null, sessionsRevoked: number}>}
+ */
+async function completePasswordReset({ tokenHash, passwordHash, claimStamp }) {
+  await initSchema();
+  // busy_timeout first: a concurrent write from another request (each runSql()
+  // is a separate sqlite3 process) would otherwise fail the whole transaction
+  // instantly with SQLITE_BUSY instead of waiting its turn.
+  const output = await runSql(`
+    PRAGMA busy_timeout = 5000;
+    BEGIN IMMEDIATE;
+    UPDATE "PasswordResetToken" SET usedAt = ${esc(claimStamp)}
+     WHERE tokenHash = ${esc(tokenHash)} AND usedAt IS NULL AND expiresAt > ${esc(claimStamp)};
+    SELECT 'claim=' || changes();
+    UPDATE "User" SET passwordHash = ${esc(passwordHash)}, updatedAt = ${esc(claimStamp)}
+     WHERE id = (SELECT userId FROM "PasswordResetToken"
+                  WHERE tokenHash = ${esc(tokenHash)} AND usedAt = ${esc(claimStamp)});
+    SELECT 'user=' || changes();
+    DELETE FROM "RefreshToken"
+     WHERE userId = (SELECT userId FROM "PasswordResetToken"
+                      WHERE tokenHash = ${esc(tokenHash)} AND usedAt = ${esc(claimStamp)});
+    SELECT 'sessions=' || changes();
+    COMMIT;
+  `);
+
+  // The markers are the transaction's own report. A failed claim (claim=0)
+  // forces user=0 and sessions=0, because the subqueries that drive them are
+  // themselves keyed on the claim stamp this request owns.
+  const marker = (name) => {
+    const line = String(output).split('\n').find((l) => l.startsWith(name + '='));
+    return line ? parseInt(line.slice(name.length + 1), 10) || 0 : 0;
+  };
+  const claim = marker('claim');
+  const user = marker('user');
+  const sessions = marker('sessions');
+  return { ok: claim === 1 && user === 1, userId: null, sessionsRevoked: sessions };
+}
+
+/**
+ * Housekeeping for the reset table alongside the token sweep: drop rows that
+ * are long past expiry. A USED row is kept — it is the audit record that a
+ * reset happened — but it is removed once it is old enough that keeping it can
+ * no longer answer a question anyone is asking.
+ */
+async function sweepPasswordResetTokens(maxAgeMs) {
+  await initSchema();
+  const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
+  await exec(`DELETE FROM "PasswordResetToken" WHERE expiresAt < ${esc(cutoff)};`);
 }
 
 // ============================================================================
@@ -514,6 +707,12 @@ module.exports = {
   markRefreshTokenUsed,
   revokeFamily,
   revokeAllForUser,
+  destroyAllSessionsForUser,
+  createPasswordResetToken,
+  findPasswordResetTokenByHash,
+  revokeUnusedPasswordResetTokens,
+  completePasswordReset,
+  sweepPasswordResetTokens,
   consumeJti,
   isJtiConsumed,
   getUserById,

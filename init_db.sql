@@ -141,3 +141,30 @@ CREATE TABLE IF NOT EXISTS "ConsumedToken" (
   consumedAt INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS "idx_ConsumedToken_expires" ON "ConsumedToken"(expiresAt);
+
+-- Admin-minted, single-use password-reset tokens.
+--
+-- A table rather than columns on "User" so that several tokens can exist per
+-- user, each with its own expiry, so a superseded one can be revoked and the
+-- history audited instead of silently overwritten.
+--
+-- createdBy records WHICH admin minted it. Timestamps are ISO-8601 TEXT (not
+-- INTEGER epoch) because humans read them — the admin panel shows the expiry
+-- and the generated .txt file prints it — and because toISOString() is
+-- fixed-width UTC, so a byte comparison of expiresAt is a chronological one.
+--
+-- tokenHash is a SHA-256 hex digest; the plaintext token is never stored.
+--
+-- src/services/db.js creates this table idempotently at boot as well, so an
+-- existing database gains it without a migration step.
+CREATE TABLE IF NOT EXISTS "PasswordResetToken" (
+  id TEXT PRIMARY KEY,
+  userId TEXT NOT NULL,
+  tokenHash TEXT NOT NULL,
+  createdBy TEXT,
+  createdAt TEXT,
+  expiresAt TEXT NOT NULL,
+  usedAt TEXT
+);
+CREATE INDEX IF NOT EXISTS "idx_PasswordResetToken_user" ON "PasswordResetToken"(userId);
+
