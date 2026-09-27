@@ -1303,6 +1303,25 @@
         </select>
         <!-- Props-only filter dimension (checklist: "filter across name/category/location") -->
         <input type="text" class="search-input" id="location-filter" style="display: none; flex: 0 1 220px; min-width: 160px;" placeholder="Filter by storage location..." oninput="filterItems()">
+        <!-- Costumes-only filter dimensions. Same pattern as #location-filter
+             above, inverted: that one is props-only, these two are costumes-only,
+             and syncFilterControls() is what shows or hides them per tab.
+             The options are NOT the 25-entry managed Fandom / 23-entry managed
+             Brand lists -- they are derived from the costumes actually loaded, by
+             syncFilterDimensionSelects(), and rebuilt on every costume load.
+             Both start at display:none so they cannot flash onto the props or
+             lenses tabs in the gap before the first syncFilterControls(). -->
+        <select class="select-input" id="fandom-filter" style="display: none; flex: 0 1 200px; min-width: 150px;" onchange="filterItems()">
+          <option value="">All Fandoms</option>
+        </select>
+        <select class="select-input" id="brand-filter" style="display: none; flex: 0 1 200px; min-width: 150px;" onchange="filterItems()">
+          <option value="">All Brands</option>
+        </select>
+        <!-- One escape hatch for four filters. Deliberately NOT data-write-only:
+             it only re-filters rows already in the browser and calls no endpoint,
+             so a read-only viewer must be able to clear a filter they just set,
+             exactly as they were able to set it. -->
+        <button type="button" class="btn btn-secondary" id="clear-filters" style="display: none; align-self: center;" onclick="clearCostumeFilters()">Clear</button>
       </div>
 
       <!-- Costumes Tab Content -->
@@ -2551,6 +2570,13 @@
       filterQuery: '',
       filterStatus: '',
       filterLocation: '',
+      // Fandom and Brand are the two costumes-only filter dimensions, and are
+      // the only costume filter keys that hold an EXACT selected value rather
+      // than a lower-cased substring. They live with their siblings so that
+      // the tab-switch reset in syncFilterControls() and the clear in
+      // clearCostumeFilters() can treat all four costume filters uniformly.
+      filterFandom: '',
+      filterBrand: '',
       // The two Reference Lists search boxes. Separate keys, not one shared
       // query, because Brand and Fandom are two independent lists and the user
       // filters one without narrowing the other. Each key is written by
@@ -3326,6 +3352,22 @@
 
     function showDashboard() {
       showScreen('dashboard');
+      // The three ways into the dashboard (password login, 2FA verify, and a
+      // session restore on refresh) all arrive here, and NONE of them goes
+      // through switchTab() -- so before this, syncFilterControls() never ran
+      // and no filter control was ever given its display rules. #status-filter
+      // got away with it (no inline display:none in the markup) and
+      // #location-filter with it (props-only, so hidden is the right default),
+      // but #fandom-filter and #brand-filter must be SHOWN by code on the
+      // default tab and so stayed at their markup `display: none` until the user
+      // clicked a tab. That is the whole of the "they only appear after I switch
+      // tabs" bug. This also rebuilds and prunes their options against the
+      // costumes loadAllData() has just fetched.
+      //
+      // Deliberately NOT in loadAllData(): that also runs after every create,
+      // edit and delete, and syncFilterControls() resets the filter selections --
+      // which would wipe an active filter every time the user saved a costume.
+      syncFilterControls();
     }
 
     // ==========================================================================
@@ -3664,6 +3706,11 @@
         const data = await api('/api/costumes');
         state.costumes = Array.isArray(data.costumes) ? data.costumes : [];
         state.costumes.forEach(seedImageCache);
+        // The Fandom/Brand dropdowns are DERIVED from these rows, so they are
+        // recomputed on every load -- and a selection the new data no longer
+        // contains is pruned back to 'All' here, BEFORE the render below, so
+        // the grid is never painted in a filtered state the user cannot undo.
+        syncFilterDimensionSelects();
         renderCostumes(getFilteredCostumes());
       } catch (err) {
         if (err.status === 401) return;   // forceLogout already ran
@@ -4708,6 +4755,16 @@
         statusSelect.style.display = 'none';
         locationInput.style.display = 'none';
         searchInput.style.display = 'none';
+        // Same rule for the costumes-only controls. switchTab() already hides
+        // the whole #filter-bar on these tabs, but doing it here too means the
+        // controls are correct for the ONE case that bypasses it: a select
+        // left inline-visible by a previous render cannot outlive the tab.
+        const noFandom = document.getElementById('fandom-filter');
+        const noBrand = document.getElementById('brand-filter');
+        const noClear = document.getElementById('clear-filters');
+        if (noFandom) noFandom.style.display = 'none';
+        if (noBrand) noBrand.style.display = 'none';
+        if (noClear) noClear.style.display = 'none';
         return;
       }
 
@@ -4728,6 +4785,158 @@
       state.filterStatus = '';
       state.filterQuery = '';
       state.filterLocation = '';
+      // Fandom and Brand exist only on Costume. Props and Lenses have no such
+      // column to narrow on, so a visible control there would be a filter that
+      // silently does nothing -- worse than absent. This is the same rule as
+      // #location-filter above, inverted. The Clear button is costumes-only for
+      // the same reason: it is the only tab that now has four filters.
+      const onCostumes = state.currentTab === 'costumes';
+      const fandomSelect = document.getElementById('fandom-filter');
+      const brandSelect = document.getElementById('brand-filter');
+      const clearButton = document.getElementById('clear-filters');
+      if (fandomSelect) fandomSelect.style.display = onCostumes ? 'inline-block' : 'none';
+      if (brandSelect) brandSelect.style.display = onCostumes ? 'inline-block' : 'none';
+      if (clearButton) clearButton.style.display = 'none';
+      // A tab switch is a clean slate: the two new keys are reset here for
+      // exactly the reason filterStatus/filterQuery/filterLocation above are,
+      // so leaving and returning to Costumes never resurrects a stale filter.
+      state.filterFandom = '';
+      state.filterBrand = '';
+      // Rebuilt (and pruned) on EVERY tab, not just costumes, so the option
+      // lists are already correct by the time the Costumes tab is shown again.
+      syncFilterDimensionSelects();
+    }
+
+    /**
+     * The single normalisation for an EXACT-match costume filter value.
+     * collapseSpaces() is the same helper the search box and the Reference
+     * Lists search already use: values arrive from the SQLite pipe as text,
+     * so a stored 'Blue  Archive' (two spaces) and the 'blue archive' key the
+     * dropdown offered have to fold to the same string. Using it on BOTH
+     * sides -- here and in distinctCostumeValues() -- is what makes the
+     * option the user picked and the row being tested provably comparable.
+     */
+    function foldFilterValue(value) {
+      return collapseSpaces(clean(value)).toLowerCase();
+    }
+
+    /**
+     * Distinct values of one costume column, for a filter dropdown.
+     *
+     * WHY FROM state.costumes AND NOT FROM state.fandoms / state.brands:
+     * an option that yields zero rows is worse than no option at all. The user
+     * picks it, the grid goes empty, and nothing on screen says why. The
+     * managed lists are deliberately bigger than what is in use -- 25 fandoms
+     * and 23 brands on file against a handful actually on a costume -- so
+     * listing them all would bury the two or three the user actually wants
+     * inside a dropdown of near-dead choices.
+     *
+     * Folded on foldFilterValue() so 'Blue Archive' and 'blue  archive' become
+     * ONE option rather than two that each match a different slice of the
+     * same thing. The first spelling seen becomes the label, which is the
+     * stored one the user typed.
+     *
+     * @param {string} field  costume column: 'fandom' | 'brand'
+     * @returns {Array<{key: string, label: string}>} sorted by folded key
+     */
+    function distinctCostumeValues(field) {
+      const seen = new Map();
+      state.costumes.forEach(costume => {
+        // label keeps the FIRST STORED SPELLING ('1/3 Delusion', not
+        // '1/3 delusion'): the dropdown should read the way the card chip and
+        // the Reference Lists spell it. key is the lower-cased form, and is the
+        // ONLY thing compared against a row -- so a user who somehow ends up
+        // with a differently-cased value still matches, but nobody has to read
+        // a shouted-lowercase option to find their own brand.
+        const label = collapseSpaces(clean(costume[field]));
+        if (!label) return;
+        const key = label.toLowerCase();
+        if (!seen.has(key)) seen.set(key, label);
+      });
+      return Array.from(seen.keys()).sort((a, b) => a.localeCompare(b))
+        .map(key => ({ key: key, label: seen.get(key) }));
+    }
+
+    /**
+     * Rebuild #fandom-filter and #brand-filter from the costumes actually
+     * loaded, and drop a selection the new data no longer contains.
+     *
+     * XSS BARRIER: options are built with document.createElement and
+     * textContent, and the select is cleared with .innerHTML = '' (an empty
+     * string carries no data). No DB-derived name is ever concatenated into an
+     * HTML string, so a fandom whose name is a literal script-tag payload
+     * becomes an inert <option> whose text IS that payload and is never
+     * parsed as markup. This is the same
+     * rule, and the same reason, as fillReferenceSelect() above.
+     *
+     * PRUNING: a select whose value is not in its own option list renders
+     * BLANK and would filter to zero rows with no way back but a reload. So
+     * when the selected value has gone (a costume deleted, or renamed, since
+     * the last load) the state key is reset to '' and the control falls back to
+     * 'All' rather than stranding a stale selection.
+     */
+    function syncFilterDimensionSelects() {
+      [
+        { id: 'fandom-filter', stateKey: 'filterFandom', all: 'All Fandoms', field: 'fandom' },
+        { id: 'brand-filter', stateKey: 'filterBrand', all: 'All Brands', field: 'brand' }
+      ].forEach(spec => {
+        const select = document.getElementById(spec.id);
+        if (!select) return;
+        const values = distinctCostumeValues(spec.field);
+        const wanted = foldFilterValue(state[spec.stateKey]);
+        // Same folded comparison the row test uses, so 'present in the
+        // dropdown' and 'matches in getFilteredCostumes()' cannot disagree.
+        const hit = wanted ? values.find(v => v.key === wanted) : null;
+        if (wanted && !hit) state[spec.stateKey] = '';
+
+        select.innerHTML = '';
+        const blank = document.createElement('option');
+        blank.value = '';
+        blank.textContent = spec.all;
+        select.appendChild(blank);
+        values.forEach(value => {
+          const option = document.createElement('option');
+          option.value = value.label;
+          option.textContent = value.label;
+          select.appendChild(option);
+        });
+        // Re-select by the value's own key. Assigning the raw state string
+        // would work today but would silently blank the control if the key
+        // were ever set from anywhere but an <option> value.
+        select.value = hit ? hit.label : '';
+      });
+    }
+
+    /**
+     * Is anything at all narrowing the costume list right now?
+     */
+    function hasActiveCostumeFilters() {
+      return !!(collapseSpaces(state.filterQuery)
+        || state.filterStatus
+        || state.filterFandom
+        || state.filterBrand);
+    }
+
+    /**
+     * The Clear button exists only while it has something to clear. Shown on
+     * the Costumes tab alone, because that is the only tab with four filters.
+     */
+    function updateClearFiltersButton() {
+      const button = document.getElementById('clear-filters');
+      if (!button) return;
+      const show = state.currentTab === 'costumes' && hasActiveCostumeFilters();
+      button.style.display = show ? 'inline-flex' : 'none';
+    }
+
+    function clearCostumeFilters() {
+      ['search-input', 'status-filter', 'fandom-filter', 'brand-filter'].forEach(id => {
+        const control = document.getElementById(id);
+        if (control) control.value = '';
+      });
+      // filterItems() re-reads all four controls into state, re-renders, and
+      // hides the button -- the same path a user takes clearing the search box
+      // by hand, so there is exactly one way the filters are applied.
+      filterItems();
     }
 
     function filterItems() {
@@ -4740,6 +4949,14 @@
       state.filterQuery = collapseSpaces(document.getElementById('search-input').value || '').toLowerCase();
       state.filterStatus = document.getElementById('status-filter').value || '';
       state.filterLocation = (document.getElementById('location-filter').value || '').toLowerCase();
+      // Read as-is, not lower-cased here: these two are exact selected values,
+      // and foldFilterValue() does the normalising once in
+      // getFilteredCostumes(). Folding at BOTH ends would double-collapse the
+      // same string for no benefit.
+      state.filterFandom = document.getElementById('fandom-filter').value || '';
+      state.filterBrand = document.getElementById('brand-filter').value || '';
+      // Last, so it sees the filter values that were just read in.
+      updateClearFiltersButton();
 
       if (state.currentTab === 'costumes') renderCostumes(getFilteredCostumes());
       else if (state.currentTab === 'props') renderProps(getFilteredProps());
@@ -4749,13 +4966,23 @@
     function getFilteredCostumes() {
       const q = state.filterQuery;
       const status = state.filterStatus;
+      // EXACT matches on the folded value, not substring matches: these are
+      // dropdowns, so the user has already chosen one specific entry, and a
+      // substring would quietly widen that choice. An empty selection folds to
+      // '' and the `!fandom` guard makes it a no-op, so 'All Fandoms' costs
+      // nothing. Deliberately NOT applied to the props or lens filters, which
+      // have no such dimension.
+      const fandom = foldFilterValue(state.filterFandom);
+      const brand = foldFilterValue(state.filterBrand);
       return state.costumes.filter(c => {
         const matchQuery = !q
           || clean(c.character).toLowerCase().indexOf(q) !== -1
           || clean(c.fandom).toLowerCase().indexOf(q) !== -1
           || clean(c.brand).toLowerCase().indexOf(q) !== -1;
         const matchStatus = !status || c.status === status;
-        return matchQuery && matchStatus;
+        const matchFandom = !fandom || foldFilterValue(c.fandom) === fandom;
+        const matchBrand = !brand || foldFilterValue(c.brand) === brand;
+        return matchQuery && matchStatus && matchFandom && matchBrand;
       });
     }
 
@@ -4815,6 +5042,12 @@
       document.getElementById('filter-bar').style.display =
         (tab === 'security' || tab === 'lists' || tab === 'users') ? 'none' : 'flex';
 
+      // The new costumes-only controls (#fandom-filter, #brand-filter and the
+      // Clear button) are NOT toggled inline here -- they are handled by the
+      // same syncFilterControls() call that has always owned #status-filter and
+      // #location-filter, for the same reason. Keeping every per-tab filter
+      // control in one function is what stops a new control being added to the
+      // bar without a matching hide rule and leaking onto Props and Lenses.
       syncFilterControls();
       filterItems();
 
