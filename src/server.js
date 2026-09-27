@@ -74,24 +74,27 @@ app.use(helmet({
   referrerPolicy: { policy: 'no-referrer' }
 }));
 
-// CORS — strict allowlist. NEVER combine a wildcard origin with credentials.
-const DEFAULT_CORS_ORIGIN = 'http://localhost:4001';
-const corsOrigins = (process.env.CORS_ORIGIN || DEFAULT_CORS_ORIGIN)
-  .split(',')
-  .map(o => o.trim())
-  .filter(Boolean);
-
-if (corsOrigins.includes('*')) {
-  console.warn('⚠️  CORS_ORIGIN="*" is not allowed with credentials — falling back to localhost only.');
-  corsOrigins.length = 0;
-  corsOrigins.push(DEFAULT_CORS_ORIGIN);
-}
+// CORS — strict allowlist, admin-editable WITHOUT a restart.
+//
+// This used to be a boot-time `const` read once from process.env.CORS_ORIGIN,
+// which meant changing an origin cost an SSH edit and a restart of a server
+// that was actively serving the app. The allowlist now lives in the "ServerSetting"
+// table and is resolved per src/services/settings.js, in the order
+// database -> .env -> hardcoded default, so an admin can correct it from the
+// Security tab and have it apply to the running process.
+//
+// The resolution helper is a synchronous, in-memory cached read (see its
+// header comment for why it cannot be an await here, and why a short TTL still
+// backs the cache up). DEFAULT_CORS_ORIGIN now lives in settings.js so the
+// fallback has exactly one definition.
+const settings = require('./services/settings');
 
 app.use(cors({
   origin(origin, callback) {
     // Same-origin / curl / server-to-server requests have no Origin header.
     if (!origin) return callback(null, true);
-    if (corsOrigins.includes(origin)) return callback(null, true);
+    const allowed = settings.getCorsOriginsSync();
+    if (allowed.indexOf(origin) !== -1) return callback(null, true);
     return callback(new Error('Origin not allowed by CORS'));
   },
   credentials: true,
@@ -218,7 +221,21 @@ app.get('/api/version', (req, res) => {
       'GET /api/images/stats',
       'DELETE /api/costumes/:id/images',
       'GET /api/auth/users (admin)',
-      'PATCH /api/auth/users/:id/role (admin)'
+      'PATCH /api/auth/users/:id/role (admin)',
+      'POST /api/auth/users/:id/password-reset (admin)',
+      // Runtime CORS allowlist. Admin-only, and editable without a restart —
+      // the whole point is that fixing an origin no longer needs SSH.
+      'GET /api/settings/cors (admin)',
+      'PUT /api/settings/cors (admin)',
+      'POST /api/settings/cors/reset (admin)',
+      // The two below are deliberately UNAUTHENTICATED. They are the only
+      // unauthenticated write path in the app, and they have to be: the whole
+      // point is to let someone who cannot sign in change a password. They
+      // carry a bearer token instead, and are rate limited per-IP AND
+      // per-token. Listed here so the public surface stays discoverable and
+      // reviewable rather than being something you have to know to find.
+      'POST /api/auth/password-reset/validate (public)',
+      'POST /api/auth/password-reset (public)'
     ],
     roles: {
       note: 'Roles are a ladder. Read the first tier at or above your own to learn what you may do.',
@@ -235,6 +252,13 @@ app.get('/api/version', (req, res) => {
 const authRoutes = require('./routes/auth');
 app.use('/api', authRoutes);
 app.use('/', authRoutes);
+
+// Admin-editable server settings (currently the CORS allowlist). Each route
+// carries its own verifyToken + authorize('admin'); mounted under /api only,
+// because a security control that rewrites who may talk to the server has no
+// business also being reachable on a second, un-prefixed path.
+const settingsRoutes = require('./routes/settings');
+app.use('/api', settingsRoutes);
 
 // ---------------------------------------------------------------------------
 // Data routes.
@@ -360,6 +384,12 @@ app.use((err, req, res, next) => {
 // a genuinely fresh one converges on init_db.sql's schema.
 const db = require('./services/db');
 db.initSchema()
+  .then(() => {
+    // Warm the CORS allowlist cache so the very first request does not race
+    // the first database read. Not fatal if this fails: getCorsOriginsSync()
+    // falls back to the .env/default list and retries on the next request.
+    return settings.primeCache();
+  })
   .then(() => reportTelegram2FAConfig())
   .catch((error) => {
     console.error('❌ Schema initialisation failed:', error.message);
@@ -420,7 +450,22 @@ app.listen(PORT, () => {
   console.log(`🌐 Server running on: http://localhost:${PORT}`);
   console.log(`📋 Health check: http://localhost:${PORT}/health`);
   console.log(`📚 API version: http://localhost:${PORT}/api/version`);
-  console.log(`🔒 CORS allowlist: ${corsOrigins.join(', ')}`);
+  // The allowlist is resolved at runtime now, so this line reports the cached
+  // value and says where it came from rather than printing a boot-time const.
+  // NOTE: it used to interpolate the `corsOrigins` const directly, which is a
+  // ReferenceError the moment that const is removed — and `node --check` does
+  // NOT catch it, because it is a runtime error in a callback, not a syntax
+  // error. It only shows up when the process actually listens.
+  settings.getCorsOrigins()
+    .then(effective => {
+      const source = effective.source === 'database' ? ' (saved override)'
+        : (effective.source === 'env' ? ' (CORS_ORIGIN in .env)' : ' (built-in default)');
+      console.log(`🔒 CORS allowlist: ${effective.origins.join(', ')}${source}`);
+      console.log('   Editable at runtime: PUT /api/settings/cors (admin) — no restart needed.');
+    })
+    .catch(() => {
+      console.log(`🔒 CORS allowlist: ${settings.getCorsOriginsSync().join(', ')}`);
+    });
   console.log(`${'='.repeat(60)}\n`);
 
   console.log('📡 Public endpoints:');

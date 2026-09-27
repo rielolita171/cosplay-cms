@@ -1046,6 +1046,56 @@
       opacity: 0.6;
       cursor: not-allowed;
     }
+
+    /* --- CORS allowlist editor (Security tab, admin only) -------------------
+       Chips are built with DOM APIs, never innerHTML, so an origin can never
+       become markup here. The colours are the point though:
+         .is-in-use  — a stronger border + glow, so "the one I am using right
+                       now" is obvious at a glance among a list of chips.
+         .chip-warn  — amber, for a plain-http origin. This is deliberately a
+                       WARNING and not a block: this deployment is reached over
+                       plain http on Tailscale, so refusing http would make the
+                       tool unusable for the only case it is actually needed in.
+                       It is flagged so the choice is informed, not hidden. */
+    .cors-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px 6px 12px;
+      border-radius: 999px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      font-size: 0.82rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .cors-chip.is-in-use {
+      border-color: var(--accent, #6366f1);
+      box-shadow: 0 0 0 1px var(--accent, #6366f1) inset;
+    }
+    .cors-chip-warn {
+      padding: 1px 7px;
+      border-radius: 999px;
+      font-size: 0.68rem;
+      font-family: inherit;
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      color: #fbbf24;
+      white-space: nowrap;
+    }
+    .cors-chip-remove {
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 1.05rem;
+      line-height: 1;
+      padding: 0 4px;
+      border-radius: 999px;
+    }
+    .cors-chip-remove:hover {
+      color: var(--danger);
+      background: rgba(239, 68, 68, 0.12);
+    }
   </style>
 </head>
 <body>
@@ -1460,6 +1510,57 @@
               </div>
               <p style="font-size: 0.75rem; color: var(--danger); margin-top: 8px;">⚠️ This key is shown once. Save it in a password manager. It will be invalidated after use and a new one generated.</p>
             </div>
+          </div>
+
+          <!-- ================================================================
+               CORS ALLOWED ORIGINS — ADMIN ONLY.
+
+               This is server config, not user config, which is why it lives in
+               the Security tab rather than in a settings screen of its own.
+
+               GATING: the whole block carries data-write-only, so
+               applyRoleVisibility() removes it entirely for any non-admin.
+               That matters more here than it does for the buttons above,
+               because — unlike the Users tab — the Security tab is NOT itself
+               role-gated; a viewer can open it and read the 2FA panel. The
+               data-write-only attribute is therefore the only thing keeping
+               this control out of a non-admin's UI. The server still enforces
+               authorize('admin') on all three endpoints, which is the half
+               that actually counts.
+               ================================================================ -->
+          <div data-write-only style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--card-border);">
+            <label style="font-weight: 600; display: block; margin-bottom: 6px;">CORS Allowed Origins</label>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
+              The origins allowed to make credentialed cross-origin requests to this server.
+              Changes apply immediately — <strong>no restart needed</strong>.
+              Currently using: <code id="cors-source">…</code>
+            </p>
+
+            <div id="cors-origin-list" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;"></div>
+
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start;">
+              <input type="text" class="form-control" id="cors-origin-input" style="flex: 1 1 280px; min-width: 220px;"
+                     maxlength="200" placeholder="https://example.com" autocomplete="off" spellcheck="false"
+                     onkeydown="if(event.key==='Enter'){event.preventDefault();addCorsOrigin();}">
+              <button class="btn btn-secondary" onclick="addCorsOrigin()">Add</button>
+              <button class="btn btn-primary" onclick="saveCorsSettings()">Save</button>
+            </div>
+            <!-- The authoritative validation message. Whatever the server
+                 rejects with a 400 is shown here verbatim, naming the entry
+                 that caused it. Nothing is silently dropped. -->
+            <div class="field-error" id="cors-origin-error" style="display: none; margin-top: 8px;"></div>
+            <div id="cors-message" style="margin-top: 10px; font-size: 0.8rem;"></div>
+
+            <div style="margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+              <button class="btn btn-secondary" onclick="resetCorsSettings()">Reset to configured default</button>
+              <span style="font-size: 0.78rem; color: var(--text-muted);">
+                Server default (<code>CORS_ORIGIN</code> in .env): <code id="cors-env-default">…</code>
+              </span>
+            </div>
+            <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 8px;">
+              ⚠️ Removing the origin marked <strong>in use</strong> will lock you out of this page. You are asked
+              to confirm before it is saved, and the server refuses the change unless you confirm it.
+            </p>
           </div>
         </div>
       </section>
@@ -2482,6 +2583,29 @@
       assignableRoles: [],
       usersLoaded: false,
       usersLoading: false,
+      // CORS allowlist editor (Security tab). `corsDraft` is a WORKING COPY the
+      // admin edits freely without saving, so the chips can be added to and
+      // removed from before anything is written. `corsCurrentRequestOrigin` is
+      // the server's echo of this browser's own Origin header — the one value
+      // that decides whether a change is a self-lockout.
+      corsDraft: [],
+      corsEnvDefault: [],
+      corsSource: '',
+      corsCurrentRequestOrigin: null,
+      corsLoaded: false,
+      corsLoading: false,
+      // Password reset (phase 5e). `resetToken` is the plaintext pasted by the
+      // user, held only in memory for the length of the two-step form and never
+      // written to sessionStorage — a token recovered from a persisted store
+      // would still be live on an unattended machine. `resetUsername` /
+      // `resetExpiresAt` come from the validate call and are only ever used to
+      // tell the user which account they are about to change.
+      resetToken: null,
+      resetUsername: null,
+      resetExpiresAt: null,
+      // The generated .txt, held the same way: memory only, never persisted.
+      resetFileContents: null,
+      resetFileName: null,
       // The open lightbox. `index` is a position in `urls`, and `urls` is a
       // SNAPSHOT taken when the lightbox opened — paging must not re-read
       // state.costumes, or a background reload could swap the list out from
@@ -4699,6 +4823,254 @@
       // otherwise pay for a guaranteed 403 on every sign-in for a panel they
       // can never see. Re-opening the tab reuses the cached list.
       if (tab === 'users' && !state.usersLoaded && !state.usersLoading) loadUsers();
+
+      // Same lazy-load reasoning for the CORS editor: it is admin-only, so a
+      // viewer or curator would otherwise pay for a guaranteed 403 on every
+      // single sign-in by opening a tab they have no use for. The isAdmin()
+      // check is the client-side half; authorize('admin') on the route is the
+      // half that enforces.
+      if (tab === 'security' && isAdmin() && !state.corsLoaded && !state.corsLoading) {
+        loadCorsSettings();
+      }
+    }
+
+    // ==========================================================================
+    // ADMIN — CORS ALLOWED ORIGINS (Security tab)
+    // ==========================================================================
+    // DOM APIs throughout, never innerHTML. Two reasons, and both matter here:
+    // an origin is attacker-influenced text, and every chip needs its own
+    // live click listener for the remove button. escapeHtml() would handle the
+    // first; it does nothing for the second. Building the node once and
+    // binding the listener to it is the same approach buildUserRow() takes.
+    //
+    // The `maxOrigins` cap is duplicated from the server on purpose: the server
+    // is the authority and will reject anything over the limit with a 400, but
+    // refusing to let the admin build a 21st chip in the first place gives a
+    // better message than a round-trip rejection of a list they just assembled.
+    const CORS_MAX_ORIGINS = 20;
+    const CORS_MAX_ORIGIN_LENGTH = 200;
+
+    function corsSetError(message) {
+      const box = document.getElementById('cors-origin-error');
+      if (!box) return;
+      // textContent, not innerHTML — the server's message quotes the offending
+      // origin back, and that text must never be parsed as markup.
+      box.textContent = message || '';
+      box.style.display = message ? 'block' : 'none';
+    }
+
+    function corsSetMessage(message, kind) {
+      const box = document.getElementById('cors-message');
+      if (!box) return;
+      box.textContent = message || '';
+      box.style.color = kind === 'warn' ? '#fbbf24' : 'var(--success, #34d399)';
+    }
+
+    /**
+     * One origin chip: the origin itself, an "in use" marker when it is the
+     * one this browser is talking from, a plain-http warning, and a remove
+     * button.
+     */
+    function buildCorsChip(origin) {
+      const isInUse = !!state.corsCurrentRequestOrigin && origin === state.corsCurrentRequestOrigin;
+      const chip = makeEl('div', 'cors-chip');
+      if (isInUse) chip.classList.add('is-in-use');
+
+      chip.appendChild(makeEl('span', 'cors-chip-origin', origin));
+
+      if (isInUse) {
+        chip.appendChild(makeEl('span', 'tag-chip active', 'in use'));
+      }
+
+      // Plain http is a WARNING, never a block. This deployment is reached over
+      // plain http on Tailscale, so refusing http would make the editor
+      // useless in precisely the situation it exists for. It is flagged so the
+      // choice is visible and informed rather than silent.
+      if (/^http:\/\//i.test(origin)) {
+        const warn = makeEl('span', 'cors-chip-warn', 'unencrypted');
+        warn.title = 'This origin is plain HTTP. Traffic, including your bearer token, travels unencrypted.';
+        chip.appendChild(warn);
+      }
+
+      const remove = makeEl('button', 'cors-chip-remove', '×');
+      remove.type = 'button';
+      remove.setAttribute('aria-label', 'Remove ' + origin);
+      remove.title = isInUse
+        ? 'WARNING: this is the origin you are using right now. Removing it will lock you out of this page.'
+        : 'Remove this origin';
+      remove.addEventListener('click', () => removeCorsOrigin(origin, isInUse));
+      chip.appendChild(remove);
+
+      return chip;
+    }
+
+    function renderCorsSettings() {
+      const list = document.getElementById('cors-origin-list');
+      if (list) {
+        list.textContent = '';
+        state.corsDraft.forEach(origin => list.appendChild(buildCorsChip(origin)));
+        if (!state.corsDraft.length) {
+          list.appendChild(makeEl('span', '', 'No origins — every cross-origin request will be blocked.'));
+        }
+      }
+
+      // Where the effective list came from. This is the difference between
+      // "the list changed and I don't know why" and "no admin has overridden
+      // .env yet", which is a genuinely confusing pair without it.
+      const sourceEl = document.getElementById('cors-source');
+      if (sourceEl) {
+        const label = state.corsSource === 'database'
+          ? 'a saved override (database)'
+          : (state.corsSource === 'env' ? 'CORS_ORIGIN in .env' : 'the built-in default');
+        sourceEl.textContent = label;
+      }
+
+      const envEl = document.getElementById('cors-env-default');
+      if (envEl) {
+        envEl.textContent = state.corsEnvDefault.length ? state.corsEnvDefault.join(', ') : '(none)';
+      }
+    }
+
+    function loadCorsSettings() {
+      if (state.corsLoading) return Promise.resolve();
+      state.corsLoading = true;
+      return api('/api/settings/cors')
+        .then(data => {
+          state.corsDraft = (data.origins || []).map(String);
+          state.corsEnvDefault = (data.envDefault || []).map(String);
+          state.corsSource = String(data.source || '');
+          state.corsCurrentRequestOrigin = data.currentRequestOrigin || null;
+          state.corsLoaded = true;
+          corsSetError('');
+          renderCorsSettings();
+        })
+        .catch(err => {
+          corsSetError(err && err.message ? err.message : 'Could not load the CORS settings.');
+        })
+        .then(() => { state.corsLoading = false; });
+    }
+
+    function addCorsOrigin() {
+      const input = document.getElementById('cors-origin-input');
+      if (!input) return;
+      const value = input.value.trim();
+      if (!value) return;
+
+      if (state.corsDraft.indexOf(value) !== -1) {
+        corsSetError('That origin is already in the list.');
+        return;
+      }
+      if (state.corsDraft.length >= CORS_MAX_ORIGINS) {
+        corsSetError('The maximum is ' + CORS_MAX_ORIGINS + ' origins.');
+        return;
+      }
+      if (value.length > CORS_MAX_ORIGIN_LENGTH) {
+        corsSetError('An origin cannot be longer than ' + CORS_MAX_ORIGIN_LENGTH + ' characters.');
+        return;
+      }
+
+      // No attempt to validate the SHAPE here beyond the obvious: the server is
+      // the authority on what an origin may look like, and inventing a second,
+      // looser parser on the client is how the two drift apart. Anything this
+      // lets through is caught by the server's 400 and shown verbatim.
+      state.corsDraft.push(value);
+      input.value = '';
+      corsSetError('');
+      corsSetMessage('');
+      renderCorsSettings();
+    }
+
+    /**
+     * Remove one origin from the draft.
+     *
+     * Removing the origin this browser is actually using is the self-lockout
+     * case, and it is confirmed HERE, before anything is sent, so the admin is
+     * never one click away from a page that cannot talk to the server. The
+     * server independently refuses the same change unless the request carries
+     * an explicit confirm flag, so this dialog is the friendly layer over a
+     * guard that is already enforced.
+     */
+    function removeCorsOrigin(origin, isInUse) {
+      const apply = () => {
+        state.corsDraft = state.corsDraft.filter(o => o !== origin);
+        corsSetError('');
+        renderCorsSettings();
+      };
+
+      if (!isInUse) {
+        apply();
+        return;
+      }
+
+      confirmAction({
+        title: 'Remove the origin you are using?',
+        message: 'You are currently browsing from ' + origin + '. Removing it will block this page from making ' +
+                 'any further requests and there will be no way back except over SSH. Continue?',
+        confirmLabel: 'Remove anyway'
+      }).then(ok => {
+        if (!ok) return;
+        apply();
+        corsSetMessage('Remember to press Save — this change is not applied until you do.', 'warn');
+      });
+    }
+
+    function saveCorsSettings() {
+      const payload = { origins: state.corsDraft.slice() };
+
+      // Does this save drop the origin we are calling from? If so the server
+      // will answer 400 LOCKOUT_RISK unless confirmSelfRemoval is set. Put the
+      // same question to the human FIRST and only then send the flag — the flag
+      // is never set silently, which is the whole point of having a flag.
+      const selfRemoved = !!state.corsCurrentRequestOrigin &&
+        state.corsDraft.indexOf(state.corsCurrentRequestOrigin) === -1;
+
+      const send = confirmFlag => {
+        if (confirmFlag) payload.confirmSelfRemoval = true;
+        return api('/api/settings/cors', { method: 'PUT', body: JSON.stringify(payload) })
+          .then(() => {
+            corsSetError('');
+            corsSetMessage('Saved. It is already live — no restart needed.', 'ok');
+            return loadCorsSettings();
+          })
+          .catch(err => {
+            // The server's own wording, which names the offending entry. Shown
+            // verbatim: an admin must never have to guess which chip is wrong.
+            corsSetError(err && err.message ? err.message : 'Could not save the allowlist.');
+            corsSetMessage('');
+          });
+      };
+
+      if (selfRemoved) {
+        confirmAction({
+          title: 'Save a list that locks you out?',
+          message: 'The origin you are using right now (' + state.corsCurrentRequestOrigin + ') is not in this ' +
+                   'list. Saving will leave this page unable to reach the server, and the only way back is over SSH. ' +
+                   'Are you sure?',
+          confirmLabel: 'Save anyway'
+        }).then(ok => { if (ok) send(true); });
+        return;
+      }
+      send(false);
+    }
+
+    function resetCorsSettings() {
+      confirmAction({
+        title: 'Reset the CORS allowlist?',
+        message: 'This discards the saved allowlist and goes back to the value configured in CORS_ORIGIN on the ' +
+                 'server. Anything you added here is lost.',
+        confirmLabel: 'Reset'
+      }).then(ok => {
+        if (!ok) return;
+        api('/api/settings/cors/reset', { method: 'POST' })
+          .then(() => {
+            corsSetError('');
+            corsSetMessage('Reset to the server-configured list.', 'ok');
+            return loadCorsSettings();
+          })
+          .catch(err => {
+            corsSetError(err && err.message ? err.message : 'Could not reset the allowlist.');
+          });
+      });
     }
 
     // ==========================================================================

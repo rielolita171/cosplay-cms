@@ -168,3 +168,29 @@ CREATE TABLE IF NOT EXISTS "PasswordResetToken" (
 );
 CREATE INDEX IF NOT EXISTS "idx_PasswordResetToken_user" ON "PasswordResetToken"(userId);
 
+-- Admin-editable, runtime server settings (currently the CORS allowlist).
+--
+-- A key/value table rather than columns on an existing table, because these
+-- are settings of the SERVER, not of a costume or a user, and a new setting
+-- should not need a migration.
+--
+-- value is TEXT holding JSON so the shape of a setting can change without a
+-- schema change; the reader contract lives in src/services/settings.js.
+--
+-- updatedBy records WHICH admin granted a setting, which matters for the
+-- security-relevant ones. updatedAt is ISO-8601 TEXT (a human reads it, and
+-- toISOString() is fixed-width UTC so byte order is chronological order).
+--
+-- NO ROW IS SEEDED. The absence of the row is exactly what "no admin
+-- override, fall back to CORS_ORIGIN in .env" means, so seeding it with the
+-- default would make a deliberate admin choice indistinguishable from the
+-- default.
+--
+-- src/services/db.js creates this table idempotently at boot as well, so an
+-- existing database gains it without a migration step.
+CREATE TABLE IF NOT EXISTS "ServerSetting" (
+  key TEXT PRIMARY KEY,
+  value TEXT,
+  updatedAt TEXT,
+  updatedBy TEXT
+);

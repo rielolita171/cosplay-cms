@@ -180,6 +180,45 @@ async function initSchema() {
       console.warn('⚠️  PasswordResetToken table not created:', error.message);
     });
 
+    // Admin-editable, runtime server settings (currently the CORS allowlist).
+    //
+    // A KEY/VALUE table rather than columns on some existing table, because
+    // these are settings of the SERVER, not of a costume or a user, and because
+    // new ones should not each need a migration.
+    //
+    // `value` is TEXT holding JSON, not a parsed column: the shape of a setting
+    // is allowed to change (a scalar today, a list tomorrow) without a schema
+    // change, and the single-reader contract lives in src/services/settings.js
+    // rather than being spread across this file.
+    //
+    // `updatedBy` records WHICH admin changed it, so the security-relevant
+    // question ("who granted this origin credentialed access, and when?") is
+    // answerable from the row itself. It is nullable so a row written by a
+    // fixture or a manual fix is still legal.
+    //
+    // updatedAt is ISO-8601 TEXT for the same reason PasswordResetToken uses it
+    // for its timestamps: a human reads it, and toISOString() is fixed-width
+    // UTC, so a byte comparison is also a chronological one.
+    //
+    // The row is ABSENT until an admin saves an override. That absence is the
+    // mechanism by which "reset to the .env value" works, so no row is ever
+    // seeded with the default — a seeded row would be indistinguishable from
+    // an admin's deliberate choice.
+    await runSql(`
+      CREATE TABLE IF NOT EXISTS "ServerSetting" (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updatedAt TEXT,
+        updatedBy TEXT
+      );
+    `).catch((error) => {
+      // Its own catch, like every other migration in this function: a failure
+      // here must never stop the server booting. The CORS routes fail loudly
+      // at call time instead, and settings.js degrades to the .env/default
+      // list rather than leaving the allowlist empty.
+      console.warn('⚠️  ServerSetting table not created:', error.message);
+    });
+
     // -----------------------------------------------------------------------
     // Managed reference lists + the one-time backfill of "Costume".brand/fandom.
     //
