@@ -4,6 +4,13 @@ const crypto = require('crypto');
  * API Key Authentication Middleware for Server-to-Server Webhooks (n8n, Cron Jobs)
  * Header: X-CMS-API-KEY
  *
+ * SCOPE: this is the ONLY credential left in the app. The human-facing routes are
+ * unauthenticated by design (see the security note at the top of src/server.js) —
+ * the operator secures the network, not this process. What this middleware still
+ * guards is the machine-to-machine surface: the n8n notification endpoints, which
+ * are not part of the browser app and would otherwise be writable by anything that
+ * can reach the port.
+ *
  * NOTE: the key comparison is constant-time. A plain `===` short-circuits on the
  * first differing byte, which leaks the key length/prefix through response timing.
  */
@@ -50,30 +57,16 @@ function requireApiKey(req, res, next) {
 
   // Mark the request as machine-authenticated. Set ONLY here, i.e. only after the
   // key has passed the constant-time comparison above, so it cannot be obtained by
-  // merely sending the header. requireWriteAccess() (middleware/auth.js) reads this
-  // to let an n8n caller through the read/write split: a viewer is a human without
-  // edit rights, whereas an API key is a server-to-server integration that has no
-  // role at all. Without the marker the two would be indistinguishable, because a
-  // key-authenticated request never populates req.user.
+  // merely sending the header. Nothing reads this marker any more now that the role
+  // ladder is gone, but it stays because it is the honest record of how the request
+  // authenticated, and a future machine-only route can gate on it.
   req.apiKeyAuth = true;
 
   next();
 }
 
-/**
- * Accepts EITHER a valid user JWT (Authorization: Bearer) OR a valid API key.
- * Used for endpoints consumed by both the browser SPA and n8n.
- */
-function verifyTokenOrApiKey(req, res, next) {
-  if (req.headers['x-cms-api-key'] || req.query.apiKey) {
-    return requireApiKey(req, res, next);
-  }
-  return require('../middleware/auth').verifyToken(req, res, next);
-}
-
 module.exports = {
   requireApiKey,
-  verifyTokenOrApiKey,
   isValidApiKey,
   safeCompare
 };

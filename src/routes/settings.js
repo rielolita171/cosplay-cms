@@ -1,24 +1,20 @@
 /**
- * Admin-editable server settings — currently the CORS allowlist.
+ * Runtime server settings — currently the CORS allowlist.
  *
- * A SEPARATE ROUTER from src/routes/auth.js on purpose. auth.js is a large,
- * security-critical file carrying the login / 2FA / refresh / password-reset
- * surface, and none of that needed to change for this feature. Keeping the
- * three settings routes here means the blast radius of touching this control is
- * one new file, and the password-reset endpoints are not one refactor away from
- * being disturbed.
+ * A SEPARATE ROUTER from the data routes on purpose: a control that rewrites who
+ * may talk to the server should never be edited as a side effect of changing a
+ * costume.
  *
- * Every route is admin-only, and every one of them re-checks the role on the
- * server. The frontend hides these controls with data-write-only, but that is
- * only a courtesy to the person using the app — the enforcement that matters is
- * authorize('admin') here.
+ * These routes used to be admin-only via verifyToken + authorize('admin'). With
+ * the account system removed there is no role to check, so the per-route guard is
+ * gone and the write limiter is all that remains. That is consistent with the
+ * rest of the app: the operator is trusted, and the network is the boundary.
  */
 const express = require('express');
 const router = express.Router();
 
 const settings = require('../services/settings');
 const { rateLimit } = require('../middleware/rateLimit');
-const { verifyToken, authorize } = require('../middleware/auth');
 
 /**
  * Write limiter. Generous compared to the auth brute-force limits (30 changes
@@ -51,7 +47,7 @@ const corsWriteLimiter = rateLimit({
  * CORS at all and therefore cannot be locked out by editing this list. The
  * check below and the warning in the UI fire exactly when CORS is in play.
  */
-router.get('/settings/cors', verifyToken, authorize('admin'), async (req, res) => {
+router.get('/settings/cors', async (req, res) => {
   try {
     const effective = await settings.getCorsOrigins();
     const envDefault = settings.getEnvOrigins() || settings.getDefaultOrigins();
@@ -108,7 +104,7 @@ router.get('/settings/cors', verifyToken, authorize('admin'), async (req, res) =
  * there is no "I really mean it" for a configuration that denies every
  * cross-origin request and can only be undone over SSH.
  */
-router.put('/settings/cors', verifyToken, authorize('admin'), corsWriteLimiter, async (req, res) => {
+router.put('/settings/cors', corsWriteLimiter, async (req, res) => {
   try {
     const body = req.body || {};
     const validation = settings.validateCorsOrigins(body.origins);
@@ -141,16 +137,14 @@ router.put('/settings/cors', verifyToken, authorize('admin'), corsWriteLimiter, 
     // 'finish' handler below). Two reasons, both of which are easy to break by
     // "tidying" this up:
     //
-    //  1. The frontend's api() helper transparently RETRIES a request once
-    //     after a 401, to ride out an expired access token. A retry re-runs
-    //     the entire middleware chain, including cors. If the cache were
-    //     swapped before this response went out, that retry would be judged
-    //     against the NEW list — and if the admin just removed their own
-    //     origin, the retry comes back 403 CORS_DENIED and the very request
-    //     that saved the setting appears to have failed, with the session
-    //     left in a confusing half-authenticated state.
+    //  1. A client may legitimately re-send a request. A repeat re-runs the entire
+    //     middleware chain, including cors. If the cache were swapped before this
+    //     response went out, that repeat would be judged against the NEW list —
+    //     and if the caller just removed their own origin, the repeat comes back
+    //     403 CORS_DENIED and the very request that saved the setting appears to
+    //     have failed.
     //  2. Writing the cache before the response means a crash between the two
-    //     leaves the process enforcing something the admin never saw a
+    //     leaves the process enforcing something the operator never saw a
     //     success for. Persist-first-then-swap keeps the cache a follower of
     //     the durable state rather than a parallel one.
     //
@@ -158,7 +152,11 @@ router.put('/settings/cors', verifyToken, authorize('admin'), corsWriteLimiter, 
     // this response's Access-Control-Allow-Origin header by the time this
     // handler runs, the swap genuinely cannot affect THIS response. That is
     // the property being relied on.
-    await settings.setCorsOrigins(validation.origins, req.user ? req.user.id : null, {
+    //
+    // The second argument is the "who changed this" audit field. There is no
+    // account to name any more, so it is recorded as NULL rather than
+    // inventing an actor.
+    await settings.setCorsOrigins(validation.origins, null, {
       cacheImmediately: false
     });
 
@@ -186,7 +184,7 @@ router.put('/settings/cors', verifyToken, authorize('admin'), corsWriteLimiter, 
  * saved can always be undone from the UI, which is the other half of why the
  * lockout guard above is safe to make non-permanent.
  */
-router.post('/settings/cors/reset', verifyToken, authorize('admin'), corsWriteLimiter, async (req, res) => {
+router.post('/settings/cors/reset', corsWriteLimiter, async (req, res) => {
   try {
     // Same deferred swap as PUT, for the same reason.
     await settings.resetCorsOrigins({ cacheImmediately: false });

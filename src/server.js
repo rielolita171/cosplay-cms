@@ -6,34 +6,27 @@ const helmet = require('helmet');
 const path = require('path');
 
 const { rateLimit } = require('./middleware/rateLimit');
-const { validateJwtSecret } = require('./middleware/auth');
 
 const app = express();
 const PORT = process.env.PORT || 4001;
 
 // ============================================================================
-// STARTUP SAFETY CHECKS
+// NO AUTHENTICATION — READ THIS BEFORE EXPOSING THE PORT
 // ============================================================================
-// We do NOT ship a hardcoded replacement secret. Instead the process refuses to
-// boot in production with a placeholder/weak JWT_SECRET, and only warns in
-// development so the current .env placeholder does not brick local work.
-(function validateJwtSecretAtBoot() {
-  const result = validateJwtSecret(process.env.JWT_SECRET);
-  const isProduction = process.env.NODE_ENV === 'production';
-
-  if (!result.ok) {
-    if (isProduction) {
-      console.error(`\n❌ FATAL: ${result.reason}`);
-      console.error('   Set a strong JWT_SECRET before starting in production, e.g.:');
-      console.error('     JWT_SECRET=$(openssl rand -hex 32)\n');
-      process.exit(1);
-    }
-    console.warn(`\n⚠️  JWT_SECRET is not production-safe: ${result.reason}`);
-    console.warn('   The server will start, but this MUST be fixed before deploying.\n');
-  } else if (result.level === 'warning') {
-    console.warn(`\n⚠️  ${result.reason}\n`);
-  }
-})();
+// This app has no accounts, no login, and no role tiers. Every data route is
+// reachable by anything that can open a TCP connection to PORT, and the server
+// binds 0.0.0.0 so it is reachable from outside its network namespace.
+//
+// THAT IS A DELIBERATE DEPLOYMENT DECISION, not an oversight. This is a private
+// single-operator CMS and the trust boundary is the network: it belongs behind a
+// reverse proxy, a VPN, or a firewall rule that admits only the operator's own
+// hosts. The process deliberately does not implement authentication as a second,
+// weaker layer — a shared secret in this code would be one more thing to leak and
+// would not make an exposed port safe.
+//
+// CONSEQUENCE: do not publish this port to the internet. There is nothing here
+// that would stop a scanner that reaches it. Put it behind the network boundary
+// FIRST, and only then start the container.
 
 // Behind a reverse proxy (nginx/traefik) so express-rate-limit style
 // IP attribution and req.ip use X-Forwarded-For instead of the proxy socket.
@@ -109,8 +102,9 @@ app.use(morgan(':method :url :status :response-time ms'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-// General API rate limit (loose). Auth routes apply their own, much tighter,
-// per-route limits inside src/routes/auth.js.
+// General API rate limit (loose). It exists to keep a runaway client or a bored
+// scanner from saturating the process, not to authenticate anything — see the
+// no-authentication note at the top of this file.
 const apiLimiter = rateLimit({
   name: 'api-general',
   windowMs: 15 * 60 * 1000,
@@ -120,29 +114,23 @@ const apiLimiter = rateLimit({
 app.use('/api', apiLimiter);
 
 /**
- * Static files for uploaded images — GUARDED.
+ * Static files for uploaded images.
  *
- * This used to be a bare `express.static` mount, which meant every uploaded
- * costume photo was world-readable to anyone who could reach the server and
- * guess (or enumerate) its path. An `<img src>` cannot send an
- * `Authorization: Bearer` header, so the guard cannot simply be the data-route
- * `verifyToken` used elsewhere: the frontend fetches each image through api()
- * with the bearer header and paints it via an object URL instead (see
- * "Authenticated image delivery" in public/index.html). That is a CLIENT-SIDE
- * contract, so the server half of it is `requireUploadAccess` below, which
- * accepts an access token (or the X-CMS-API-KEY header, for n8n) and denies
- * everything else with 401/403 and a JSON body — never a redirect to the login
- * page, and never a fall-through to the SPA mount.
+ * This mount was previously guarded by requireUploadAccess, which demanded a JWT
+ * or the API key. That guard is gone with the account system. It is deliberately
+ * NOT replaced with anything: the whole trust model is now the network boundary
+ * (see the top of this file), and a half-guard here would be worse than none —
+ * it would suggest the images are protected while the data routes beside them
+ * are wide open.
  *
- * The trailing 404 handler is part of the guard, not decoration: with
+ * The trailing 404 handler is load-bearing and is NOT decoration: with
  * `fallthrough` left at its default, a request for a file that does not exist
- * would fall out of this mount and be answered by the public SPA mount at the
- * bottom of this file, handing the caller index.html with a 200.
+ * falls out of this mount and is answered by the public SPA mount at the bottom
+ * of this file, handing the caller index.html with a 200 — an image tag that
+ * silently renders a web page.
  */
-const { requireUploadAccess } = require('./middleware/uploadAccess');
 app.use(
   '/uploads',
-  requireUploadAccess,
   express.static(path.join(__dirname, '../data/uploads'), {
     index: false,
     dotfiles: 'deny',
@@ -166,30 +154,25 @@ app.get('/health', (req, res) => {
 });
 
 // API version endpoint (public).
-// Intentionally lists ONLY public + user-token routes. The n8n /
-// X-CMS-API-KEY notification endpoints are internal machine-to-machine
-// surface and are not advertised here.
+//
+// This endpoint used to advertise the full auth scheme, a 40-line endpoint
+// list including every /auth/* route, and the whole role ladder. All of that is
+// gone, and the endpoint now says so explicitly rather than just quietly
+// omitting it — an operator reading this output is looking for exactly the
+// question "does this thing still need a login?", and "no" is the answer.
+//
+// The n8n / X-CMS-API-KEY notification endpoints are still not listed: they are
+// machine-to-machine surface, not part of the browser app.
 app.get('/api/version', (req, res) => {
   res.json({
-    api_version: '1.0.0',
+    api_version: '1.1.0',
     phase: 5,
-    auth: {
-      scheme: 'Bearer JWT (access) + rotating refresh token',
-      access_token_ttl: '15m',
-      two_factor: 'Telegram OTP, opt-in per user',
-      note: 'This is NOT an OAuth 2.0 authorization server; it is a local JWT session flow.'
+    authentication: {
+      required: false,
+      scheme: 'none',
+      note: 'This deployment is unauthenticated by design. It is intended for a private network; do not expose this port to the internet.'
     },
     endpoints: [
-      'POST /api/auth/register',
-      'POST /api/auth/login',
-      'POST /api/auth/2fa/verify',
-      'POST /api/auth/2fa/resend',
-      'PATCH /api/auth/2fa/toggle',
-      'POST /api/auth/break-glass',
-      'POST /api/auth/break-glass/generate',
-      'POST /api/auth/refresh',
-      'POST /api/auth/logout',
-      'GET /api/auth/profile',
       'GET /api/costumes',
       'POST /api/costumes',
       'GET /api/costumes/:id',
@@ -220,123 +203,65 @@ app.get('/api/version', (req, res) => {
       'POST /api/images/upload-multiple',
       'GET /api/images/stats',
       'DELETE /api/costumes/:id/images',
-      'GET /api/auth/users (admin)',
-      'PATCH /api/auth/users/:id/role (admin)',
-      'POST /api/auth/users/:id/password-reset (admin)',
-      // Runtime CORS allowlist. Admin-only, and editable without a restart —
-      // the whole point is that fixing an origin no longer needs SSH.
-      'GET /api/settings/cors (admin)',
-      'PUT /api/settings/cors (admin)',
-      'POST /api/settings/cors/reset (admin)',
-      // The two below are deliberately UNAUTHENTICATED. They are the only
-      // unauthenticated write path in the app, and they have to be: the whole
-      // point is to let someone who cannot sign in change a password. They
-      // carry a bearer token instead, and are rate limited per-IP AND
-      // per-token. Listed here so the public surface stays discoverable and
-      // reviewable rather than being something you have to know to find.
-      'POST /api/auth/password-reset/validate (public)',
-      'POST /api/auth/password-reset (public)'
-    ],
-    roles: {
-      note: 'Roles are a ladder. Read the first tier at or above your own to learn what you may do.',
-      ladder: ['guest (0, no data access)', 'viewer (1, read-only)', 'user (2, full record CRUD)', 'curator (3)', 'admin (4, + user management)'],
-      write_tier: 'user',
-      read_only_error: '403 { code: "READ_ONLY_ROLE" } is returned to a viewer on any POST/PUT/PATCH/DELETE.'
-    }
+      // Runtime CORS allowlist, editable without a restart — the whole point is
+      // that fixing an origin no longer needs SSH.
+      'GET /api/settings/cors',
+      'PUT /api/settings/cors',
+      'POST /api/settings/cors/reset'
+    ]
   });
 });
 
-// ---------------------------------------------------------------------------
-// Auth routes — self-guarded (public login/2fa, verifyToken on the rest).
-// ---------------------------------------------------------------------------
-const authRoutes = require('./routes/auth');
-app.use('/api', authRoutes);
-app.use('/', authRoutes);
-
-// Admin-editable server settings (currently the CORS allowlist). Each route
-// carries its own verifyToken + authorize('admin'); mounted under /api only,
-// because a security control that rewrites who may talk to the server has no
+// Runtime server settings (currently the CORS allowlist). Mounted under /api
+// only, because a control that rewrites who may talk to the server has no
 // business also being reachable on a second, un-prefixed path.
 const settingsRoutes = require('./routes/settings');
 app.use('/api', settingsRoutes);
 
 // ---------------------------------------------------------------------------
-// Data routes.
+// Data routes. These carry NO authentication middleware: verifyToken and
+// requireWriteAccess were removed along with the account system, and nothing
+// replaced them. That is the intended end state for a private-network
+// deployment (see the warning at the top of this file) — but it is the single
+// most important thing to understand before changing anything here.
 //
-// IMPORTANT (this bit the project once already): the guard MUST be mounted on a
-// PATH PREFIX, never on a broad prefix like '/' or '/api'.
-//
-//   app.use('/api', verifyToken, router)   // WRONG
-//   app.use('/api/costumes', verifyToken, costumeRoutes)   // RIGHT
-//
-// With a broad prefix, any request that no route handles falls through to the
-// next app.use, which re-runs verifyToken — so unrelated endpoints (even the
-// public /health and the API-key notification routes) start returning 401.
-// Scoping the mount to the resource keeps the guard applied to exactly the
-// routes it protects, and no later edit can mount one ahead of it.
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// THE READ/WRITE SPLIT
-// ---------------------------------------------------------------------------
-// requireWriteAccess is the second guard on every data mount. It reads the HTTP
-// method: GET/HEAD/OPTIONS pass, and every mutating method (POST/PUT/PATCH/DELETE)
-// requires the 'user' tier or above. That is what makes a `viewer` account
-// read-only instead of merely labelled read-only.
-//
-// It is mounted PER RESOURCE, immediately after verifyToken, for the same reason
-// the auth guard is (see the WARNING above): the order in this list is the order
-// the request passes through, and there is exactly one line per resource so a
-// route added later cannot accidentally be mounted without it.
-//
-//   verifyToken  ->  who are you          (401 if not)
-//
-//   requireWriteAccess -> may you change it (403 READ_ONLY_ROLE if a viewer)
-//
-// An API-key caller carries no role at all, so requireWriteAccess lets it through
-// on the strength of the marker apiKeyAuth.js sets after verifying the key. That
-// is deliberate: the n8n workflow is a server-to-server integration, not a person
-// whose permissions should be a tier.
-const authMiddleware = require('./middleware/auth');
-const { verifyTokenOrApiKey } = require('./middleware/apiKeyAuth');
-const { requireWriteAccess } = authMiddleware;
-
+// The routers themselves still own their input validation, their parameter
+// whitelists and their SQL safety, so an unauthenticated caller is still bound
+// by every check the handlers make. What is gone is *who* is calling, not what
+// they can send.
 const costumeRoutes = require('./routes/costumes');
-app.use('/api/costumes', authMiddleware.verifyToken, requireWriteAccess, costumeRoutes);
-app.use('/costumes', authMiddleware.verifyToken, requireWriteAccess, costumeRoutes);
+app.use('/api/costumes', costumeRoutes);
+app.use('/costumes', costumeRoutes);
 
-// Brand / Fandom reference lists. Same prefix-scoped guard as the other data
-// routes — see the WARNING above about mounting on '/' or '/api'.
 const brandRoutes = require('./routes/brands');
-app.use('/api/brands', authMiddleware.verifyToken, requireWriteAccess, brandRoutes);
-app.use('/brands', authMiddleware.verifyToken, requireWriteAccess, brandRoutes);
+app.use('/api/brands', brandRoutes);
+app.use('/brands', brandRoutes);
 
 const fandomRoutes = require('./routes/fandoms');
-app.use('/api/fandoms', authMiddleware.verifyToken, requireWriteAccess, fandomRoutes);
-app.use('/fandoms', authMiddleware.verifyToken, requireWriteAccess, fandomRoutes);
+app.use('/api/fandoms', fandomRoutes);
+app.use('/fandoms', fandomRoutes);
 
 const propsRoutes = require('./routes/props');
-app.use('/api/props', authMiddleware.verifyToken, requireWriteAccess, propsRoutes);
-app.use('/props', authMiddleware.verifyToken, requireWriteAccess, propsRoutes);
+app.use('/api/props', propsRoutes);
+app.use('/props', propsRoutes);
 
 const lensesRoutes = require('./routes/lenses');
-app.use('/api/lenses', authMiddleware.verifyToken, requireWriteAccess, lensesRoutes);
-app.use('/lenses', authMiddleware.verifyToken, requireWriteAccess, lensesRoutes);
+app.use('/api/lenses', lensesRoutes);
+app.use('/lenses', lensesRoutes);
 
-// Image endpoints are used by the browser SPA *and* by n8n (X-CMS-API-KEY), so
-// they accept either credential. Uploading IS a write, so the same split applies —
-// a viewer may keep looking at the photos but cannot add any.
+// Image endpoints. The browser app and n8n both use these, and the API key is
+// still accepted where the router asks for it.
 const imageRoutes = require('./routes/images');
-app.use('/api/images', verifyTokenOrApiKey, requireWriteAccess, imageRoutes);
-app.use('/images', verifyTokenOrApiKey, requireWriteAccess, imageRoutes);
+app.use('/api/images', imageRoutes);
+app.use('/images', imageRoutes);
 
 // Alias kept for the phase-5 frontend spec (`POST /api/upload`). Same handler,
-// same guard, same response shape as the canonical /api/images/upload.
-// Mounted with app.post (not app.use) so the guard is scoped to this one path.
-app.post('/api/upload', verifyTokenOrApiKey, requireWriteAccess, imageRoutes.singleUploadChain);
-app.post('/upload', verifyTokenOrApiKey, requireWriteAccess, imageRoutes.singleUploadChain);
+// same response shape as the canonical /api/images/upload.
+app.post('/api/upload', imageRoutes.singleUploadChain);
+app.post('/upload', imageRoutes.singleUploadChain);
 
-// Notification endpoints are machine-to-machine only (n8n); they keep the
-// stricter X-CMS-API-KEY guard defined inside the router.
+// Notification endpoints are the ONE surface that still requires a credential:
+// machine-to-machine callers only, gated on X-CMS-API-KEY inside the router.
 const notificationRoutes = require('./routes/notifications');
 app.use('/api', notificationRoutes);
 app.use('/', notificationRoutes);
@@ -390,57 +315,32 @@ db.initSchema()
     // falls back to the .env/default list and retries on the next request.
     return settings.primeCache();
   })
-  .then(() => reportTelegram2FAConfig())
   .catch((error) => {
     console.error('❌ Schema initialisation failed:', error.message);
   });
 
 /**
- * Loud, non-fatal startup check for the one misconfiguration that can lock a
- * real user out of their own account.
+ * Loud, non-fatal startup check for a half-configured Telegram bot.
  *
- * THE MISCONFIGURATION
- * "User".telegram2FAEnabled is a per-account flag. If it is set but Telegram is
- * not configured, POST /api/auth/login answers 503 TELEGRAM_NOT_CONFIGURED
- * (src/routes/auth.js telegramUnconfigured) — which is the correct fail-closed
- * behaviour — but the account owner has no way to receive the OTP, and the only
- * remaining way back in is the break-glass recovery key.
+ * This used to be a much more serious check: it warned that 2FA was enabled for
+ * an account whose OTP could not be delivered, which would have LOCKED THAT USER
+ * OUT of the app. There is no account and no login any more, so a missing bot
+ * token is now an ordinary misconfiguration — notifications simply will not
+ * arrive — and refusing to boot over it would be the wrong trade.
  *
- * WHY THIS ONLY WARNS
- * The app is perfectly usable without 2FA, and this function runs against a
- * database that may legitimately hold no 2FA users at all. Refusing to boot over
- * a warning would take the whole CMS down to report a problem the operator can
- * fix in their .env, so this mirrors validateJwtSecretAtBoot()'s development
- * path: shout, then start.
- *
- * It never prints a chat id, a bot token, or any credential — only counts.
+ * It never prints a chat id, a bot token, or any credential.
  */
-async function reportTelegram2FAConfig() {
+async function reportTelegramConfig() {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const configured = !!token && !token.includes('$(') && !token.includes('your_') && !token.includes('here');
   if (configured) return;
 
-  try {
-    const withChatId = await db.countUsersWith2FAEnabled(true);
-    const withoutChatId = await db.countUsersWith2FAEnabled(false);
-    if (withChatId + withoutChatId === 0) return;
-
-    console.warn('\n' + '='.repeat(60));
-    console.warn('⚠️  2FA IS ENABLED FOR AT LEAST ONE ACCOUNT, BUT TELEGRAM IS NOT CONFIGURED.');
-    console.warn(`   Accounts with 2FA on: ${withChatId + withoutChatId}`
-      + (withoutChatId > 0 ? ` (${withoutChatId} of them have no telegramChatId at all)` : ''));
-    console.warn('   While TELEGRAM_BOT_TOKEN is a placeholder, POST /api/auth/login for those');
-    console.warn('   accounts returns 503 TELEGRAM_NOT_CONFIGURED and no OTP can be sent.');
-    console.warn('   Recovery: POST /api/auth/break-glass with { username, recoveryKey } —');
-    console.warn('   this does NOT depend on Telegram, so those users are not locked out as');
-    console.warn('   long as they still hold their emergency key.');
-    console.warn('   Fix: set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in .env, then set the');
-    console.warn('   telegramChatId column on your own "User" row before enabling 2FA.');
-    console.warn('='.repeat(60) + '\n');
-  } catch (error) {
-    // A missing "User" table is not this function's problem to report.
-    console.warn('⚠️  Could not verify the 2FA / Telegram configuration:', error.message);
-  }
+  console.warn('\n' + '='.repeat(60));
+  console.warn('⚠️  TELEGRAM_BOT_TOKEN IS NOT CONFIGURED.');
+  console.warn('   Notification messages will NOT be delivered — the service falls back');
+  console.warn('   to printing them to the log instead of sending them.');
+  console.warn('   Fix: set a real bot token in .env (from @BotFather).');
+  console.warn('='.repeat(60) + '\n');
 }
 
 // The host is explicit rather than relying on the no-host overload. Without it
@@ -468,22 +368,24 @@ const server = app.listen(PORT, '0.0.0.0', () => {
       const source = effective.source === 'database' ? ' (saved override)'
         : (effective.source === 'env' ? ' (CORS_ORIGIN in .env)' : ' (built-in default)');
       console.log(`🔒 CORS allowlist: ${effective.origins.join(', ')}${source}`);
-      console.log('   Editable at runtime: PUT /api/settings/cors (admin) — no restart needed.');
+      console.log('   Editable at runtime: PUT /api/settings/cors — no restart needed.');
     })
     .catch(() => {
       console.log(`🔒 CORS allowlist: ${settings.getCorsOriginsSync().join(', ')}`);
     });
   console.log(`${'='.repeat(60)}\n`);
 
-  console.log('📡 Public endpoints:');
+  console.log('📡 Endpoints:');
   console.log('   GET  /health');
   console.log('   GET  /api/version');
-  console.log('   POST /api/auth/login  (2FA challenge or token pair)');
-  console.log('   POST /api/auth/2fa/verify');
   console.log('');
-  console.log('🔐 Bearer-token endpoints: /api/costumes, /api/brands, /api/fandoms, /api/props, /api/lenses, /api/images');
-  console.log('🤖 API-key endpoints:     /api/notifications (X-CMS-API-KEY)');
-  console.log('\nℹ️  Frontend SPA: public/index.html\n');
+  console.log('🔓 Data routes: /api/costumes, /api/brands, /api/fandoms, /api/props,');
+  console.log('               /api/lenses, /api/images  — NO AUTHENTICATION REQUIRED');
+  console.log('🤖 API-key routes: /api/notifications (X-CMS-API-KEY required)');
+  console.log('\n⚠️  This server does not authenticate anyone. Anyone who can reach this');
+  console.log('   port has full read AND write access to every record. Keep it on a');
+  console.log('   trusted network only — do not publish it to the internet.\n');
+  console.log('ℹ️  Frontend SPA: public/index.html\n');
 });
 
 // ============================================================================
