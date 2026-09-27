@@ -750,6 +750,235 @@
       cursor: pointer;
       flex: 0 0 auto;
     }
+
+    /* -----------------------------------------------------------------------
+       ROLE GATING
+       The write controls are hidden with `.is-hidden` when canWrite() is
+       false. The class is used rather than an inline `display:none` because
+       several of the gated elements are flex children whose computed display
+       is not `block`; `!important` is what makes one rule correct for all of
+       them without each call site having to remember to save and restore the
+       previous value.
+
+       THIS IS NOT THE CONTROL. requireWriteAccess() on the server refuses
+       every mutating request from a `viewer` with 403 READ_ONLY_ROLE before
+       the route is reached. The class only stops the buttons being OFFERED —
+       a control the user can click and be refused is worse UX than one that
+       was never there. See canWrite() and bindGridEvents() for the matching
+       client-side chokepoint.
+    ----------------------------------------------------------------------- */
+    .is-hidden {
+      display: none !important;
+    }
+
+    .role-notice {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 20px;
+      padding: 12px 16px;
+      border-radius: var(--radius);
+      background: rgba(59, 130, 246, 0.10);
+      border: 1px solid rgba(59, 130, 246, 0.30);
+      color: #93c5fd;
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+    .role-notice strong {
+      color: var(--text);
+    }
+
+    /* -----------------------------------------------------------------------
+       COSTUME GALLERY (thumbnail strip + lightbox)
+       `.item-media` is a fixed 150px box with `overflow:hidden`, so the strip
+       is a SIBLING of it rather than a child: a strip inside a 150px cropped
+       box would be clipped by the same `overflow:hidden` that keeps the cover
+       photo filling the box.
+    ----------------------------------------------------------------------- */
+    .media-strip {
+      display: flex;
+      gap: 6px;
+      margin: -6px 0 14px;
+      flex-wrap: wrap;
+    }
+
+    .media-thumb {
+      width: 44px;
+      height: 44px;
+      padding: 0;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.03);
+      cursor: pointer;
+      transition: var(--transition);
+      flex: 0 0 auto;
+    }
+    .media-thumb:hover {
+      border-color: var(--primary);
+      transform: translateY(-1px);
+    }
+    .media-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .media-thumb-more {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      cursor: default;
+    }
+
+    /* The "open the lightbox" overlay. Centred, and BELOW the upload button in
+       stacking order so the two never fight over the same clicks. */
+    .media-expand-btn {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 1;
+      background: rgba(15, 17, 23, 0.72);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      border-radius: 9999px;
+      padding: 8px 14px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: var(--transition);
+      white-space: nowrap;
+    }
+    .media-expand-btn:hover {
+      background: var(--primary);
+      border-color: var(--primary);
+    }
+    .media-upload-btn {
+      z-index: 2;
+    }
+
+    /* Lightbox. A plain <dialog> like every other modal in this file — it gets
+       focus trapping, Esc and the top layer for free, which a hand-rolled
+       overlay div would have to reimplement. */
+    #modal-lightbox {
+      max-width: min(1100px, 94vw);
+      width: 94vw;
+      padding: 16px;
+    }
+
+    .lightbox-stage {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 220px;
+      max-height: 68vh;
+      background: #141724;
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .lightbox-stage img {
+      max-width: 100%;
+      max-height: 68vh;
+      object-fit: contain;
+      display: block;
+    }
+
+    .lightbox-nav {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(15, 17, 23, 0.72);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      font-size: 1.1rem;
+      line-height: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .lightbox-nav:hover {
+      background: var(--primary);
+      border-color: var(--primary);
+    }
+    .lightbox-nav:disabled {
+      opacity: 0.35;
+      cursor: default;
+      background: rgba(15, 17, 23, 0.72);
+      border-color: var(--card-border);
+    }
+    .lightbox-prev { left: 10px; }
+    .lightbox-next { right: 10px; }
+
+    .lightbox-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+    .lightbox-caption {
+      color: var(--text-muted);
+      font-size: 0.82rem;
+      min-width: 0;
+    }
+
+    /* -----------------------------------------------------------------------
+       ADMIN — USERS TAB
+    ----------------------------------------------------------------------- */
+    .user-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 12px 14px;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .user-row.is-self {
+      border-color: rgba(139, 92, 246, 0.4);
+      background: rgba(139, 92, 246, 0.07);
+    }
+    .user-identity {
+      min-width: 0;
+    }
+    .user-name {
+      font-size: 0.95rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .user-meta {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    .user-role-select {
+      padding: 8px 12px;
+      border-radius: 8px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      color: white;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    .user-role-select:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
   </style>
 </head>
 <body>
@@ -811,12 +1040,32 @@
           <p>Home Server Inventory, Milestones & 2FA Security</p>
         </div>
         <div class="header-actions">
-          <button class="btn btn-secondary" onclick="openModal('modal-add-lens')">+ Add Lens</button>
-          <button class="btn btn-secondary" onclick="openModal('modal-add-prop')">+ Add Prop</button>
-          <button class="btn btn-primary" onclick="openModal('modal-add-costume')">+ New Costume</button>
+          <!-- The three "+ Add …" buttons are write entry points. They carry
+               data-write-only so applyRoleVisibility() can hide them from a
+               viewer; the onclick is KEPT because openModal() also refuses a
+               viewer, and that is the half that actually matters — a hidden
+               button is still reachable from the keyboard, from devtools, or
+               from a tab rendered before the role changed. See canWrite(). -->
+          <button class="btn btn-secondary" data-write-only onclick="openModal('modal-add-lens')">+ Add Lens</button>
+          <button class="btn btn-secondary" data-write-only onclick="openModal('modal-add-prop')">+ Add Prop</button>
+          <button class="btn btn-primary" data-write-only onclick="openModal('modal-add-costume')">+ New Costume</button>
           <button class="btn btn-secondary" onclick="logout()">Logout</button>
         </div>
       </header>
+
+      <!-- Read-only notice, hidden for every writer by applyRoleVisibility().
+           A viewer is TOLD the buttons are gone, rather than being left to
+           wonder whether the page half-loaded. -->
+      <div class="role-notice is-hidden" id="role-notice">
+        <span aria-hidden="true">👁️</span>
+        <span>
+          <strong>Read-only access.</strong> Your account has the
+          <strong>viewer</strong> role, so everything can be browsed but nothing
+          can be added, edited or deleted. The server enforces this separately
+          and answers <code>403 READ_ONLY_ROLE</code> to any attempt. Ask an
+          administrator if you need write access.
+        </span>
+      </div>
 
       <!-- Metrics Cards -->
       <div class="metrics-grid">
@@ -848,6 +1097,10 @@
         <button class="tab-btn" data-tab="props" onclick="switchTab('props')">⚔️ Props & Accessories</button>
         <button class="tab-btn" data-tab="lenses" onclick="switchTab('lenses')">👁️ Contact Lenses</button>
         <button class="tab-btn" data-tab="lists" onclick="switchTab('lists')">🏷️ Reference Lists</button>
+        <!-- ADMIN ONLY. Hidden by applyRoleVisibility() for any role that is
+             not exactly 'admin'; switchTab() refuses the tab itself too, so the
+             restriction does not rest on the button merely being invisible. -->
+        <button class="tab-btn is-hidden" id="tab-btn-users" data-tab="users" onclick="switchTab('users')">👥 Users</button>
         <button class="tab-btn" data-tab="security" onclick="switchTab('security')">🔐 Security & 2FA</button>
       </div>
 
@@ -924,7 +1177,10 @@
                 </p>
                 <div class="field-error" data-error-for="storeUrl"></div>
               </div>
-              <button type="submit" class="btn btn-primary btn-full">Add Brand</button>
+              <!-- A bare text box with no submit button is worse than nothing,
+                   so it is the SUBMIT that is hidden and the panel stays —
+                   a viewer can still search and read the list. -->
+              <button type="submit" class="btn btn-primary btn-full" data-write-only>Add Brand</button>
             </form>
             <!-- Search box for the Brand list. This box belongs to the Brand list
                  alone: its own id, its own state key (state.brandQuery), its own
@@ -957,7 +1213,7 @@
                        placeholder="e.g. Genshin Impact" required>
                 <div class="field-error" data-error-for="name"></div>
               </div>
-              <button type="submit" class="btn btn-primary btn-full">Add Fandom</button>
+              <button type="submit" class="btn btn-primary btn-full" data-write-only>Add Fandom</button>
             </form>
             <!-- The Fandom list's own search box, wired to the 'fandoms' key of
                  the same helper. Independent of the Brand box above in every
@@ -971,6 +1227,29 @@
             <p class="ref-search-empty" id="fandoms-list-message" hidden></p>
             <div class="items-grid" id="fandoms-grid" style="margin-top: 16px;"></div>
           </div>
+        </div>
+      </section>
+
+      <!-- Users Tab Content (ADMIN ONLY).
+
+           Rendered by renderUsers() with DOM APIs, not innerHTML: every value
+           here is attacker-adjacent (a username is chosen at signup, an email
+           likewise) and the <select> needs a real change listener per row,
+           which an innerHTML template would have to re-bind on every repaint.
+           See renderUsers(). -->
+      <section id="tab-users" style="display: none;">
+        <div class="metric-card" style="max-width: 900px; margin: 0 auto;">
+          <h2 style="font-size: 1.3rem; margin-bottom: 6px;">👥 Users & Roles</h2>
+          <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px;">
+            Roles run from least to most privileged:
+            <strong>viewer</strong> (read only) → <strong>user</strong> (full editing)
+            → <strong>curator</strong> → <strong>admin</strong> (this panel).
+            A change takes effect on that account's next request — the role is a
+            claim in the token, so an already-issued access token keeps its old
+            role until it is refreshed or expires.
+          </p>
+          <div id="users-error" class="auth-error" style="display: none; text-align: left;"></div>
+          <div id="users-list" style="display: grid; gap: 10px;"></div>
         </div>
       </section>
 
@@ -1458,8 +1737,40 @@
   </dialog>
 
   <!-- Hidden file input used by the costume card upload button (opened by
-       bindGridEvents -> data-action="upload"; accept + size are re-checked in JS) -->
-  <input type="file" id="costume-image-input" class="upload-input-hidden" accept="image/png,image/jpeg,image/webp,image/gif">
+       bindGridEvents -> data-action="upload"; accept + size are re-checked in JS)
+
+       `multiple` turns one selection into a whole batch. onImagePicked() posts
+       ONE file to /api/images/upload and TWO OR MORE to /api/images/upload-multiple
+       (field `images`), rather than always using the batch endpoint: the single
+       route is the canonical one, and firing a batch request for one file buys
+       nothing while adding a second code path to keep correct. Both caps are
+       checked client-side BEFORE anything is sent — see onImagePicked(). -->
+  <input type="file" id="costume-image-input" class="upload-input-hidden" multiple accept="image/png,image/jpeg,image/webp,image/gif">
+
+  <!-- Lightbox: the costume gallery viewer.
+       A plain <dialog> so Esc, focus trapping and the top layer come from the
+       platform. The <img> is painted by the SAME authenticated pipeline as
+       every thumbnail (loadImageObjectUrl -> object URL) and is deliberately
+       NOT a plain <img src="/uploads/…">: that mount is guarded and an <img>
+       cannot send the bearer header. See "Authenticated image delivery". -->
+  <dialog id="modal-lightbox">
+    <h3 style="margin-bottom: 4px;" id="lightbox-title">Photos</h3>
+    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 12px;" id="lightbox-caption"></p>
+    <div class="lightbox-stage">
+      <img id="lightbox-img" src="" alt="">
+      <button type="button" class="lightbox-nav lightbox-prev" id="lightbox-prev" aria-label="Previous photo">‹</button>
+      <button type="button" class="lightbox-nav lightbox-next" id="lightbox-next" aria-label="Next photo">›</button>
+    </div>
+    <div class="lightbox-bar">
+      <span class="lightbox-caption" id="lightbox-position"></span>
+      <div style="display: flex; gap: 10px; align-items: center;">
+        <!-- Write control: hidden for a viewer, and deleteLightboxImage()
+             refuses the call independently. -->
+        <button type="button" class="btn btn-danger" id="lightbox-delete" data-write-only>Delete this photo</button>
+        <button type="button" class="btn btn-secondary" id="lightbox-close">Close</button>
+      </div>
+    </div>
+  </dialog>
 
   <!-- Confirm Dialog (replaces native confirm() for destructive actions) -->
   <dialog id="modal-confirm">
@@ -1499,6 +1810,23 @@
 
     // Accepted upload MIME types (must match the multer fileFilter).
     const ALLOWED_UPLOAD_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+
+    // Server caps for the gallery, mirrored so the user is told BEFORE a
+    // round-trip rather than after a rejection:
+    //   * MAX_FILES_PER_REQUEST  — multer's array limit in
+    //     `upload.array('images', 10)` (src/routes/images.js).
+    //   * MAX_IMAGES_PER_COSTUME — normalizeImageUrls() in src/routes/costumes.js.
+    //   * MAX_IMAGE_URL_LENGTH   — the per-url cap that same normaliser
+    //     enforces, and the one DELETE /api/costumes/:id/images validates against.
+    const MAX_FILES_PER_REQUEST = 10;
+    const MAX_IMAGES_PER_COSTUME = 20;
+    const MAX_IMAGE_URL_LENGTH = 2048;
+
+    // How many thumbnails the card strip draws before collapsing the remainder
+    // into a "+N" chip. A costume may hold 20 images and a 20-wide strip would
+    // push the card's own content off screen. The lightbox still pages through
+    // every one of them, so nothing becomes unreachable — see renderCostumes().
+    const MAX_CARD_THUMBS = 6;
 
     // The status values PUT /api/costumes/:id accepts (COSTUME_STATUSES in
     // src/routes/costumes.js). Kept as a list so the edit form and this check
@@ -1678,6 +2006,94 @@
           img.setAttribute('src', objectUrl);
         });
       }
+    }
+
+    // ==========================================================================
+    // ROLES (phase 5c — the "viewer" role and the admin role panel)
+    // ==========================================================================
+    // THE SAME LADDER THE SERVER USES, AND WHY IT MUST BE FAIL-CLOSED HERE TOO
+    // hasRoleAtLeast() in src/middleware/auth.js compares ranks, and a role it
+    // does not recognise ranks below everything, so a `viewer` — and equally a
+    // missing, empty or misspelt role — can never satisfy `>= 'user'`. This
+    // client copy reproduces that by INDEXING a lookup rather than by comparing
+    // strings:
+    //
+    //   rankOf('viewer')    -> 0        rankOf('bogus')    -> -1 (not in table)
+    //   rankOf('user')      -> 1        rankOf(undefined) -> -1 (not in table)
+    //   rankOf('curator')   -> 2
+    //   rankOf('admin')     -> 3
+    //
+    // An unknown role therefore scores -1, and -1 >= 1 is false, so anything
+    // this table does not name is read-only. That is the whole point: state.user
+    // is restored from sessionStorage at boot, so a tampered or stale blob must
+    // not be able to talk its way into write controls.
+    //
+    // The ranks are ORDERED, not merely present, so 'user' < 'curator' < 'admin'
+    // keeps holding if the server ever promotes a role.
+    const ROLE_RANKS = { viewer: 0, user: 1, curator: 2, admin: 3 };
+    const WRITE_ROLE = 'user';
+    const ADMIN_ROLE = 'admin';
+
+    // Every `data-action` that eventually mutates something. Kept as ONE list
+    // beside the ladder so the two halves of the gate can be read together: an
+    // action missing from this list is a READ, and a read is something a
+    // `viewer` must still be able to do. 'open-gallery' is the current example
+    // — browsing photos is not a write.
+    const WRITE_ACTIONS = ['upload', 'edit', 'delete', 'open-lens',
+      'rename-brand', 'link-brand', 'rename-fandom', 'delete-brand', 'delete-fandom'];
+
+    /** The numeric rank of `role`, or -1 when it is not one we know. */
+    function roleRank(role) {
+      const key = clean(role).toLowerCase();
+      return Object.prototype.hasOwnProperty.call(ROLE_RANKS, key) ? ROLE_RANKS[key] : -1;
+    }
+
+    /**
+     * True when the signed-in account may perform writes.
+     *
+     * Fail-closed, matching the server: an absent state.user, an absent role, or
+     * a role this table does not name, all yield -1 — which fails the
+     * `>= WRITE_ROLE` comparison and leaves every write control hidden.
+     */
+    function canWrite() {
+      return roleRank(state.user && state.user.role) >= roleRank(WRITE_ROLE);
+    }
+
+    /** True only for a real 'admin'. */
+    function isAdmin() {
+      return roleRank(state.user && state.user.role) >= roleRank(ADMIN_ROLE);
+    }
+
+    /**
+     * Apply the role to the DOM.
+     *
+     * Runs on every dashboard load and after a role change, because the correct
+     * visibility depends on WHO is signed in, not on which tab happens to be
+     * open. It is deliberately one pass over `[data-write-only]` rather than an
+     * `if (canWrite())` inside each renderer: a single rule that can simply be
+     * re-applied after a role change is far harder to get wrong than a dozen
+     * scattered conditionals, and a control rendered while the wrong role was
+     * active is corrected the next time this runs.
+     *
+     * What actually ENFORCES anything is deliberately NOT here — that lives in
+     * the code path (openModal, and the dispatcher in bindGridEvents). Hiding a
+     * control is presentation; refusing the call is the check.
+     */
+    function applyRoleVisibility() {
+      const writable = canWrite();
+      document.querySelectorAll('[data-write-only]').forEach(el => {
+        el.classList.toggle('is-hidden', !writable);
+      });
+
+      const notice = document.getElementById('role-notice');
+      if (notice) notice.classList.toggle('is-hidden', writable);
+
+      const usersTab = document.getElementById('tab-btn-users');
+      if (usersTab) usersTab.classList.toggle('is-hidden', !isAdmin());
+
+      // Leave a tab that is open but no longer permitted, so a demoted admin is
+      // not left sitting on a Users tab they can no longer use.
+      if (!isAdmin() && state.currentTab === 'users') switchTab('costumes');
     }
 
     // ==========================================================================
@@ -1900,7 +2316,20 @@
       // confirmResolver: that one is the project's only yes/no path; this one
       // only collects a value.
       textEntryResolver: null,
-      textEntryValidate: null
+      textEntryValidate: null,
+      // Admin panel (phase 5c). `usersLoaded` is the lazy-load guard: the list
+      // is fetched when the tab is first OPENED, not on every dashboard load,
+      // because only an admin ever sees it and a viewer/curator would pay for a
+      // 403 on every single sign-in.
+      users: [],
+      assignableRoles: [],
+      usersLoaded: false,
+      usersLoading: false,
+      // The open lightbox. `index` is a position in `urls`, and `urls` is a
+      // SNAPSHOT taken when the lightbox opened — paging must not re-read
+      // state.costumes, or a background reload could swap the list out from
+      // under the photo the user is looking at.
+      gallery: null
     };
 
     // ==========================================================================
@@ -2583,7 +3012,23 @@
           const action = trigger.dataset.action;
           const id = trigger.dataset.id;
 
-          if (action === 'upload') openImagePicker(id);
+          // THE SINGLE CLIENT-SIDE CHOKE POINT FOR EVERY CARD ACTION.
+          // Every renderer in this file emits `data-action`, and this one
+          // delegated listener is the only thing that turns that attribute into
+          // a mutation. Gating HERE is what makes the role check complete: a
+          // control a renderer failed to hide still cannot reach its handler.
+          // Hiding (applyRoleVisibility) is the UX half; this is the half that
+          // refuses. Neither replaces the server's requireWriteAccess().
+          //
+          // 'open-gallery' is deliberately absent — viewing photos is a read,
+          // and a viewer must be able to browse the gallery in full.
+          if (WRITE_ACTIONS.indexOf(action) !== -1 && !canWrite()) {
+            showToast('Your account is read-only, so that action is not available.', 'error');
+            return;
+          }
+
+          if (action === 'open-gallery') openGallery(id, parseInt(trigger.dataset.index, 10) || 0);
+          else if (action === 'upload') openImagePicker(id);
           else if (action === 'edit') {
             // `edit` is one action name shared by three grids, exactly like
             // `delete` below, because all the card renderers follow the same
@@ -2636,6 +3081,37 @@
 
       const fileInput = document.getElementById('costume-image-input');
       if (fileInput) fileInput.addEventListener('change', onImagePicked);
+
+      // ---- Lightbox wiring -------------------------------------------------
+      // A <dialog> closes on Esc by itself, but the `cancel` event is prevented
+      // and settled through closeGallery() instead, so the gallery state is torn
+      // down in the same place as the explicit Close button. Without that,
+      // state.gallery would keep pointing at a costume whose photos are no
+      // longer on screen, and a later arrow keypress would page a closed dialog.
+      const lightbox = document.getElementById('modal-lightbox');
+      if (lightbox) {
+        document.getElementById('lightbox-close').addEventListener('click', closeGallery);
+        document.getElementById('lightbox-prev').addEventListener('click', () => stepGallery(-1));
+        document.getElementById('lightbox-next').addEventListener('click', () => stepGallery(1));
+        document.getElementById('lightbox-delete').addEventListener('click', deleteLightboxImage);
+        lightbox.addEventListener('cancel', event => {
+          event.preventDefault();
+          closeGallery();
+        });
+      }
+
+      // Arrow keys page the gallery. Bound on `document` rather than on the
+      // dialog because key events from a modal <dialog> do not reach document
+      // consistently across browsers. Every branch returns early unless it
+      // handles the key, so an arrow press anywhere else in the app is never
+      // swallowed or preventDefault()ed.
+      document.addEventListener('keydown', event => {
+        if (!state.gallery) return;
+        if (event.key === 'ArrowLeft') stepGallery(-1);
+        else if (event.key === 'ArrowRight') stepGallery(1);
+        else return;
+        event.preventDefault();
+      });
 
       // Size selects: build them once, and reveal/hide the custom text box as
       // the value changes. Both modals are wired identically.
@@ -3020,6 +3496,7 @@
      * paintReferenceList() keyed by 'brands'.
      */
     function renderBrands() {
+      const writable = canWrite();
       paintReferenceList('brands', state.brands, getFilteredBrands(), brand => {
         const name = clean(brand.name);
         const store = safeUrl(brand.storeUrl);
@@ -3037,11 +3514,16 @@
             ? '        <a href="' + escapeHtml(store) + '" target="_blank" rel="noopener noreferrer" style="font-size:0.72rem; color:var(--info);">Store ↗</a>'
             : '',
           '      </div>',
-          '      <div style="display:flex; gap:6px; flex:0 0 auto;">',
-          '        <button type="button" class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px;" data-action="rename-brand" data-id="' + idAttr(brand.id) + '" data-name="' + escapeHtml(name) + '">Rename</button>',
-          '        <button type="button" class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px;" data-action="link-brand" data-id="' + idAttr(brand.id) + '" data-name="' + escapeHtml(name) + '" data-url="' + escapeHtml(storeForPrompt) + '">Store link</button>',
-          '        <button type="button" class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px; color:var(--danger);" data-action="delete-brand" data-id="' + idAttr(brand.id) + '">Delete</button>',
-          '      </div>',
+          // All three are writes, so a viewer gets an empty group rather than a
+          // removed one — the card is a flex row and dropping the group would
+          // leave the name stretching oddly. The dispatcher still refuses them.
+          writable
+            ? '      <div style="display:flex; gap:6px; flex:0 0 auto;">'
+              + '<button type="button" class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px;" data-action="rename-brand" data-id="' + idAttr(brand.id) + '" data-name="' + escapeHtml(name) + '">Rename</button>'
+              + '<button type="button" class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px;" data-action="link-brand" data-id="' + idAttr(brand.id) + '" data-name="' + escapeHtml(name) + '" data-url="' + escapeHtml(storeForPrompt) + '">Store link</button>'
+              + '<button type="button" class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px; color:var(--danger);" data-action="delete-brand" data-id="' + idAttr(brand.id) + '">Delete</button>'
+              + '</div>'
+            : '      <div style="flex:0 0 auto;"></div>',
           '    </div>'
         ].filter(Boolean).join('\n');
       });
@@ -3053,6 +3535,7 @@
      * message line. Only the CARD differs, because only a brand has a store link.
      */
     function renderFandoms() {
+      const writable = canWrite();
       paintReferenceList('fandoms', state.fandoms, getFilteredFandoms(), fandom => {
         const name = clean(fandom.name);
         const count = parseInt(clean(fandom.costumeCount), 10) || 0;
@@ -3062,10 +3545,13 @@
           '        <div style="font-size:0.9rem; font-weight:600; overflow:hidden; text-overflow:ellipsis;">' + escapeHtml(name) + '</div>',
           '        <div style="font-size:0.72rem; color:var(--text-muted);">' + escapeHtml(count + ' costume' + (count === 1 ? '' : 's')) + '</div>',
           '      </div>',
-          '      <div style="display:flex; gap:6px; flex:0 0 auto;">',
-          '        <button type="button" class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px;" data-action="rename-fandom" data-id="' + idAttr(fandom.id) + '" data-name="' + escapeHtml(name) + '">Rename</button>',
-          '        <button type="button" class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px; color:var(--danger);" data-action="delete-fandom" data-id="' + idAttr(fandom.id) + '">Delete</button>',
-          '      </div>',
+          // Same treatment as the Brand card: an empty group, not a removed one.
+          writable
+            ? '      <div style="display:flex; gap:6px; flex:0 0 auto;">'
+              + '<button type="button" class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px;" data-action="rename-fandom" data-id="' + idAttr(fandom.id) + '" data-name="' + escapeHtml(name) + '">Rename</button>'
+              + '<button type="button" class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px; color:var(--danger);" data-action="delete-fandom" data-id="' + idAttr(fandom.id) + '">Delete</button>'
+              + '</div>'
+            : '      <div style="flex:0 0 auto;"></div>',
           '    </div>'
         ].filter(Boolean).join('\n');
       });
@@ -3076,6 +3562,10 @@
       updateMetrics();
       populateCostumeSelects();
       updateSecurityTab();
+      // Runs AFTER the renderers, so it also corrects anything they drew while
+      // a different role was active — e.g. a tab restored from sessionStorage
+      // before /api/auth/profile refreshed state.user.
+      applyRoleVisibility();
     }
 
     // ==========================================================================
@@ -3168,13 +3658,56 @@
           ? '<span class="media-count">' + images.length + ' images</span>'
           : '';
 
+        // The expand overlay opens the lightbox at photo 0. A single photo gets
+        // the button too — it is still the only way to see that photo full
+        // size, and hiding it for one-image costumes would make the control
+        // appear and disappear as photos are added.
+        const expand = images.length
+          ? '<button type="button" class="media-expand-btn" data-action="open-gallery" data-id="' + idAttr(c.id) + '" data-index="0"'
+            + ' title="Open the photo gallery">🖼️ View ' + (images.length > 1 ? images.length + ' photos' : 'photo') + '</button>'
+          : '';
+
+        // The thumbnail strip. Each entry is its own button carrying the photo's
+        // index, so clicking thumb 4 opens the lightbox ON photo 4 rather than
+        // always on the first. Capped at MAX_CARD_THUMBS; the remainder is
+        // summarised and still reachable through the lightbox, so the cap
+        // shortens the strip without hiding anything.
+        let strip = '';
+        if (images.length > 1) {
+          const shown = images.slice(0, MAX_CARD_THUMBS);
+          const hidden = images.length - shown.length;
+          strip = [
+            '<div class="media-strip">',
+            shown.map((url, i) =>
+              '<button type="button" class="media-thumb" data-action="open-gallery" data-id="' + idAttr(c.id) + '"'
+              + ' data-index="' + i + '" title="Photo ' + (i + 1) + '">'
+              + '<img src="' + IMAGE_LOADING_PIXEL + '" data-image-src="' + escapeHtml(url) + '" alt="Photo ' + (i + 1) + '"></button>'
+            ).join(''),
+            hidden > 0
+              ? '<div class="media-thumb media-thumb-more" title="' + hidden + ' more in the gallery">+' + hidden + '</div>'
+              : '',
+            '</div>'
+          ].join('');
+        }
+
+        // Write controls. The upload button is a `data-write-only` element so
+        // applyRoleVisibility() hides it for a viewer; the dispatcher refuses
+        // the action too. `canWrite()` is read once per card rather than per
+        // button, so the whole card is consistent even if the role changed
+        // between two renders.
+        const writable = canWrite();
+
         return [
           '<div class="item-card">',
           '  <div class="item-media">',
           thumb,
-          '    <button type="button" class="media-upload-btn" data-action="upload" data-id="' + idAttr(c.id) + '" title="Upload a photo of this costume">📷</button>',
+          expand,
+          writable
+            ? '    <button type="button" class="media-upload-btn" data-action="upload" data-id="' + idAttr(c.id) + '" title="Upload photos of this costume">📷</button>'
+            : '',
           extraImages,
           '  </div>',
+          strip,
           '  <div>',
           '    <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:8px;">',
           '      <h3 style="font-size:1.15rem; font-weight:700;">' + escapeHtml(clean(c.character) || 'Unnamed') + '</h3>',
@@ -3198,19 +3731,28 @@
           '    </div>',
           notes ? '<p style="font-size:0.82rem; color:var(--text-muted); margin-top:10px;">' + escapeHtml(notes) + '</p>' : '',
           '  </div>',
+          // .card-actions is `justify-content: space-between` with two
+          // children. For a viewer the right-hand group is emitted as an EMPTY
+          // div rather than removed, which keeps the left anchor (the
+          // "Reference ↗" link, or its placeholder span) on the same side and
+          // the row from collapsing to full width.
           '  <div class="card-actions">',
           refUrl
             ? '<a href="' + escapeHtml(refUrl) + '" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 12px;">Reference ↗</a>'
             : '<span></span>',
-          '    <div style="display:flex; gap:8px;">',
-          '      <button type="button" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 12px;" data-action="edit" data-id="' + idAttr(c.id) + '">Edit</button>',
-          '      <button type="button" class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" data-action="delete" data-id="' + idAttr(c.id) + '">Delete</button>',
-          '    </div>',
+          writable
+            ? '    <div style="display:flex; gap:8px;">'
+              + '<button type="button" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 12px;" data-action="edit" data-id="' + idAttr(c.id) + '">Edit</button>'
+              + '<button type="button" class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" data-action="delete" data-id="' + idAttr(c.id) + '">Delete</button>'
+              + '</div>'
+            : '    <div></div>',
           '  </div>',
           '</div>'
         ].join('');
       }).join('');
 
+      // Paints BOTH the cover photo and every strip thumbnail, because both
+      // carry data-image-src. One pass, so the strip costs no extra plumbing.
       hydrateAuthenticatedImages(grid);
     }
 
@@ -3226,6 +3768,7 @@
         return;
       }
 
+      const writable = canWrite();
       grid.innerHTML = items.map(p => {
         const notes = clean(p.notes);
         const costumeName = clean(p.costumeName);
@@ -3243,12 +3786,17 @@
           '    </div>',
           notes ? '<p style="font-size:0.85rem; color:var(--text-muted); margin-top:8px;">' + escapeHtml(notes) + '</p>' : '',
           '  </div>',
+          // The right-hand group becomes an EMPTY div for a viewer rather than
+          // being removed, so the `space-between` row keeps its shape and the
+          // left anchor stays put. Same reasoning as renderCostumes().
           '  <div class="card-actions">',
           '    <span></span>',
-          '    <div style="display:flex; gap:8px;">',
-          '      <button type="button" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 12px;" data-action="edit" data-id="' + idAttr(p.id) + '">Edit</button>',
-          '      <button type="button" class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" data-action="delete" data-id="' + idAttr(p.id) + '">Delete</button>',
-          '    </div>',
+          writable
+            ? '    <div style="display:flex; gap:8px;">'
+              + '<button type="button" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 12px;" data-action="edit" data-id="' + idAttr(p.id) + '">Edit</button>'
+              + '<button type="button" class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" data-action="delete" data-id="' + idAttr(p.id) + '">Delete</button>'
+              + '</div>'
+            : '    <div></div>',
           '  </div>',
           '</div>'
         ].join('');
@@ -3280,6 +3828,7 @@
         return;
       }
 
+      const writable = canWrite();
       grid.innerHTML = items.map(l => {
         const status = lensDisplayStatus(l);
         const statusClass = 'badge-' + status.toLowerCase();
@@ -3310,7 +3859,10 @@
           countdown = '<span class="tag-chip">⏳ ' + days + 'd left</span>';
         }
 
-        const showOpenButton = clean(l.isOpened) === '0' || (!toBool(l.isOpened) && status === 'UNOPENED');
+        // "Mark as Opened" issues PATCH /api/lenses/:id/open, so it is a write
+        // and is suppressed for a viewer along with Edit/Delete.
+        const showOpenButton = writable
+          && (clean(l.isOpened) === '0' || (!toBool(l.isOpened) && status === 'UNOPENED'));
 
         return [
           '<div class="item-card">',
@@ -3337,10 +3889,12 @@
           showOpenButton
             ? '<button type="button" class="btn btn-primary" style="font-size:0.8rem; padding:6px 12px;" data-action="open-lens" data-id="' + idAttr(l.id) + '">Mark as Opened</button>'
             : '<span></span>',
-          '    <div style="display:flex; gap:8px;">',
-          '      <button type="button" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 12px;" data-action="edit" data-id="' + idAttr(l.id) + '">Edit</button>',
-          '      <button type="button" class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" data-action="delete" data-id="' + idAttr(l.id) + '">Delete</button>',
-          '    </div>',
+          writable
+            ? '    <div style="display:flex; gap:8px;">'
+              + '<button type="button" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 12px;" data-action="edit" data-id="' + idAttr(l.id) + '">Edit</button>'
+              + '<button type="button" class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" data-action="delete" data-id="' + idAttr(l.id) + '">Delete</button>'
+              + '</div>'
+            : '    <div></div>',
           '  </div>',
           '</div>'
         ].join('');
@@ -3734,6 +4288,16 @@
     }
 
     function switchTab(tab) {
+      // The Users tab is admin-only. Refusing it HERE — not merely hiding its
+      // button — is what makes the restriction hold for a deep link, a stale
+      // tab, or a console call. The endpoint is admin-guarded as well; this
+      // half is what stops an admin panel being rendered to someone who can
+      // only ever see errors in it.
+      if (tab === 'users' && !isAdmin()) {
+        showToast('Only an administrator can manage users and roles.', 'error');
+        tab = 'costumes';
+      }
+
       state.currentTab = tab;
       document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.tab === tab);
@@ -3743,14 +4307,173 @@
       document.getElementById('tab-props').style.display = tab === 'props' ? 'block' : 'none';
       document.getElementById('tab-lenses').style.display = tab === 'lenses' ? 'block' : 'none';
       document.getElementById('tab-lists').style.display = tab === 'lists' ? 'block' : 'none';
+      document.getElementById('tab-users').style.display = tab === 'users' ? 'block' : 'none';
       document.getElementById('tab-security').style.display = tab === 'security' ? 'block' : 'none';
       // The filter bar only describes costumes/props/lenses, so it is hidden on
-      // the two non-inventory tabs.
+      // the non-inventory tabs — now three of them (lists, users, security)
+      // rather than two.
       document.getElementById('filter-bar').style.display =
-        (tab === 'security' || tab === 'lists') ? 'none' : 'flex';
+        (tab === 'security' || tab === 'lists' || tab === 'users') ? 'none' : 'flex';
 
       syncFilterControls();
       filterItems();
+
+      // LAZY LOAD. The user list is fetched the first time an admin opens this
+      // tab, NOT on every dashboard load: a viewer or a curator would
+      // otherwise pay for a guaranteed 403 on every sign-in for a panel they
+      // can never see. Re-opening the tab reuses the cached list.
+      if (tab === 'users' && !state.usersLoaded && !state.usersLoading) loadUsers();
+    }
+
+    // ==========================================================================
+    // ADMIN — USERS & ROLES
+    // ==========================================================================
+    function showUsersError(message) {
+      const box = document.getElementById('users-error');
+      if (!box) return;
+      box.textContent = message || '';
+      box.style.display = message ? 'block' : 'none';
+    }
+
+    /**
+     * Build one user row.
+     *
+     * DOM APIs, never innerHTML. A username and an email are both chosen at
+     * signup, so they are exactly the kind of value the rest of this file
+     * escapes — but here there is a second reason: each row needs a live
+     * `change` listener, and a template string would mean re-binding every
+     * listener on every repaint. Building the node once and attaching the
+     * listener to it is both safer and simpler.
+     */
+    function buildUserRow(user, assignableRoles) {
+      const row = makeEl('div', 'user-row');
+      const isSelf = !!(state.user && clean(user.id) === clean(state.user.id));
+      if (isSelf) row.classList.add('is-self');
+
+      const identity = makeEl('div', 'user-identity');
+      const nameRow = makeEl('div', 'user-name');
+      nameRow.appendChild(document.createTextNode(clean(user.username) || '(no username)'));
+      if (isSelf) nameRow.appendChild(makeEl('span', 'tag-chip active', 'this is you'));
+      identity.appendChild(nameRow);
+
+      const metaBits = [];
+      if (clean(user.email)) metaBits.push(clean(user.email));
+      metaBits.push('2FA ' + (toBool(user.telegram2FAEnabled) ? 'on' : 'off'));
+      if (clean(user.createdAt)) metaBits.push('joined ' + clean(user.createdAt).split('T')[0]);
+      identity.appendChild(makeEl('div', 'user-meta', metaBits.join(' · ')));
+      row.appendChild(identity);
+
+      const select = document.createElement('select');
+      select.className = 'user-role-select';
+      // THE OPTIONS COME FROM THE SERVER'S `assignableRoles`, never from a list
+      // hardcoded here. That is the entire point of the field: the dropdown
+      // cannot offer a role the PATCH route would reject with 400, and a role
+      // added server-side appears here with no frontend change.
+      const roles = Array.isArray(assignableRoles) ? assignableRoles : [];
+      roles.forEach(role => {
+        const option = document.createElement('option');
+        option.value = clean(role);
+        option.textContent = clean(role);
+        select.appendChild(option);
+      });
+
+      const currentRole = clean(user.role);
+      // A stored role outside the allowlist (legacy data) is still shown, as a
+      // one-off option, so the select reflects reality instead of silently
+      // displaying the first role in the list.
+      if (currentRole && roles.indexOf(currentRole) === -1) {
+        const orphan = document.createElement('option');
+        orphan.value = currentRole;
+        orphan.textContent = currentRole + ' (current)';
+        select.appendChild(orphan);
+      }
+      select.value = currentRole;
+
+      // The server refuses a self-change with 400, so the control is disabled
+      // rather than offered and then rejected. This is the one role change
+      // that is ALWAYS refused, so offering it would be pure noise.
+      select.disabled = isSelf;
+      if (isSelf) select.title = 'You cannot change your own role.';
+
+      select.addEventListener('change', () => changeUserRole(user, select.value));
+      row.appendChild(select);
+      return row;
+    }
+
+    /** Paint the users tab from whatever loadUsers() last fetched. */
+    function renderUsers() {
+      const list = document.getElementById('users-list');
+      if (!list) return;
+      list.innerHTML = '';
+
+      if (!state.users.length) {
+        list.appendChild(makeEl('p', 'user-meta', 'No accounts were returned.'));
+        return;
+      }
+      state.users.forEach(user => list.appendChild(buildUserRow(user, state.assignableRoles)));
+    }
+
+    /**
+     * GET /api/auth/users — admin only.
+     *
+     * The response deliberately omits passwordHash and twoFactorSecret, so
+     * nothing sensitive can reach the DOM even by accident.
+     */
+    async function loadUsers(force) {
+      if (!isAdmin()) return;                 // the endpoint is admin-only too
+      if (state.usersLoading) return;
+      if (state.usersLoaded && !force) return; // lazy: once per session
+
+      state.usersLoading = true;
+      showUsersError('');
+      try {
+        const data = await api('/api/auth/users');
+        state.users = Array.isArray(data.users) ? data.users : [];
+        state.assignableRoles = Array.isArray(data.assignableRoles) ? data.assignableRoles : [];
+        state.usersLoaded = true;
+        renderUsers();
+      } catch (err) {
+        // describeAuthError() is the shared ApiError translator. A 403 here
+        // means this session's token no longer carries the admin role, which is
+        // worth saying plainly instead of showing a generic failure.
+        showUsersError(describeAuthError(err));
+      } finally {
+        state.usersLoading = false;
+      }
+    }
+
+    /**
+     * PATCH /api/auth/users/:id/role.
+     *
+     * On failure the panel is re-rendered from the server's own state rather
+     * than left showing the rejected choice — otherwise the dropdown would
+     * claim a role the database does not have.
+     */
+    async function changeUserRole(user, role) {
+      if (!isAdmin() || !canWrite()) {
+        showUsersError('You are not permitted to change roles.');
+        renderUsers();
+        return;
+      }
+      const id = clean(user && user.id);
+      if (!id || !role) return;
+      if (role === clean(user.role)) return;
+
+      try {
+        await api('/api/auth/users/' + encodeURIComponent(id) + '/role', {
+          method: 'PATCH',
+          body: JSON.stringify({ role: role })
+        });
+        showUsersError('');
+        // Re-read rather than patching the local copy: the server is the only
+        // authority on what a role change actually did, and it may have
+        // refused for a reason the dropdown cannot express.
+        await loadUsers(true);
+        showToast('"' + (clean(user.username) || id) + '" is now a ' + role + '.', 'success');
+      } catch (err) {
+        showUsersError(describeAuthError(err));
+        renderUsers();                        // snap the <select> back
+      }
     }
 
     function populateCostumeSelects() {
@@ -4364,8 +5087,12 @@
       }
 
       // The CUSTOM_PROP_VALUE sentinel is a UI affordance; the real value is in
-      // the paired free-text box. An empty box means "leave the column alone",
-      // which is what the server does with an absent field.
+      // the paired free-text box.
+      //
+      // Every key below is always sent, including when its input is empty. That
+      // is deliberate: the server distinguishes an ABSENT key (leave the column
+      // alone, for partial updates) from a PRESENT but empty one (clear it).
+      // Omitting an emptied key would silently discard the user's clearing.
       const payload = {
         costumeId: form.querySelector('[name="costumeId"]').value,
         name: form.querySelector('[name="name"]').value.trim(),
@@ -4580,26 +5307,158 @@
     // IMAGE UPLOAD
     // ==========================================================================
     function openImagePicker(costumeId) {
+      // Belt and braces: the dispatcher already gates `upload`, but the picker
+      // is the thing that reaches the filesystem, so it re-checks for itself.
+      if (!canWrite()) {
+        showToast('Your account is read-only, so photos cannot be uploaded.', 'error');
+        return;
+      }
       state.imageUploadTargetId = costumeId;
       const input = document.getElementById('costume-image-input');
       input.value = '';
       input.click();
     }
 
+    /**
+     * Validate a whole selection BEFORE anything is uploaded.
+     *
+     * WHY THE BATCH IS REJECTED RATHER THAN PARTIALLY UPLOADED
+     * The obvious alternative is "send the good ones, complain about the rest".
+     * That is worse here for two reasons: the user cannot tell WHICH file was
+     * rejected once a toast has faded, and a partial success leaves the gallery
+     * in a state nobody asked for. So every file is checked, every failure is
+     * NAMED, and if any one fails nothing is sent at all.
+     *
+     * The two per-file checks are the ones the single-file path has always
+     * applied — ALLOWED_UPLOAD_TYPES and MAX_UPLOAD_BYTES — but applied to EACH
+     * FILE rather than to the selection as a whole, which is the entire point of
+     * this rewrite: a 200KB JPEG in a batch of ten must not be rejected because
+     * its neighbour is 12MB.
+     *
+     * @returns {{ok: boolean, message: string}}
+     */
+    function validateImageSelection(files, existingCount) {
+      if (!files.length) return { ok: false, message: 'No images were selected.' };
+
+      if (files.length > MAX_FILES_PER_REQUEST) {
+        return {
+          ok: false,
+          message: 'You selected ' + files.length + ' images, but one upload accepts at most '
+            + MAX_FILES_PER_REQUEST + '. Select fewer and send the rest in a second batch.'
+        };
+      }
+
+      const room = MAX_IMAGES_PER_COSTUME - existingCount;
+      if (room < files.length) {
+        return {
+          ok: false,
+          message: 'This costume already holds ' + existingCount + ' of the maximum '
+            + MAX_IMAGES_PER_COSTUME + ' images, so only ' + Math.max(room, 0)
+            + ' more can be added. Delete a photo first.'
+        };
+      }
+
+      const tooBig = files.filter(f => f.size > MAX_UPLOAD_BYTES);
+      if (tooBig.length) {
+        const largest = Math.max.apply(null, tooBig.map(f => f.size));
+        return {
+          ok: false,
+          message: (tooBig.length === 1 ? 'That image is' : tooBig.length + ' of the selected images are')
+            + ' too large (largest ' + (largest / 1048576).toFixed(1) + ' MB). The limit is '
+            + (MAX_UPLOAD_BYTES / 1048576) + ' MB. Nothing was uploaded.'
+        };
+      }
+
+      const badType = files.filter(f => ALLOWED_UPLOAD_TYPES.indexOf(f.type) === -1);
+      if (badType.length) {
+        const names = badType.slice(0, 3).map(f => f.name || 'unnamed').join(', ');
+        return {
+          ok: false,
+          message: 'Only JPEG, PNG, WebP or GIF images are accepted. Rejected: ' + names
+            + (badType.length > 3 ? ' (+' + (badType.length - 3) + ' more)' : '')
+            + '. Nothing was uploaded.'
+        };
+      }
+
+      return { ok: true, message: '' };
+    }
+
+    /**
+     * POST a selection and return the stored URLs, in selection order.
+     *
+     * ONE file goes to /api/images/upload (field `image`); TWO OR MORE go to
+     * /api/images/upload-multiple (field `images`). The single route is kept for
+     * the single case deliberately: it is the canonical endpoint, it answers
+     * with `url`, and "add one photo" is by far the most common action — sending
+     * it through the batch machinery would add a second response shape and a
+     * second code path to keep correct for no gain.
+     *
+     * Every returned url passes through safeUrl before it is used anywhere: it
+     * ends up in an href/src-bearing attribute and in a PUT body, and safeUrl is
+     * the one gate that rejects anything that is not http(s) or a rooted path.
+     *
+     * @returns {Promise<string[]>} the accepted URLs
+     */
+    async function uploadImageBatch(files) {
+      const form = new FormData();
+
+      if (files.length === 1) {
+        form.append('image', files[0]);        // field name fixed by the backend
+        const result = await api('/api/images/upload', { method: 'POST', body: form });
+        const url = safeUrl(result.url || result.processedUrl);
+        if (!url) throw new ApiError('The server did not return a usable image URL.', 500, 'BAD_UPLOAD_RESPONSE');
+        return [url];
+      }
+
+      files.forEach(file => form.append('images', file));   // field name fixed by the backend
+      const result = await api('/api/images/upload-multiple', { method: 'POST', body: form });
+      const images = Array.isArray(result.images) ? result.images : [];
+      const urls = images
+        .map(entry => safeUrl(entry && (entry.url || entry.processedUrl)))
+        .filter(Boolean);
+      if (!urls.length) {
+        throw new ApiError('The server did not return any usable image URLs.', 500, 'BAD_UPLOAD_RESPONSE');
+      }
+      return urls;
+    }
+
+    /**
+     * Handle one file selection — which may hold up to ten files.
+     *
+     * The ORDER of the three phases matters and is the same as it was for the
+     * single-file version, just widened:
+     *   1. validate the WHOLE selection (nothing is sent if anything is wrong),
+     *   2. upload every file in ONE request,
+     *   3. merge the returned URLs into imageUrls and persist them with ONE PUT.
+     *
+     * Step 3 is deliberately ONCE for the whole batch, not once per file: a
+     * ten-photo selection used to mean ten PUTs, each of which re-read and
+     * re-wrote the whole list, so the ninth write could clobber the eighth and
+     * a failure halfway through left the gallery in an order nobody chose. The
+     * merge is computed from the full returned set, so the list is written once
+     * and is correct.
+     *
+     * The re-read after the PUT is kept deliberately: `imageUrls` IS in the
+     * PUT /api/costumes/:id whitelist (normalizeImageUrls in
+     * src/routes/costumes.js), so re-reading genuinely verifies the write
+     * instead of assuming it.
+     */
     async function onImagePicked(event) {
       const input = event.target;
       const costumeId = state.imageUploadTargetId;
-      const file = input.files && input.files[0];
       state.imageUploadTargetId = null;
-      if (!costumeId || !file) return;
 
-      if (ALLOWED_UPLOAD_TYPES.indexOf(file.type) === -1) {
-        showToast('Only JPEG, PNG, WebP or GIF images are accepted.', 'error');
-        return;
-      }
-      if (file.size > MAX_UPLOAD_BYTES) {
-        showToast('That image is too large (' + (file.size / 1048576).toFixed(1)
-          + ' MB). Maximum is ' + (MAX_UPLOAD_BYTES / 1048576) + ' MB.', 'error');
+      const files = input.files ? Array.prototype.slice.call(input.files) : [];
+      if (!costumeId || !files.length) { input.value = ''; return; }
+
+      const existing = costumeImages(
+        state.costumes.find(c => clean(c.id) === clean(costumeId)) || { id: costumeId, imageUrls: '[]' }
+      );
+
+      const check = validateImageSelection(files, existing.length);
+      if (!check.ok) {
+        showToast(check.message, 'error');
+        input.value = '';
         return;
       }
 
@@ -4609,41 +5468,45 @@
         button.textContent = '…';
       }
 
-      const form = new FormData();
-      form.append('image', file);          // field name is fixed by the backend
-
       try {
-        const result = await api('/api/images/upload', { method: 'POST', body: form });
-        const url = safeUrl(result.url || result.processedUrl);
-        if (!url) throw new ApiError('The server did not return a usable image URL.', 500, 'BAD_UPLOAD_RESPONSE');
+        const urls = await uploadImageBatch(files);
 
-        // Show the thumbnail for this session immediately...
-        const existing = state.imageUrlsCache[costumeId] || [];
-        if (existing.indexOf(url) === -1) state.imageUrlsCache[costumeId] = existing.concat([url]);
+        // Show the thumbnails for this session immediately...
+        const cached = state.imageUrlsCache[costumeId] || [];
+        const mergedCache = cached.slice();
+        urls.forEach(url => { if (mergedCache.indexOf(url) === -1) mergedCache.push(url); });
+        state.imageUrlsCache[costumeId] = mergedCache;
         await loadCostumes();
 
-        // ...then persist it. `imageUrls` IS in the PUT /api/costumes/:id
-        // whitelist (normalizeImageUrls in src/routes/costumes.js), so the
-        // re-read below genuinely verifies the write. The warning branch is
-        // kept for the case where the request succeeded but the list did not
-        // stick — it no longer claims the endpoint ignores the field.
+        // ...then persist the WHOLE set in one PUT.
         try {
-          const merged = costumeImages({ id: costumeId, imageUrls: JSON.stringify([url]) });
+          const current = state.costumes.find(c => clean(c.id) === clean(costumeId)) || { id: costumeId };
+          const merged = costumeImages(current);
+          // Belt and braces against the server's per-url length cap: a url that
+          // arrived here but is over the limit would make the whole PUT 400 and
+          // cost the user every photo in the batch, not just the bad one.
+          const acceptable = merged.filter(url => url.length <= MAX_IMAGE_URL_LENGTH);
           await api('/api/costumes/' + encodeURIComponent(costumeId), {
             method: 'PUT',
-            body: JSON.stringify({ imageUrls: JSON.stringify(merged) })
+            body: JSON.stringify({ imageUrls: JSON.stringify(acceptable) })
           });
           await loadCostumes();
-          const refreshed = state.costumes.find(c => c.id === costumeId) || {};
+
+          const refreshed = state.costumes.find(c => clean(c.id) === clean(costumeId)) || {};
           const persisted = parseImageUrls(refreshed.imageUrls);
-          if (persisted.indexOf(url) === -1) {
-            showToast('Image uploaded, but the server did not store it — it will only show for this session.', 'warning');
+          const stuck = urls.filter(url => persisted.indexOf(url) === -1);
+
+          if (stuck.length === urls.length) {
+            showToast('Photos were uploaded, but the server did not store them — they will only show for this session.', 'warning');
+          } else if (stuck.length) {
+            showToast('Added ' + (urls.length - stuck.length) + ' of ' + urls.length
+              + ' photos; ' + stuck.length + ' did not stick and will only show for this session.', 'warning');
           } else {
-            showToast('Image uploaded and saved.', 'success');
+            showToast(urls.length === 1 ? 'Image uploaded and saved.' : urls.length + ' images uploaded and saved.', 'success');
           }
         } catch (persistErr) {
-          showToast('Image uploaded, but saving it to the costume failed ('
-            + persistErr.message + '). It will only show for this session.', 'warning');
+          showToast('Uploaded, but saving to the costume failed ('
+            + persistErr.message + '). The photos will only show for this session.', 'warning');
         }
       } catch (err) {
         showToast('Upload failed: ' + err.message, 'error');
@@ -4665,11 +5528,198 @@
     }
 
     // ==========================================================================
+    // GALLERY / LIGHTBOX
+    // ==========================================================================
+    // WHY THE <img> IS NOT src="/uploads/…"
+    // `/uploads` is a guarded mount and an <img> cannot send an Authorization
+    // header, so every photo — thumbnail and lightbox alike — goes through
+    // loadImageObjectUrl(), the SAME cached, LRU-bounded, revocable pipeline the
+    // grid already uses. That reuse is the point: a second delivery path would
+    // mean a second set of object URLs to revoke on logout and a second cache to
+    // bound, and revokeAllImageObjectUrls() only knows about one of them.
+    function paintLightboxImage(url) {
+      const img = document.getElementById('lightbox-img');
+      if (!img) return;
+      // Reset first so a slow fetch cannot leave the PREVIOUS photo on screen
+      // while the new one loads — which would look like the page failed.
+      img.setAttribute('src', IMAGE_LOADING_PIXEL);
+
+      if (!isSameOriginImageUrl(url)) {
+        img.setAttribute('src', url);       // external: left to the browser
+        return;
+      }
+      loadImageObjectUrl(url).then(objectUrl => {
+        if (!objectUrl || !img.isConnected) return;
+        img.setAttribute('src', objectUrl);
+      });
+    }
+
+    /** Re-draw the lightbox for state.gallery.index. */
+    function renderGallery() {
+      const g = state.gallery;
+      const dialog = document.getElementById('modal-lightbox');
+      if (!g || !dialog) return;
+
+      const total = g.urls.length;
+      const url = g.urls[g.index];
+      paintLightboxImage(url);
+
+      document.getElementById('lightbox-title').textContent = g.character || 'Photos';
+      document.getElementById('lightbox-caption').textContent =
+        'Use the arrow keys, or the ‹ › buttons, to move between photos.';
+      document.getElementById('lightbox-position').textContent =
+        total > 1 ? ('Photo ' + (g.index + 1) + ' of ' + total) : 'Photo 1 of 1';
+
+      // Disabled rather than hidden at the ends: the control stays put so the
+      // bar does not reflow every time the user reaches the first or last photo.
+      const prev = document.getElementById('lightbox-prev');
+      const next = document.getElementById('lightbox-next');
+      prev.disabled = g.index <= 0;
+      next.disabled = g.index >= total - 1;
+
+      // The delete control is a WRITE. applyRoleVisibility() hides it for a
+      // viewer, and deleteLightboxImage() refuses the call independently.
+      const del = document.getElementById('lightbox-delete');
+      if (del) del.classList.toggle('is-hidden', !canWrite());
+    }
+
+    /**
+     * Open the gallery for one costume, optionally at a given position.
+     *
+     * `urls` is SNAPSHOT into state.gallery rather than re-read on every page,
+     * so a background reload of the costume list cannot reorder the photos under
+     * the user while they are looking at one.
+     */
+    function openGallery(costumeId, index) {
+      const costume = state.costumes.find(c => clean(c.id) === clean(costumeId));
+      if (!costume) {
+        showToast('That costume is no longer loaded — refresh and try again.', 'error');
+        return;
+      }
+      const urls = costumeImages(costume);
+      if (!urls.length) return;
+
+      const dialog = document.getElementById('modal-lightbox');
+      if (!dialog || typeof dialog.showModal !== 'function') return;
+
+      const position = Math.max(0, Math.min(index || 0, urls.length - 1));
+      state.gallery = {
+        costumeId: clean(costume.id),
+        character: clean(costume.character),
+        urls: urls,
+        index: position
+      };
+      renderGallery();
+      if (!dialog.open) dialog.showModal();
+    }
+
+    /** Move the lightbox by `delta`, clamped to the ends. */
+    function stepGallery(delta) {
+      const g = state.gallery;
+      if (!g) return;
+      const next = g.index + delta;
+      if (next < 0 || next >= g.urls.length) return;
+      g.index = next;
+      renderGallery();
+    }
+
+    function closeGallery() {
+      const dialog = document.getElementById('modal-lightbox');
+      state.gallery = null;
+      if (dialog && dialog.open) dialog.close();
+    }
+
+    /**
+     * Delete the photo currently shown in the lightbox.
+     *
+     * The response is reported HONESTLY, which is the whole reason this is not
+     * just "Deleted." The route answers { removed, stillReferenced, fileDeleted }:
+     * a photo can be unlinked from THIS costume while the file on disk is
+     * deliberately KEPT because another costume still references it. Saying
+     * "deleted" there would be a lie the user discovers only when the other
+     * costume's photo turns out to be fine — or, worse, that their disk usage
+     * never went down.
+     */
+    async function deleteLightboxImage() {
+      const g = state.gallery;
+      if (!g) return;
+      if (!canWrite()) {
+        showToast('Your account is read-only, so photos cannot be deleted.', 'error');
+        return;
+      }
+
+      const position = g.index;
+      const url = g.urls[position];
+      const total = g.urls.length;
+
+      const ok = await confirmAction({
+        title: 'Delete this photo?',
+        message: total > 1
+          ? 'It will be removed from ' + (g.character || 'this costume') + ' (' + (position + 1) + ' of ' + total + ').'
+            + ' If another costume still uses the same file, that file is kept.'
+          : 'It will be removed from ' + (g.character || 'this costume') + '.'
+            + ' If another costume still uses the same file, that file is kept.',
+        confirmLabel: 'Delete photo'
+      });
+      if (!ok) return;
+
+      try {
+        const result = await api('/api/costumes/' + encodeURIComponent(g.costumeId) + '/images', {
+          method: 'DELETE',
+          body: JSON.stringify({ url: url })
+        });
+
+        const stillReferenced = parseInt(clean(result.stillReferenced), 10) || 0;
+        const fileDeleted = result.fileDeleted === true;
+
+        if (!fileDeleted && stillReferenced > 0) {
+          showToast('Photo removed from this costume. The file was kept because '
+            + stillReferenced + ' other costume' + (stillReferenced === 1 ? '' : 's')
+            + ' still use' + (stillReferenced === 1 ? 's' : '') + ' it.', 'info');
+        } else if (!fileDeleted) {
+          // removed === true but nothing was unlinked and nothing else claims
+          // the file. Say what actually happened rather than implying a delete.
+          showToast('Photo removed from this costume, but the server kept the file on disk.', 'info');
+        } else {
+          showToast('Photo deleted.', 'success');
+        }
+
+        // The card behind the dialog must show the new state too.
+        await loadCostumes();
+
+        const remaining = Array.isArray(result.remaining) ? result.remaining.map(safeUrl).filter(Boolean) : null;
+        if (remaining && remaining.length) {
+          state.gallery = {
+            costumeId: g.costumeId,
+            character: g.character,
+            urls: remaining,
+            // Stay near where the user was: the photo after the deleted one has
+            // slid into this slot, so the same index usually shows something new.
+            index: Math.min(position, remaining.length - 1)
+          };
+          renderGallery();
+        } else {
+          // Last photo: there is nothing left to page through.
+          closeGallery();
+        }
+      } catch (err) {
+        showToast(describeAuthError(err), 'error');
+      }
+    }
+
+    // ==========================================================================
     // MODALS
     // ==========================================================================
     function openModal(id) {
       const dialog = document.getElementById(id);
       if (!dialog) return;
+      // The three create modals are the write entry points in the header, and
+      // openModal() is their only caller, so the check lives here rather than
+      // on each button. Hiding a control is presentation; this is the refusal.
+      if (!canWrite()) {
+        showToast('Your account is read-only, so nothing can be added or edited.', 'error');
+        return;
+      }
       const form = dialog.querySelector('form');
       if (form) clearFormErrors(form);
       dialog.showModal();
