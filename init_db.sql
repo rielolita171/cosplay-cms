@@ -38,21 +38,26 @@ CREATE TABLE IF NOT EXISTS "Fandom" (
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_Fandom_nameLower" ON "Fandom"(nameLower);
 CREATE INDEX IF NOT EXISTS "idx_Fandom_name" ON "Fandom"(name);
 
-CREATE TABLE IF NOT EXISTS "User" (
-  id TEXT PRIMARY KEY,
-  username TEXT UNIQUE NOT NULL,
-  email TEXT UNIQUE NOT NULL,
-  -- Added post-initial-schema: bcrypt password hash + role.
-  -- src/services/db.js also adds these idempotently at boot for existing DBs.
-  passwordHash TEXT,
-  role TEXT DEFAULT 'user',
-  oauthProvider TEXT,
-  oauthId TEXT UNIQUE,
+-- The single operator contact point.
+--
+-- This table used to be a full account table: username, email, passwordHash, role,
+-- oauthId, the 2FA columns and the refresh/reset/token tables all hung off it.
+-- The CMS is now a single-user private app on a trusted network with no login, so
+-- all of that is gone. What deliberately SURVIVES is telegramChatId, because it is
+-- the address a notification is delivered to — a configuration value that happens
+-- to be worth persisting, not an identity.
+--
+-- There is no "account" here: no id to log in with, no credentials, no role tier.
+-- `slot` is a fixed constant so this is a single-row table rather than a list —
+-- the ONE row is the operator's own Telegram chat.
+--
+-- MIGRATION NOTE: init_db.sql is CREATE TABLE IF NOT EXISTS only. It never
+-- migrates an existing database, so an existing volume keeps the old 14-column
+-- "User" table and this narrower definition simply does not apply to it. A fresh
+-- container gets this shape. See DOCKER.md.
+CREATE TABLE IF NOT EXISTS "TelegramChat" (
+  slot TEXT PRIMARY KEY,
   telegramChatId TEXT UNIQUE,
-  telegram2FAEnabled INTEGER DEFAULT 1,
-  twoFactorSecret TEXT,
-  twoFactorExpiry TEXT,
-  recoveryCodeHash TEXT,
   createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
   updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -119,75 +124,22 @@ CREATE TABLE IF NOT EXISTS "ContactLens" (
   colorHex TEXT
 );
 
--- Rotating, single-use refresh tokens (family-based reuse detection)
-CREATE TABLE IF NOT EXISTS "RefreshToken" (
-  jti TEXT PRIMARY KEY,
-  userId TEXT NOT NULL,
-  familyId TEXT NOT NULL,
-  expiresAt INTEGER NOT NULL,
-  usedAt INTEGER,
-  revokedAt INTEGER,
-  createdAt INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS "idx_RefreshToken_family" ON "RefreshToken"(familyId);
-CREATE INDEX IF NOT EXISTS "idx_RefreshToken_user" ON "RefreshToken"(userId);
-CREATE INDEX IF NOT EXISTS "idx_RefreshToken_expires" ON "RefreshToken"(expiresAt);
-
--- Consumed single-use token ids (2FA tempToken replay protection)
-CREATE TABLE IF NOT EXISTS "ConsumedToken" (
-  jti TEXT PRIMARY KEY,
-  purpose TEXT NOT NULL,
-  expiresAt INTEGER NOT NULL,
-  consumedAt INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS "idx_ConsumedToken_expires" ON "ConsumedToken"(expiresAt);
-
--- Admin-minted, single-use password-reset tokens.
---
--- A table rather than columns on "User" so that several tokens can exist per
--- user, each with its own expiry, so a superseded one can be revoked and the
--- history audited instead of silently overwritten.
---
--- createdBy records WHICH admin minted it. Timestamps are ISO-8601 TEXT (not
--- INTEGER epoch) because humans read them — the admin panel shows the expiry
--- and the generated .txt file prints it — and because toISOString() is
--- fixed-width UTC, so a byte comparison of expiresAt is a chronological one.
---
--- tokenHash is a SHA-256 hex digest; the plaintext token is never stored.
---
--- src/services/db.js creates this table idempotently at boot as well, so an
--- existing database gains it without a migration step.
-CREATE TABLE IF NOT EXISTS "PasswordResetToken" (
-  id TEXT PRIMARY KEY,
-  userId TEXT NOT NULL,
-  tokenHash TEXT NOT NULL,
-  createdBy TEXT,
-  createdAt TEXT,
-  expiresAt TEXT NOT NULL,
-  usedAt TEXT
-);
-CREATE INDEX IF NOT EXISTS "idx_PasswordResetToken_user" ON "PasswordResetToken"(userId);
-
--- Admin-editable, runtime server settings (currently the CORS allowlist).
+-- Runtime server settings (currently the CORS allowlist).
 --
 -- A key/value table rather than columns on an existing table, because these
--- are settings of the SERVER, not of a costume or a user, and a new setting
--- should not need a migration.
+-- are settings of the SERVER, not of a costume or a contact point, and a new
+-- setting should not need a migration.
 --
 -- value is TEXT holding JSON so the shape of a setting can change without a
 -- schema change; the reader contract lives in src/services/settings.js.
 --
--- updatedBy records WHICH admin granted a setting, which matters for the
--- security-relevant ones. updatedAt is ISO-8601 TEXT (a human reads it, and
--- toISOString() is fixed-width UTC so byte order is chronological order).
+-- updatedBy records who set it, which matters for the security-relevant ones.
+-- updatedAt is ISO-8601 TEXT (a human reads it, and toISOString() is fixed-width
+-- UTC so byte order is chronological order).
 --
--- NO ROW IS SEEDED. The absence of the row is exactly what "no admin
--- override, fall back to CORS_ORIGIN in .env" means, so seeding it with the
--- default would make a deliberate admin choice indistinguishable from the
--- default.
---
--- src/services/db.js creates this table idempotently at boot as well, so an
--- existing database gains it without a migration step.
+-- NO ROW IS SEEDED. The absence of the row is exactly what "no override, fall
+-- back to CORS_ORIGIN in .env" means, so seeding it with the default would make
+-- a deliberate choice indistinguishable from the default.
 CREATE TABLE IF NOT EXISTS "ServerSetting" (
   key TEXT PRIMARY KEY,
   value TEXT,

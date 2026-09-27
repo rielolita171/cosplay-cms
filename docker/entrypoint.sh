@@ -72,9 +72,27 @@ sqlite3 "${DB_FILE}" < "${INIT_SQL}"
 TABLE_COUNT="$(sqlite3 "${DB_FILE}" "SELECT COUNT(*) FROM sqlite_master WHERE type='table';")"
 log "schema applied to ${DB_FILE} (${TABLE_COUNT} tables present)"
 
-if [ "${TABLE_COUNT}" -lt 10 ]; then
-  fail "expected at least 10 tables after init_db.sql, found ${TABLE_COUNT}. The schema did not apply correctly — refusing to start."
+# CHECK BY NAME, NOT BY COUNT.
+#
+# This used to assert a bare `-lt 10`, which silently couples the boot check to the
+# number of tables that happened to exist when it was written. Adding or removing a
+# table then either broke a healthy container or, worse, let a broken one through.
+# Asserting the specific tables the app actually queries means the check states what
+# it is for: "every table the routes read from exists", which stays correct across
+# schema changes in both directions.
+REQUIRED_TABLES="Brand Fandom Costume Prop ContactLens ServerSetting TelegramChat"
+
+MISSING=""
+for table in ${REQUIRED_TABLES}; do
+  if [ "$(sqlite3 "${DB_FILE}" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='${table}';")" != "1" ]; then
+    MISSING="${MISSING} ${table}"
+  fi
+done
+
+if [ -n "${MISSING}" ]; then
+  fail "missing required table(s) after init_db.sql:${MISSING}. The schema did not apply correctly — refusing to start."
 fi
+log "all required tables present: ${REQUIRED_TABLES}"
 
 # ------------------------------------------------------------------------------
 # 4. Hand off. From here on this shell is gone; Node is PID 1.
