@@ -3,11 +3,12 @@ const router = express.Router();
 const { spawn } = require('child_process');
 const { requireApiKey } = require('../middleware/apiKeyAuth');
 const { numberParam } = require('../services/sqlSafety');
+const { DB_FILE } = require('../services/db');
 
 // Execute SQL query helper
 async function queryDb(sql) {
   return new Promise((resolve, reject) => {
-    const sqlite = spawn('sqlite3', ['data/db/cms.db']);
+    const sqlite = spawn('sqlite3', [DB_FILE]);
     let output = '';
     
     sqlite.stdout.on('data', (data) => { output += data; });

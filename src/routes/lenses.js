@@ -3,6 +3,7 @@ const router = express.Router();
 const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
 const { esc, enumParam, textParam, textUpdate, idParam, hexColorParam } = require('../services/sqlSafety');
+const { DB_FILE } = require('../services/db');
 
 // The five states a lens can be in. The GET / filter allowlists against this
 // list, and PUT validates against it too, so a status can never be written that
@@ -23,7 +24,7 @@ const MAX_DATE_LENGTH = 40;
 // Execute SQL queries helper
 async function queryDb(sql) {
   return new Promise((resolve, reject) => {
-    const sqlite = spawn('sqlite3', ['data/db/cms.db']);
+    const sqlite = spawn('sqlite3', [DB_FILE]);
     let output = '';
     
     sqlite.stdout.on('data', (data) => { output += data; });

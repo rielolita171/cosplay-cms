@@ -14,10 +14,29 @@
  * `better-sqlite3` was declared in package.json but required by zero lines of app
  * code, and it cannot install in a slim container image (no prebuilds, gypfile
  * disabled, no install script), so it has been removed as a dependency.
+ *
+ * DB_FILE IS THE SINGLE SOURCE OF TRUTH FOR THE DATABASE PATH. It is exported
+ * below and the route files' own spawn helpers consume it instead of each
+ * hardcoding the same literal: six of them used to pass 'data/db/cms.db'
+ * directly, so setting DATABASE_PATH moved the auth/2FA surface onto one
+ * database while the data routes silently kept reading another.
+ *
+ * It stays relative on purpose — 'data/db/cms.db', resolved against
+ * process.cwd() — so a bare `node src/server.js` from the repo root keeps
+ * working exactly as before, and the test suites can still isolate a run by
+ * changing the cwd (scripts/test_phase5.js copies the DB into a temp dir and
+ * spawns the server from there).
  */
 const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 const DB_FILE = process.env.DATABASE_PATH || 'data/db/cms.db';
+
+// The sqlite3 CLI will not create the file's parent directory, so a container
+// starting against a mounted-but-empty volume would fail on the very first
+// query. Idempotent and cheap, so it runs once at module load.
+fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
 
 // ============================================================================
 // Low level

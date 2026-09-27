@@ -15,12 +15,13 @@ const router = express.Router();
 const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
 const { collapseWhitespace } = require('../services/sqlSafety');
+const { DB_FILE } = require('../services/db');
 
 
 // Execute SQL queries helper (same pattern as costumes.js / lenses.js)
 async function queryDb(sql) {
   return new Promise((resolve, reject) => {
-    const sqlite = spawn('sqlite3', ['data/db/cms.db']);
+    const sqlite = spawn('sqlite3', [DB_FILE]);
     let output = '';
 
     sqlite.stdout.on('data', (data) => { output += data; });

@@ -3,11 +3,12 @@ const router = express.Router();
 const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
 const { esc, enumParam, textParam, textUpdate, numberParam, idParam, collapseWhitespace } = require('../services/sqlSafety');
+const { DB_FILE } = require('../services/db');
 
 // Helper function to execute SQL queries
 async function queryDb(sql) {
   return new Promise((resolve, reject) => {
-    const sqlite = spawn('sqlite3', ['data/db/cms.db']);
+    const sqlite = spawn('sqlite3', [DB_FILE]);
     let output = '';
     
     sqlite.stdout.on('data', (data) => { output += data; });

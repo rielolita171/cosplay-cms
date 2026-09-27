@@ -3,6 +3,7 @@ const router = express.Router();
 const { spawn } = require('child_process');
 const { randomUUID } = require('crypto');
 const { esc, textParam, textUpdate, idParam } = require('../services/sqlSafety');
+const { DB_FILE } = require('../services/db');
 
 // Column caps. These mirror what public/index.html already enforces on the prop
 // form (name 120, location 160, notes 2000) so the server is never stricter than
@@ -17,7 +18,7 @@ const MAX_COSTUME_ID_LENGTH = 64;
 // Execute SQL queries helper
 async function queryDb(sql) {
   return new Promise((resolve, reject) => {
-    const sqlite = spawn('sqlite3', ['data/db/cms.db']);
+    const sqlite = spawn('sqlite3', [DB_FILE]);
     let output = '';
     
     sqlite.stdout.on('data', (data) => { output += data; });
