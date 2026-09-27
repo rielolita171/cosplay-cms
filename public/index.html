@@ -446,7 +446,13 @@
     .toast.toast-info    { border-left-color: var(--info);    background: #16233d; }
     .toast.toast-warning { border-left-color: var(--warning); background: #3a2e12; }
 
-    /* Auth Screens */
+    /* Screens.
+       `.screen` is the one rule that outlived the auth screens: the dashboard
+       is the only `.screen` left in the document and it is what this rule
+       gives its full-viewport height. The `.auth-*` rules below it belonged to
+       the login / OTP / password-reset screens, which are gone; they are
+       unreferenced and are kept only so a reinstated screen is a matter of
+       un-deleting markup rather than re-deriving a stylesheet. */
     .screen {
       min-height: 100vh;
     }
@@ -522,13 +528,13 @@
 
     /* Boot splash.
      * The normal .loading-overlay is a translucent scrim meant to sit ON TOP of a
-     * screen the user is already looking at (saving a costume, and so on). During
-     * BOOT there is no such screen: the outcome of the session-restore request is
-     * still unknown, so the login screen must stay hidden. An opaque, non-scrim
-     * variant is used for that window so nothing underneath is ever visible. It
-     * is the SAME #loading-overlay element (the same z-index and spinner) with a
-     * single extra class, so the existing showLoading(true/false) path for later
-     * data loads is untouched.
+     * page the user is already looking at (saving a costume, and so on). During
+     * BOOT the dashboard is on screen but empty — the five list requests are
+     * still in flight — and watching it fill in one card at a time is worse than
+     * watching nothing at all. An opaque, non-scrim variant covers that window.
+     * It is the SAME #loading-overlay element (the same z-index and spinner)
+     * with a single extra class, so the existing showLoading(true/false) path
+     * for later data loads is untouched.
      */
     .loading-overlay.boot {
       background: var(--bg);
@@ -799,12 +805,12 @@
        them without each call site having to remember to save and restore the
        previous value.
 
-       THIS IS NOT THE CONTROL. requireWriteAccess() on the server refuses
-       every mutating request from a `viewer` with 403 READ_ONLY_ROLE before
-       the route is reached. The class only stops the buttons being OFFERED —
-       a control the user can click and be refused is worse UX than one that
-       was never there. See canWrite() and bindGridEvents() for the matching
-       client-side chokepoint.
+       canWrite() is now hard-coded to true, so this rule is never actually
+       applied and there is no longer a server-side requireWriteAccess() to
+       mirror — the deployment is the boundary now, not the role. It is still
+       on every write control (as `data-write-only`) and still toggled from
+       bindGridEvents(), so reinstating roles is a change to canWrite() alone.
+       See canWrite().
     ----------------------------------------------------------------------- */
     .is-hidden {
       display: none !important;
@@ -829,11 +835,11 @@
 
     /* -----------------------------------------------------------------------
        PASSWORD RESET
-       `.reset-note` is the "there is no email here" explainer on the login
-       screen; `.reset-token-box` is the read-only preview of a generated reset
-       file in the admin panel. Both are deliberately plain and low-contrast
-       next to the actual controls, because in both cases the surrounding copy
-       is what stops a user doing something irreversible.
+       ALL UNREFERENCED. `.auth-link` and `.reset-note` styled the login
+       screen, `.reset-file-box` / `.reset-warning` / `.reset-actions` the
+       admin's mint-a-reset-file panel, and all of it went with the admin
+       Users tab. Kept, as with the `.auth-*` rules above, so re-adding a
+       recovery path is markup rather than a stylesheet.
     ----------------------------------------------------------------------- */
     .auth-link {
       display: block;
@@ -1041,6 +1047,9 @@
 
     /* -----------------------------------------------------------------------
        ADMIN — USERS TAB
+       ALL UNREFERENCED. The row layout and the role <select> it dressed went
+       with the Users tab; canWrite() no longer reads a role to pick between
+       them. Kept for the same reason as the other removed-screen rules.
     ----------------------------------------------------------------------- */
     .user-row {
       display: flex;
@@ -1139,163 +1148,34 @@
 </head>
 <body>
 
-  <!-- LOGIN SCREEN -->
-  <!-- Ships HIDDEN. Every other screen ships hidden and is revealed by the code
-       that decides it should be seen; the login screen used to ship VISIBLE, so
-       every refresh painted it before init() had even asked the server whether a
-       session existed. init() calls showLogin() only once that question is
-       answered, which is what removed the flash. Do not "restore" the visible
-       default here. -->
-  <section id="screen-login" class="screen" style="display: none;">
-    <div class="auth-container">
-      <div class="auth-card">
-        <div class="auth-header">
-          <h1>Cosplay CMS</h1>
-          <p>Sign in to access your inventory</p>
-        </div>
-        <form id="login-form" onsubmit="handleLogin(event)">
-          <div class="form-group">
-            <label for="login-username">Username</label>
-            <input type="text" id="login-username" class="form-control" name="username" required autocomplete="username" placeholder="Enter username">
-          </div>
-          <div class="form-group">
-            <label for="login-password">Password</label>
-            <input type="password" id="login-password" class="form-control" name="password" required autocomplete="current-password" placeholder="Enter password">
-          </div>
-          <div id="login-error" class="auth-error" style="display: none;"></div>
-          <button type="submit" class="btn btn-primary btn-full">Sign In</button>
-        </form>
-        <button type="button" class="auth-link" onclick="showResetHelp()">Forgot your password?</button>
-        <!-- The explanation is written into the DOM by showResetHelp() rather
-             than shipped inline, so it can only appear on purpose. It says
-             plainly that there is NO EMAIL: this server has no mail transport,
-             and a "we emailed you a link" message would send the user hunting
-             for a mail that does not exist. -->
-        <div id="reset-help" class="reset-note is-hidden"></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- RESET PASSWORD SCREEN
-       Reachable only from the "Forgot your password?" link above, and it is a
-       two-step form: paste the file, then choose a new password. Step 1 exists
-       to show which account the file belongs to before the user commits to a
-       new password; it does not consume the token (see the server route). -->
-  <section id="screen-reset" class="screen" style="display: none;">
-    <div class="auth-container">
-      <div class="auth-card">
-        <div class="auth-header">
-          <h1>Reset your password</h1>
-          <p id="reset-subtitle">Paste the reset file an administrator gave you.</p>
-        </div>
-
-        <!-- Step 1: the token. -->
-        <form id="reset-token-form" onsubmit="handleResetToken(event)">
-          <div class="form-group">
-            <label for="reset-token">Reset file or token</label>
-            <!-- A textarea, not an input: the thing users actually have is a
-                 whole .txt file, and pasting the entire file into a one-line
-                 input would silently keep only the first line. -->
-            <textarea id="reset-token" class="form-control" rows="5" required
-                      autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
-                      placeholder="Paste the whole .txt file, or just the token line"></textarea>
-            <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 6px;">
-              You can paste the entire file — the token is taken from the last line.
-            </p>
-          </div>
-          <div id="reset-token-error" class="auth-error" style="display: none;"></div>
-          <button type="submit" class="btn btn-primary btn-full">Continue</button>
-          <button type="button" class="auth-link" onclick="showLogin()">Back to sign in</button>
-        </form>
-
-        <!-- Step 2: the new password. Hidden until step 1 validates. -->
-        <form id="reset-password-form" onsubmit="handleResetPassword(event)" style="display: none;">
-          <div class="reset-note" style="margin-top: 0; margin-bottom: 16px;">
-            Resetting password for <strong id="reset-username">(unknown)</strong>.
-            <span id="reset-expiry-note"></span>
-          </div>
-          <div class="form-group">
-            <label for="reset-new-password">New password</label>
-            <input type="password" id="reset-new-password" class="form-control" required minlength="8"
-                   autocomplete="new-password" placeholder="At least 8 characters">
-            <div class="field-error" data-error-for="newPassword"></div>
-          </div>
-          <div class="form-group">
-            <label for="reset-confirm-password">Confirm new password</label>
-            <input type="password" id="reset-confirm-password" class="form-control" required minlength="8"
-                   autocomplete="new-password" placeholder="Type it again">
-            <div class="field-error" data-error-for="confirmPassword"></div>
-          </div>
-          <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: -4px;">
-            Setting a new password signs you out everywhere, including this browser.
-          </p>
-          <div id="reset-password-error" class="auth-error" style="display: none;"></div>
-          <button type="submit" class="btn btn-primary btn-full">Set new password</button>
-          <button type="button" class="auth-link" onclick="showReset()">Start over</button>
-        </form>
-      </div>
-    </div>
-  </section>
-
-  <!-- OTP SCREEN -->
-  <section id="screen-otp" class="screen" style="display: none;">
-    <div class="auth-container">
-      <div class="auth-card">
-        <div class="auth-header">
-          <h1>Two-Factor Authentication</h1>
-          <p>A 6-digit code has been sent to your Telegram</p>
-        </div>
-        <form id="otp-form" onsubmit="handleOtpVerify(event)">
-          <div class="form-group">
-            <label for="otp-code">Verification Code</label>
-            <input type="text" id="otp-code" class="form-control" name="otp" required maxlength="6" pattern="\d{6}" autocomplete="one-time-code" placeholder="123456" style="letter-spacing: 0.5rem; text-align: center; font-size: 1.5rem;">
-          </div>
-          <div id="otp-error" class="auth-error" style="display: none;"></div>
-          <button type="submit" class="btn btn-primary btn-full">Verify</button>
-          <div style="margin-top: 16px; text-align: center;">
-            <button type="button" class="btn btn-ghost" onclick="resendOtp()">Resend Code</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  </section>
-
-  <!-- DASHBOARD SCREEN -->
-  <section id="screen-dashboard" class="screen" style="display: none;">
+  <!-- DASHBOARD SCREEN.
+       NOT hidden any more. It used to ship `display: none` so that the login
+       screen could be revealed first; there is no login screen left, and the
+       only thing that ever unhides this section is showDashboard(). Keeping
+       the element visible in the markup means the dashboard is on screen
+       before the first paint instead of only after the data arrives, which is
+       what lets the boot splash (showBootSplash()) be the only thing the user
+       ever sees during the initial load. -->
+  <section id="screen-dashboard" class="screen">
     <div class="container">
       <!-- Header -->
       <header>
         <div class="logo-group">
           <h1>Cosplay Management System</h1>
-          <p>Home Server Inventory, Milestones & 2FA Security</p>
+          <p>Home Server Inventory & Milestones</p>
         </div>
         <div class="header-actions">
-          <!-- The three "+ Add …" buttons are write entry points. They carry
-               data-write-only so applyRoleVisibility() can hide them from a
-               viewer; the onclick is KEPT because openModal() also refuses a
-               viewer, and that is the half that actually matters — a hidden
-               button is still reachable from the keyboard, from devtools, or
-               from a tab rendered before the role changed. See canWrite(). -->
+          <!-- The three "+ Add …" buttons are the write entry points. They keep
+               the data-write-only attribute and openModal()'s canWrite() guard
+               even though the app no longer has roles: both are now constants
+               that always pass, and leaving them in place is what means a future
+               re-introduction of roles is a change to canWrite() alone rather
+               than a change spread over every call site. See canWrite(). -->
           <button class="btn btn-secondary" data-write-only onclick="openModal('modal-add-lens')">+ Add Lens</button>
           <button class="btn btn-secondary" data-write-only onclick="openModal('modal-add-prop')">+ Add Prop</button>
           <button class="btn btn-primary" data-write-only onclick="openModal('modal-add-costume')">+ New Costume</button>
-          <button class="btn btn-secondary" onclick="logout()">Logout</button>
         </div>
       </header>
-
-      <!-- Read-only notice, hidden for every writer by applyRoleVisibility().
-           A viewer is TOLD the buttons are gone, rather than being left to
-           wonder whether the page half-loaded. -->
-      <div class="role-notice is-hidden" id="role-notice">
-        <span aria-hidden="true">👁️</span>
-        <span>
-          <strong>Read-only access.</strong> Your account has the
-          <strong>viewer</strong> role, so everything can be browsed but nothing
-          can be added, edited or deleted. The server enforces this separately
-          and answers <code>403 READ_ONLY_ROLE</code> to any attempt. Ask an
-          administrator if you need write access.
-        </span>
-      </div>
 
       <!-- Metrics Cards -->
       <div class="metrics-grid">
@@ -1327,11 +1207,6 @@
         <button class="tab-btn" data-tab="props" onclick="switchTab('props')">⚔️ Props & Accessories</button>
         <button class="tab-btn" data-tab="lenses" onclick="switchTab('lenses')">👁️ Contact Lenses</button>
         <button class="tab-btn" data-tab="lists" onclick="switchTab('lists')">🏷️ Reference Lists</button>
-        <!-- ADMIN ONLY. Hidden by applyRoleVisibility() for any role that is
-             not exactly 'admin'; switchTab() refuses the tab itself too, so the
-             restriction does not rest on the button merely being invisible. -->
-        <button class="tab-btn is-hidden" id="tab-btn-users" data-tab="users" onclick="switchTab('users')">👥 Users</button>
-        <button class="tab-btn" data-tab="security" onclick="switchTab('security')">🔐 Security & 2FA</button>
       </div>
 
       <!-- Filter Bar -->
@@ -1364,8 +1239,7 @@
         </select>
         <!-- One escape hatch for four filters. Deliberately NOT data-write-only:
              it only re-filters rows already in the browser and calls no endpoint,
-             so a read-only viewer must be able to clear a filter they just set,
-             exactly as they were able to set it. -->
+             so it is a read, and a read must be usable by anyone. -->
         <button type="button" class="btn btn-secondary" id="clear-filters" style="display: none; align-self: center;" onclick="clearCostumeFilters()">Clear</button>
       </div>
 
@@ -1427,8 +1301,9 @@
                 <div class="field-error" data-error-for="storeUrl"></div>
               </div>
               <!-- A bare text box with no submit button is worse than nothing,
-                   so it is the SUBMIT that is hidden and the panel stays —
-                   a viewer can still search and read the list. -->
+                   so it is the SUBMIT that is a write control and the panel stays
+                   whatever answer canWrite() gives — the list is always readable
+                   and searchable. -->
               <button type="submit" class="btn btn-primary btn-full" data-write-only>Add Brand</button>
             </form>
             <!-- Search box for the Brand list. This box belongs to the Brand list
@@ -1479,155 +1354,6 @@
         </div>
       </section>
 
-      <!-- Users Tab Content (ADMIN ONLY).
-
-           Rendered by renderUsers() with DOM APIs, not innerHTML: every value
-           here is attacker-adjacent (a username is chosen at signup, an email
-           likewise) and the <select> needs a real change listener per row,
-           which an innerHTML template would have to re-bind on every repaint.
-           See renderUsers(). -->
-      <section id="tab-users" style="display: none;">
-        <div class="metric-card" style="max-width: 900px; margin: 0 auto;">
-          <h2 style="font-size: 1.3rem; margin-bottom: 6px;">👥 Users & Roles</h2>
-          <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px;">
-            Roles run from least to most privileged:
-            <strong>viewer</strong> (read only) → <strong>user</strong> (full editing)
-            → <strong>curator</strong> → <strong>admin</strong> (this panel).
-            A change takes effect on that account's next request — the role is a
-            claim in the token, so an already-issued access token keeps its old
-            role until it is refreshed or expires.
-          </p>
-          <div id="users-error" class="auth-error" style="display: none; text-align: left;"></div>
-          <div id="users-list" style="display: grid; gap: 10px;"></div>
-
-          <!-- Generated reset file. Populated ONLY by the mint call, and the
-               server never keeps the plaintext, so once this box is cleared the
-               token is gone for good. The panel is cleared on every repaint of
-               the list so a stale token cannot be re-read by the next admin who
-               opens the tab. -->
-          <div id="reset-file-panel" class="reset-note is-hidden" style="margin-top: 20px;">
-            <strong>Reset file for <span id="reset-file-username"></span></strong>
-            <textarea id="reset-file-contents" class="reset-file-box" readonly rows="9"
-                      aria-label="Generated reset file contents"></textarea>
-            <div class="reset-actions">
-              <button type="button" class="btn btn-secondary" onclick="downloadResetFile()">Download .txt</button>
-              <button type="button" class="btn btn-secondary" onclick="copyResetFile()">Copy</button>
-              <button type="button" class="btn btn-ghost" onclick="clearResetFilePanel()">Hide</button>
-            </div>
-            <p class="reset-warning">
-              ⚠️ This is shown <strong>once</strong>. The server stores only a hash of
-              the token, so it cannot be displayed again — if you lose it, generate a
-              new one (which immediately invalidates this one). Send the file to the
-              user over a channel you trust, and delete your copy afterwards.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <!-- Security Tab Content -->
-      <section id="tab-security" style="display: none;">
-        <div class="metric-card" style="max-width: 600px; margin: 0 auto;">
-          <h2 style="font-size: 1.3rem; margin-bottom: 16px;">🔐 Security & Break-Glass Settings</h2>
-          <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px;">
-            Manage Telegram Two-Factor Authentication (2FA) and generate emergency single-use recovery keys.
-          </p>
-
-          <!-- User Profile -->
-          <div style="margin-bottom: 24px; padding: 16px; background: rgba(255,255,255,0.03); border-radius: 8px; border: 1px solid var(--card-border);">
-            <h3 style="font-size: 1rem; margin-bottom: 12px; color: var(--text);">👤 User Profile</h3>
-            <div style="display: grid; gap: 8px; font-size: 0.9rem;">
-              <div><strong>Username:</strong> <span id="sec-username">-</span></div>
-              <div><strong>Email:</strong> <span id="sec-email">-</span></div>
-              <div><strong>Telegram Chat ID:</strong> <span id="sec-telegram-id">-</span></div>
-              <div><strong>Role:</strong> <span id="sec-role">-</span></div>
-            </div>
-            <div id="sec-telegram-warning" style="display: none; margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: 0.8rem; background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.3); color: #fbbf24;">
-              ⚠️ This server has no Telegram credentials configured, so 2FA codes cannot be delivered and 2FA cannot be enabled. Enable 2FA will fail with a 503.
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label>Telegram 2FA Status</label>
-            <div style="display: flex; gap: 10px; align-items: center;">
-              <span class="badge badge-in_possession" id="2fa-status-badge">Enabled</span>
-              <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.8rem;" onclick="toggle2FA()">Toggle 2FA</button>
-            </div>
-          </div>
-
-          <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--card-border);">
-            <label style="font-weight: 600; display: block; margin-bottom: 6px;">Emergency Break-Glass Recovery</label>
-            <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
-              If you ever lose access to your Telegram device, use an emergency recovery key at <code>/api/auth/break-glass</code> to bypass 2FA.
-            </p>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-              <button class="btn btn-primary" onclick="generateNewBreakGlassKey()">Generate / Rotate Emergency Key</button>
-            </div>
-            <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 8px;">
-              The backend stores only a hash of the key, so an existing key can never be displayed again.
-              "Generate" always issues a <strong>brand new</strong> key and immediately invalidates the previous one.
-            </p>
-            <div id="break-glass-display" style="margin-top: 12px; display: none;">
-              <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 6px;">Your Emergency Key (save securely!):</label>
-              <div style="display: flex; gap: 8px; align-items: center;">
-                <code id="break-glass-key" style="flex: 1; background: #141724; padding: 10px 12px; border-radius: 6px; font-size: 0.9rem; color: var(--warning); border: 1px solid var(--card-border);"></code>
-                <button class="btn btn-secondary" onclick="copyBreakGlassKey()">Copy</button>
-              </div>
-              <p style="font-size: 0.75rem; color: var(--danger); margin-top: 8px;">⚠️ This key is shown once. Save it in a password manager. It will be invalidated after use and a new one generated.</p>
-            </div>
-          </div>
-
-          <!-- ================================================================
-               CORS ALLOWED ORIGINS — ADMIN ONLY.
-
-               This is server config, not user config, which is why it lives in
-               the Security tab rather than in a settings screen of its own.
-
-               GATING: the whole block carries data-write-only, so
-               applyRoleVisibility() removes it entirely for any non-admin.
-               That matters more here than it does for the buttons above,
-               because — unlike the Users tab — the Security tab is NOT itself
-               role-gated; a viewer can open it and read the 2FA panel. The
-               data-write-only attribute is therefore the only thing keeping
-               this control out of a non-admin's UI. The server still enforces
-               authorize('admin') on all three endpoints, which is the half
-               that actually counts.
-               ================================================================ -->
-          <div data-write-only style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--card-border);">
-            <label style="font-weight: 600; display: block; margin-bottom: 6px;">CORS Allowed Origins</label>
-            <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
-              The origins allowed to make credentialed cross-origin requests to this server.
-              Changes apply immediately — <strong>no restart needed</strong>.
-              Currently using: <code id="cors-source">…</code>
-            </p>
-
-            <div id="cors-origin-list" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;"></div>
-
-            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start;">
-              <input type="text" class="form-control" id="cors-origin-input" style="flex: 1 1 280px; min-width: 220px;"
-                     maxlength="200" placeholder="https://example.com" autocomplete="off" spellcheck="false"
-                     onkeydown="if(event.key==='Enter'){event.preventDefault();addCorsOrigin();}">
-              <button class="btn btn-secondary" onclick="addCorsOrigin()">Add</button>
-              <button class="btn btn-primary" onclick="saveCorsSettings()">Save</button>
-            </div>
-            <!-- The authoritative validation message. Whatever the server
-                 rejects with a 400 is shown here verbatim, naming the entry
-                 that caused it. Nothing is silently dropped. -->
-            <div class="field-error" id="cors-origin-error" style="display: none; margin-top: 8px;"></div>
-            <div id="cors-message" style="margin-top: 10px; font-size: 0.8rem;"></div>
-
-            <div style="margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-              <button class="btn btn-secondary" onclick="resetCorsSettings()">Reset to configured default</button>
-              <span style="font-size: 0.78rem; color: var(--text-muted);">
-                Server default (<code>CORS_ORIGIN</code> in .env): <code id="cors-env-default">…</code>
-              </span>
-            </div>
-            <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 8px;">
-              ⚠️ Removing the origin marked <strong>in use</strong> will lock you out of this page. You are asked
-              to confirm before it is saved, and the server refuses the change unless you confirm it.
-            </p>
-          </div>
-        </div>
-      </section>
     </div>
   </section>
 
@@ -2074,7 +1800,7 @@
        platform. The <img> is painted by the SAME authenticated pipeline as
        every thumbnail (loadImageObjectUrl -> object URL) and is deliberately
        NOT a plain <img src="/uploads/…">: that mount is guarded and an <img>
-       cannot send the bearer header. See "Authenticated image delivery". -->
+       cannot send a request header. See "IMAGE DELIVERY". -->
   <dialog id="modal-lightbox">
     <h3 style="margin-bottom: 4px;" id="lightbox-title">Photos</h3>
     <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 12px;" id="lightbox-caption"></p>
@@ -2086,8 +1812,8 @@
     <div class="lightbox-bar">
       <span class="lightbox-caption" id="lightbox-position"></span>
       <div style="display: flex; gap: 10px; align-items: center;">
-        <!-- Write control: hidden for a viewer, and deleteLightboxImage()
-             refuses the call independently. -->
+        <!-- Write control: hidden by applyRoleVisibility(), and
+             deleteLightboxImage() refuses the call independently. -->
         <button type="button" class="btn btn-danger" id="lightbox-delete" data-write-only>Delete this photo</button>
         <button type="button" class="btn btn-secondary" id="lightbox-close">Close</button>
       </div>
@@ -2113,11 +1839,6 @@
     // ==========================================================================
     // CONSTANTS
     // ==========================================================================
-    const TOKEN_KEY = 'cms_token';
-    const REFRESH_TOKEN_KEY = 'cms_refresh_token';
-    const USER_KEY = 'cms_user';
-    const TEMP_TOKEN_KEY = 'cms_temp_token';
-
     // Server cap is 10MB (src/middleware/imageUpload.js:38-40). We use a slightly
     // lower client limit so the user gets an instant, friendly message instead of
     // a server-side failure from the image processor.
@@ -2187,8 +1908,15 @@
       '<div class="media-placeholder"><span class="media-icon">🖼️</span><span>No image</span></div>';
 
     // ==========================================================================
-    // AUTHENTICATED IMAGE DELIVERY
+    // IMAGE DELIVERY (fetch + object URL)
     // ==========================================================================
+    // NOTE: the reasoning below is written for the era when /uploads was a guarded
+    // static mount and these fetches carried a bearer token. That guard is gone
+    // with the rest of the auth system, so the header is no longer sent — but the
+    // fetch/Blob/object-URL pipeline itself is kept unchanged, because it remains
+    // the only way to cache a decoded image behind a fixed-size placeholder while
+    // the grid re-renders on every filter keystroke.
+    //
     // WHY THIS EXISTS
     // `/uploads` is a GUARDED static mount (src/middleware/uploadAccess.js): an
     // anonymous `GET /uploads/<file>.webp` is denied with 401, because otherwise
@@ -2209,24 +1937,21 @@
     //     images CSRF-readable. A cross-site <img> on any page would then pull
     //     the user's private photos into a third-party request.
     //   * Authenticated fetch + object URL (this file): no secret in any URL, no
-    //     cookie, no new server secret, and the existing access token already
-    //     expires in 15 minutes and is already rotated. The cost is a fetch per
-    //     image and an object-URL lifecycle to manage — which is what the rest
-    //     of this block is.
+    //     cookie, no new server secret, and the access token already in use
+    //     expires and rotates on its own. The cost is a fetch per image and an
+    //     object-URL lifecycle to manage — which is what the rest of this block
+    //     is, and is the reason the pipeline outlived the token that motivated it.
     //
     // EXPIRY
-    // There is no separate image token, so there is no separate expiry to get
-    // wrong. When the access token expires, api() transparently refreshes it
-    // (see tryRefreshToken) and the request is retried once, and any fetch that
-    // fails after that logs the user out — after which every object URL is
-    // revoked (revokeAllImageObjectUrls). Signing in again re-fetches on demand,
-    // so a stale image can never be permanently broken.
+    // There is no image token and therefore no separate expiry to get wrong: the
+    // only thing that can refuse one of these fetches is the server, and a
+    // refusal is reported by api() exactly as it is for any other request.
     //
     // MEMORY
-    // Every URL.createObjectURL() is held in imageObjectUrls and is revoked on
-    // logout, on any screen change, and by the LRU cap below. Without the cap a
-    // long session that scrolls through many costumes would pin every decoded
-    // image in memory for the lifetime of the tab.
+    // Every URL.createObjectURL() is held in imageObjectUrls and is revoked by
+    // the LRU cap below. Without the cap a long session that scrolls through many
+    // costumes would pin every decoded image in memory for the lifetime of the
+    // tab.
 
     // 1x1 transparent GIF: the placeholder `src` a thumbnail carries until its
     // authenticated fetch resolves, so the browser never shows a broken-image
@@ -2269,7 +1994,7 @@
     }
 
     /**
-     * Fetch one image with the bearer header and resolve to an object URL.
+     * Fetch one image and resolve to an object URL.
      * Cached, so re-rendering a grid (typing in the filter box) does not re-fetch.
      * @returns {Promise<string|null>} the object URL, or null when it failed.
      */
@@ -2331,92 +2056,40 @@
     }
 
     // ==========================================================================
-    // ROLES (phase 5c — the "viewer" role and the admin role panel)
+    // ROLES — REMOVED
     // ==========================================================================
-    // THE SAME LADDER THE SERVER USES, AND WHY IT MUST BE FAIL-CLOSED HERE TOO
-    // hasRoleAtLeast() in src/middleware/auth.js compares ranks, and a role it
-    // does not recognise ranks below everything, so a `viewer` — and equally a
-    // missing, empty or misspelt role — can never satisfy `>= 'user'`. This
-    // client copy reproduces that by INDEXING a lookup rather than by comparing
-    // strings:
+    // The viewer/user/curator/admin ladder is gone along with the account system.
+    // There is no longer anyone to ask "which role is this?", so the two halves of
+    // the old gate are kept as constants that answer "always":
     //
-    //   rankOf('viewer')    -> 0        rankOf('bogus')    -> -1 (not in table)
-    //   rankOf('user')      -> 1        rankOf(undefined) -> -1 (not in table)
-    //   rankOf('curator')   -> 2
-    //   rankOf('admin')     -> 3
+    //   * canWrite() is a function rather than `true` inlined at the call sites,
+    //     because there are ~19 of them (openModal, the bindGridEvents
+    //     dispatcher, every form handler). Keeping the seam means that if roles
+    //     ever come back, this ONE function plus WRITE_ACTIONS below is all that
+    //     has to be reinstated.
+    //   * WRITE_ACTIONS is deliberately still a real array rather than a deleted
+    //     symbol, for the same reason: the dispatcher indexes it to decide which
+    //     `data-action` values are writes. An action missing from the list is a
+    //     READ, and a read must still be allowed.
     //
-    // An unknown role therefore scores -1, and -1 >= 1 is false, so anything
-    // this table does not name is read-only. That is the whole point: state.user
-    // is restored from sessionStorage at boot, so a tampered or stale blob must
-    // not be able to talk its way into write controls.
-    //
-    // The ranks are ORDERED, not merely present, so 'user' < 'curator' < 'admin'
-    // keeps holding if the server ever promotes a role.
-    const ROLE_RANKS = { viewer: 0, user: 1, curator: 2, admin: 3 };
-    const WRITE_ROLE = 'user';
-    const ADMIN_ROLE = 'admin';
+    // The security of this app is now entirely the deployment's job — it is
+    // expected to sit behind a reverse proxy that does the authn/authz.
+    function canWrite() {
+      return true;
+    }
 
-    // Every `data-action` that eventually mutates something. Kept as ONE list
-    // beside the ladder so the two halves of the gate can be read together: an
-    // action missing from this list is a READ, and a read is something a
-    // `viewer` must still be able to do. 'open-gallery' is the current example
-    // — browsing photos is not a write.
+    // Every `data-action` that mutates something. Read from the dispatcher in
+    // bindGridEvents; kept beside canWrite() so the two can be read together.
     const WRITE_ACTIONS = ['upload', 'edit', 'delete', 'open-lens',
       'rename-brand', 'link-brand', 'rename-fandom', 'delete-brand', 'delete-fandom'];
 
-    /** The numeric rank of `role`, or -1 when it is not one we know. */
-    function roleRank(role) {
-      const key = clean(role).toLowerCase();
-      return Object.prototype.hasOwnProperty.call(ROLE_RANKS, key) ? ROLE_RANKS[key] : -1;
-    }
-
     /**
-     * True when the signed-in account may perform writes.
-     *
-     * Fail-closed, matching the server: an absent state.user, an absent role, or
-     * a role this table does not name, all yield -1 — which fails the
-     * `>= WRITE_ROLE` comparison and leaves every write control hidden.
+     * Nothing to apply any more: there is no role, so no control is ever
+     * conditionally hidden. Kept as a named no-op because loadAllData() still
+     * calls it, and that call site is the single place a role would have to be
+     * re-derived after a sign-in — worth leaving legible rather than deleting.
      */
-    function canWrite() {
-      return roleRank(state.user && state.user.role) >= roleRank(WRITE_ROLE);
-    }
-
-    /** True only for a real 'admin'. */
-    function isAdmin() {
-      return roleRank(state.user && state.user.role) >= roleRank(ADMIN_ROLE);
-    }
-
-    /**
-     * Apply the role to the DOM.
-     *
-     * Runs on every dashboard load and after a role change, because the correct
-     * visibility depends on WHO is signed in, not on which tab happens to be
-     * open. It is deliberately one pass over `[data-write-only]` rather than an
-     * `if (canWrite())` inside each renderer: a single rule that can simply be
-     * re-applied after a role change is far harder to get wrong than a dozen
-     * scattered conditionals, and a control rendered while the wrong role was
-     * active is corrected the next time this runs.
-     *
-     * What actually ENFORCES anything is deliberately NOT here — that lives in
-     * the code path (openModal, and the dispatcher in bindGridEvents). Hiding a
-     * control is presentation; refusing the call is the check.
-     */
-    function applyRoleVisibility() {
-      const writable = canWrite();
-      document.querySelectorAll('[data-write-only]').forEach(el => {
-        el.classList.toggle('is-hidden', !writable);
-      });
-
-      const notice = document.getElementById('role-notice');
-      if (notice) notice.classList.toggle('is-hidden', writable);
-
-      const usersTab = document.getElementById('tab-btn-users');
-      if (usersTab) usersTab.classList.toggle('is-hidden', !isAdmin());
-
-      // Leave a tab that is open but no longer permitted, so a demoted admin is
-      // not left sitting on a Users tab they can no longer use.
-      if (!isAdmin() && state.currentTab === 'users') switchTab('costumes');
-    }
+    function applyRoleVisibility() {}
 
     // ==========================================================================
     // LENS COLOUR PICKER
@@ -2596,13 +2269,6 @@
     }
 
     const state = {
-      // Auth
-      token: null,
-      refreshToken: null,
-      user: null,
-      currentScreen: 'login',
-      tempToken: null,
-
       // Data
       costumes: [],
       props: [],
@@ -2639,21 +2305,12 @@
       editingPropId: null,
       editingLensId: null,
       toastTimer: null,
-      refreshPromise: null,   // single-flight guard for the silent token refresh
       confirmResolver: null,
       // The text-entry modal. Deliberately a SEPARATE slot from
       // confirmResolver: that one is the project's only yes/no path; this one
       // only collects a value.
       textEntryResolver: null,
       textEntryValidate: null,
-      // Admin panel (phase 5c). `usersLoaded` is the lazy-load guard: the list
-      // is fetched when the tab is first OPENED, not on every dashboard load,
-      // because only an admin ever sees it and a viewer/curator would pay for a
-      // 403 on every single sign-in.
-      users: [],
-      assignableRoles: [],
-      usersLoaded: false,
-      usersLoading: false,
       // CORS allowlist editor (Security tab). `corsDraft` is a WORKING COPY the
       // admin edits freely without saving, so the chips can be added to and
       // removed from before anything is written. `corsCurrentRequestOrigin` is
@@ -2665,18 +2322,6 @@
       corsCurrentRequestOrigin: null,
       corsLoaded: false,
       corsLoading: false,
-      // Password reset (phase 5e). `resetToken` is the plaintext pasted by the
-      // user, held only in memory for the length of the two-step form and never
-      // written to sessionStorage — a token recovered from a persisted store
-      // would still be live on an unattended machine. `resetUsername` /
-      // `resetExpiresAt` come from the validate call and are only ever used to
-      // tell the user which account they are about to change.
-      resetToken: null,
-      resetUsername: null,
-      resetExpiresAt: null,
-      // The generated .txt, held the same way: memory only, never persisted.
-      resetFileContents: null,
-      resetFileName: null,
       // The open lightbox. `index` is a position in `urls`, and `urls` is a
       // SNAPSHOT taken when the lightbox opened — paging must not re-read
       // state.costumes, or a background reload could swap the list out from
@@ -2812,103 +2457,29 @@
       }
     }
 
-    function storeSession(payload) {
-      if (!payload) return;
-      const accessToken = payload.token || payload.accessToken || null;
-      if (accessToken) {
-        state.token = accessToken;
-        sessionStorage.setItem(TOKEN_KEY, accessToken);
-      }
-      if (payload.refreshToken) {
-        state.refreshToken = payload.refreshToken;
-        sessionStorage.setItem(REFRESH_TOKEN_KEY, payload.refreshToken);
-      }
-      if (payload.user) {
-        state.user = payload.user;
-        sessionStorage.setItem(USER_KEY, JSON.stringify(payload.user));
-      }
-    }
-
-    function clearSession() {
-      state.token = null;
-      state.refreshToken = null;
-      state.user = null;
-      state.tempToken = null;
-      state.costumes = [];
-      state.props = [];
-      state.lenses = [];
-      state.imageUrlsCache = {};
-      // Object URLs are scoped to this session. Revoking them here is what stops a
-      // signed-out tab — or the next person at a shared machine — from still
-      // holding every photo it paged into memory.
-      revokeAllImageObjectUrls();
-      sessionStorage.removeItem(TOKEN_KEY);
-      sessionStorage.removeItem(REFRESH_TOKEN_KEY);
-      sessionStorage.removeItem(USER_KEY);
-      sessionStorage.removeItem(TEMP_TOKEN_KEY);
-    }
-
-    // Local, state-only teardown (no network). Used when a refresh has failed.
-    function forceLogout(message) {
-      clearSession();
-      showLogin();
-      if (message) showToast(message, 'error');
-    }
-
-    /**
-     * One in-flight refresh shared by every caller: a burst of 401s (the three
-     * parallel list loaders can all expire at once) results in exactly ONE
-     * POST /api/auth/refresh, not a stampede. Returns true when a fresh access
-     * token is available.
-     */
-    function tryRefreshToken() {
-      if (state.refreshPromise) return state.refreshPromise;
-
-      const refreshToken = state.refreshToken || sessionStorage.getItem(REFRESH_TOKEN_KEY);
-      if (!refreshToken) return Promise.resolve(false);
-
-      state.refreshPromise = (async () => {
-        try {
-          // auth:false so a 401 here can NEVER recurse into another refresh.
-          const data = await api('/api/auth/refresh', {
-            method: 'POST',
-            auth: false,
-            body: JSON.stringify({ refreshToken: refreshToken })
-          });
-          storeSession(data);
-          return true;
-        } catch (err) {
-          console.warn('Silent token refresh failed:', err.code || err.message);
-          // Invalid / expired / REUSED refresh token -> the family is dead.
-          sessionStorage.removeItem(REFRESH_TOKEN_KEY);
-          state.refreshToken = null;
-          return false;
-        } finally {
-          state.refreshPromise = null;
-        }
-      })();
-
-      return state.refreshPromise;
-    }
-
     /**
      * The single network chokepoint. EVERY request in the app goes through here.
-     *   - injects Authorization: Bearer <accessToken> (unless auth:false)
      *   - omits Content-Type for FormData so the browser sets the boundary
-     *   - THROWS ApiError on !res.ok, surfacing the server 'error' field
-     *   - on 401 (authenticated requests only) attempts ONE silent refresh and
-     *     then retries the original request exactly once; if the refresh fails it
-     *     logs out instead of looping.
+     *   - THROWS ApiError on !res.ok, surfacing the server 'error' field and
+     *     the machine-readable `code` alongside it
+     *
+     * It sends no credentials of its own. The server has no sessions and no
+     * token to check, so the only header worth sending is Content-Type; authn
+     * is now entirely the reverse proxy's job. A 401 from here therefore means
+     * the proxy is in front of this app and is refusing the request — it is
+     * reported to the caller like any other error rather than retried.
+     *
+     * NOTE: many call sites still pass `auth: false`, a leftover from when this
+     * function branched on it. It is not read any more, but the property is
+     * still stripped below rather than left to reach fetch() as an unknown init
+     * key, so those call sites need no change and cost nothing.
      */
     async function api(path, options) {
       const opts = options || {};
-      const auth = opts.auth !== false;
-      const isRetry = opts.__retry === true;
       const isFormData = typeof FormData !== 'undefined' && opts.body instanceof FormData;
-      // `binary: true` returns the response body as a Blob instead of parsed JSON.
-      // It exists so the image pipeline can still go through this single
-      // chokepoint (the suite asserts there are no bare fetch() calls anywhere
-      // else) while sending the Authorization header that <img> cannot send.
+      // `binary: true` returns the response body as a Blob instead of parsed JSON,
+      // so the image pipeline can still go through this single chokepoint (the
+      // suite asserts there are no bare fetch() calls anywhere else).
       const wantBinary = opts.binary === true;
 
       const headers = Object.assign(
@@ -2916,11 +2487,9 @@
         isFormData ? {} : { 'Content-Type': 'application/json' },
         opts.headers || {}
       );
-      if (auth && state.token) headers['Authorization'] = 'Bearer ' + state.token;
 
       const init = Object.assign({}, opts);
       delete init.auth;
-      delete init.__retry;
       delete init.binary;
 
       let res;
@@ -2946,20 +2515,6 @@
       }
 
       const data = await readJsonSafely(res);
-
-      if (res.status === 401 && auth && !isRetry) {
-        const refreshed = await tryRefreshToken();
-        if (refreshed) {
-          // Exactly one retry of the ORIGINAL request.
-          return api(path, Object.assign({}, opts, { __retry: true }));
-        }
-        forceLogout('Your session expired. Please sign in again.');
-        throw new ApiError(
-          (data && data.error) || 'Session expired. Please sign in again.',
-          401,
-          (data && data.code) || 'SESSION_EXPIRED'
-        );
-      }
 
       if (!res.ok) {
         throw new ApiError(
@@ -3135,10 +2690,9 @@
      * The retry affordance for a TRANSIENT boot failure.
      *
      * `status === 0` is api()'s NETWORK_ERROR: the request never reached the
-     * server. That proves nothing about whether the stored token is still good --
-     * on a home LAN the box may simply not have finished booting -- so the token
-     * is KEPT and a retry is offered instead of dumping the user on the login
-     * screen and silently logging them out.
+     * server. That is not a verdict about the data — on a home LAN the box may
+     * simply not have finished booting — so a retry is offered rather than an
+     * empty dashboard and a toast the user can do nothing with.
      */
     function showBootRetry(message) {
       const label = document.getElementById('boot-retry-message');
@@ -3149,58 +2703,16 @@
       overlay.classList.add('is-retrying');
     }
 
-    function showScreen(screen) {
-      // A screen change means the previous screen's DOM is going away, so this is
-      // the right place to drop the object URLs the old screen was displaying.
-      // Together with clearSession() this bounds the blob cache to "images the
-      // current screen is showing", so a long session cannot pin every decoded
-      // photo in memory and no object URL outlives the session that fetched it.
-      revokeAllImageObjectUrls();
-      state.currentScreen = screen;
-      document.getElementById('screen-login').style.display = screen === 'login' ? 'flex' : 'none';
-      document.getElementById('screen-otp').style.display = screen === 'otp' ? 'flex' : 'none';
-      document.getElementById('screen-reset').style.display = screen === 'reset' ? 'flex' : 'none';
-      document.getElementById('screen-dashboard').style.display = screen === 'dashboard' ? 'block' : 'none';
-    }
-
-    function showAuthError(elementId, err) {
-      const box = document.getElementById(elementId);
-      box.textContent = describeAuthError(err);
-      box.style.display = 'block';
-    }
-
-    // The 503 TELEGRAM_NOT_CONFIGURED case is an environment problem, not a
-    // credential problem, so it gets an actionable explanation instead of the
-    // raw error string.
+    /**
+     * Turn an ApiError into something worth reading.
+     *
+     * The credential-specific branches (bad password, bad 2FA code, a consumed
+     * reset file) are gone with the login screens they belonged to. What is left
+     * is the transport half, which is still worth having: a request that never
+     * reached the server and a request that was rate-limited are both failures a
+     * user can act on, and neither reads well as a raw fetch error.
+     */
     function describeAuthError(err) {
-      if (err && err.code === 'TELEGRAM_NOT_CONFIGURED') {
-        return '2FA is enabled for this account, but this server has no Telegram bot credentials '
-          + 'configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID are placeholders), so the code cannot '
-          + 'be delivered. Ask an administrator to configure Telegram, or use an emergency break-glass '
-          + 'recovery key.';
-      }
-      if (err && err.code === 'INVALID_CREDENTIALS') {
-        return 'Invalid username or password.';
-      }
-      if (err && err.code === 'INVALID_2FA') {
-        return 'Invalid or expired code. Request a new one and try again.';
-      }
-      // The server sends ONE message for every reset failure (unknown, used,
-      // expired, malformed) so an attacker cannot tell them apart. The UI
-      // re-uses that same wording rather than inventing a more specific one:
-      // a client-side message that said "this one expired" where the server
-      // said "invalid" would hand the distinction straight back to an attacker
-      // reading the response in devtools.
-      if (err && err.code === 'INVALID_RESET_TOKEN') {
-        return (err.message || 'This reset file is invalid, expired, or already used.')
-          + ' Ask an administrator for a new one.';
-      }
-      if (err && err.code === 'WEAK_PASSWORD') {
-        return (err.message || 'Password must be at least 8 characters');
-      }
-      if (err && err.code === 'PASSWORD_MISMATCH') {
-        return 'The two passwords do not match.';
-      }
       if (err && err.status === 0) {
         return 'Cannot reach the CMS server. Check that it is running, then try again.';
       }
@@ -3210,361 +2722,29 @@
       return (err && err.message) || 'Something went wrong.';
     }
 
-    function showLogin() {
-      showScreen('login');
-      document.getElementById('login-form').reset();
-      document.getElementById('login-error').style.display = 'none';
-      // The "no email is sent" explainer is tied to the login screen, so
-      // returning here puts it back the way it was found.
-      const help = document.getElementById('reset-help');
-      if (help) help.classList.add('is-hidden');
-      // Leaving the reset screen drops the pasted token. A user who abandons
-      // the flow and walks away must not leave a live credential sitting in
-      // this tab's memory.
-      clearResetState();
-    }
-
     /**
-     * The "Forgot your password?" explainer.
+     * The dashboard is the app. There is no longer anything to switch away
+     * from, so this no longer "reveals" anything — #screen-dashboard is
+     * visible in the markup and the boot splash is what covers it until the
+     * data is in. What is left here is the one piece of DOM setup that used
+     * to ride along on the screen switch, kept as its own function so the
+     * explanation below stays attached to the call that needs it.
      *
-     * Its accuracy is the whole point. The obvious copy for a password-reset
-     * entry point is "we'll email you a link" — and it would be a lie here,
-     * because this server has no mail transport at all. A user who is told to
-     * check their inbox will check their inbox, find nothing, and conclude the
-     * account is unrecoverable. So it says what actually happens: an admin
-     * generates a one-time file and hands it over.
+     * Nothing calls switchTab() on the way in, so before this runs no filter
+     * control has ever been given its display rules. #status-filter gets away
+     * with it (no inline display:none in the markup) and #location-filter with
+     * it (props-only, so hidden is the right default), but #fandom-filter and
+     * #brand-filter must be SHOWN by code on the default tab and so would stay
+     * at their markup `display: none` forever. That is the whole of the "they
+     * only appear after I switch tabs" bug this call prevents. It also rebuilds
+     * and prunes their options against the costumes init() has just fetched.
      *
-     * Built from static strings with no interpolation, so there is nothing here
-     * for escapeHtml to be responsible for.
+     * Deliberately NOT in loadAllData(): that also runs after every create,
+     * edit and delete, and syncFilterControls() resets the filter selections --
+     * which would wipe an active filter every time the user saved a costume.
      */
-    function showResetHelp() {
-      const help = document.getElementById('reset-help');
-      if (!help) return;
-      help.textContent = '';
-      const p1 = document.createElement('p');
-      p1.style.margin = '0 0 8px';
-      p1.appendChild(document.createTextNode('There is no email on this server. To reset your password, an '));
-      const strong = document.createElement('strong');
-      strong.textContent = 'administrator generates a one-time reset file';
-      p1.appendChild(strong);
-      p1.appendChild(document.createTextNode(' and gives it to you directly. You paste that file below and choose a new password. The file works once, then it stops working — delete it once you have used it.'));
-      const p2 = document.createElement('p');
-      p2.style.margin = '8px 0 0';
-      p2.textContent = 'If you use the emergency recovery key on the Security tab, that is a different thing and it still needs you to be signed in already.';
-      help.appendChild(p1);
-      help.appendChild(p2);
-      help.classList.remove('is-hidden');
-    }
-
-    // ==========================================================================
-    // PASSWORD RESET (user-facing)
-    // ==========================================================================
-    /** Forget any pasted token. Called on entering login and on a fresh start. */
-    function clearResetState() {
-      state.resetToken = null;
-      state.resetUsername = null;
-      state.resetExpiresAt = null;
-    }
-
-    /** Show the reset screen at step 1, with any previous attempt discarded. */
-    function showReset() {
-      showScreen('reset');
-      clearResetState();
-      document.getElementById('reset-token-form').reset();
-      document.getElementById('reset-password-form').reset();
-      document.getElementById('reset-token-form').style.display = '';
-      document.getElementById('reset-password-form').style.display = 'none';
-      document.getElementById('reset-token-error').style.display = 'none';
-      document.getElementById('reset-password-error').style.display = 'none';
-      document.getElementById('reset-subtitle').textContent = 'Paste the reset file an administrator gave you.';
-      document.getElementById('reset-token').focus();
-    }
-
-    /**
-     * Pull the token out of whatever was pasted.
-     *
-     * The common case is the ENTIRE .txt file, because that is what a user has
-     * and what people actually paste — nobody selects the last line on purpose.
-     * So: a single line is used as-is, and anything multi-line has its LAST
-     * non-empty line taken as the token, which discards the header, the account
-     * name, the expiry line and the blank lines above it.
-     *
-     * This is a convenience, not a security control. Everything it produces is
-     * still validated by the server against a stored hash, so a wrong guess is
-     * indistinguishable from a forged token. The server repeats the same parse
-     * so that pasting a whole file into the API works too, which is what makes
-     * this testable from curl.
-     */
-    function extractResetToken(raw) {
-      const text = clean(raw).trim();
-      if (!text) return '';
-      if (text.indexOf('\n') === -1 && text.indexOf('\r') === -1) return text;
-      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-      return lines.length ? lines[lines.length - 1] : '';
-    }
-
-    /**
-     * Step 1: check the file, then reveal the new-password form.
-     *
-     * Both reset calls go through api() with `auth: false`. That flag is what
-     * makes api() skip the Authorization header AND skip the 401-refresh path —
-     * correct here, because a signed-in admin clicking this in another tab
-     * should not have their (irrelevant) session attached to a public
-     * unauthenticated request.
-     */
-    async function handleResetToken(e) {
-      e.preventDefault();
-      const pasted = document.getElementById('reset-token').value;
-      const token = extractResetToken(pasted);
-
-      document.getElementById('reset-token-error').style.display = 'none';
-      if (!token) {
-        showAuthError('reset-token-error', new ApiError('Paste the reset file or the token from it.', 400, 'NO_TOKEN'));
-        return;
-      }
-      showLoading(true);
-      try {
-        const result = await api('/api/auth/password-reset/validate', {
-          method: 'POST',
-          auth: false,
-          body: JSON.stringify({ token: token })
-        });
-
-        state.resetToken = token;
-        state.resetUsername = clean(result && result.username);
-        state.resetExpiresAt = clean(result && result.expiresAt);
-
-        // The username is DB-derived, so it goes in as textContent — never
-        // interpolated into the .reset-note innerHTML.
-        document.getElementById('reset-username').textContent = state.resetUsername || '(unknown)';
-
-        const expiry = Date.parse(state.resetExpiresAt);
-        const expiryNote = document.getElementById('reset-expiry-note');
-        if (!Number.isNaN(expiry)) {
-          expiryNote.textContent = 'This file expires at ' + state.resetExpiresAt.replace('T', ' ').replace(/\.\d+Z$/, ' UTC') + '.';
-        } else {
-          expiryNote.textContent = '';
-        }
-
-        // Step 1 done. The pasted text is no longer needed on screen, so the
-        // textarea is cleared and only the token itself is kept in memory.
-        document.getElementById('reset-token').value = '';
-        document.getElementById('reset-token-form').style.display = 'none';
-        document.getElementById('reset-password-form').style.display = '';
-        document.getElementById('reset-subtitle').textContent = 'Choose a new password.';
-        document.getElementById('reset-new-password').focus();
-      } catch (err) {
-        showAuthError('reset-token-error', err);
-      } finally {
-        showLoading(false);
-      }
-    }
-
-    /**
-     * Step 2: spend the token.
-     *
-     * NO AUTO-LOGIN, deliberately. The server returns no session and this does
-     * not manufacture one; the user is returned to the login screen and has to
-     * sign in. That is both the safer behaviour (a token pasted on a shared
-     * machine must not leave a session behind) and the only real proof that the
-     * new password works.
-     *
-     * Only `token` and `newPassword` are sent. The server reads only those two
-     * fields, so there is nothing here that could set a role.
-     */
-    async function handleResetPassword(e) {
-      e.preventDefault();
-      const newPassword = document.getElementById('reset-new-password').value;
-      const confirmPassword = document.getElementById('reset-confirm-password').value;
-
-      document.getElementById('reset-password-error').style.display = 'none';
-
-      // The same rule the register form uses, checked client-side purely to
-      // avoid a pointless round trip. The server re-checks it; this is the
-      // second lock on the same door, not the only one.
-      if (newPassword.length < 8) {
-        showAuthError('reset-password-error', new ApiError('Password must be at least 8 characters', 400, 'WEAK_PASSWORD'));
-        return;
-      }
-      if (newPassword !== confirmPassword) {
-        showAuthError('reset-password-error', new ApiError('The two passwords do not match.', 400, 'PASSWORD_MISMATCH'));
-        return;
-      }
-      if (!state.resetToken) {
-        showAuthError('reset-password-error', new ApiError('Your reset attempt expired. Please paste the file again.', 400, 'NO_TOKEN'));
-        return;
-      }
-
-      showLoading(true);
-      try {
-        await api('/api/auth/password-reset', {
-          method: 'POST',
-          auth: false,
-          body: JSON.stringify({ token: state.resetToken, newPassword: newPassword })
-        });
-
-        // Nothing secret is left behind: the fields are cleared and the token
-        // dropped from state before the screen is torn down.
-        document.getElementById('reset-password-form').reset();
-        clearResetState();
-        showScreen('login');
-        document.getElementById('login-error').style.display = 'none';
-        showToast('Password reset. Delete the reset file, then sign in.', 'success');
-        document.getElementById('login-username').focus();
-      } catch (err) {
-        showAuthError('reset-password-error', err);
-      } finally {
-        showLoading(false);
-      }
-    }
-
-    function showOtp(info) {
-      showScreen('otp');
-      document.getElementById('otp-form').reset();
-      document.getElementById('otp-error').style.display = 'none';
-      const delivery = info && info.delivery;
-      document.querySelector('#screen-otp .auth-header p').textContent =
-        delivery === 'simulated'
-          ? 'A 6-digit code was generated for this server (Telegram is not configured, so it was not actually delivered).'
-          : 'A 6-digit code has been sent to your Telegram.';
-      document.getElementById('otp-code').focus();
-    }
-
     function showDashboard() {
-      showScreen('dashboard');
-      // The three ways into the dashboard (password login, 2FA verify, and a
-      // session restore on refresh) all arrive here, and NONE of them goes
-      // through switchTab() -- so before this, syncFilterControls() never ran
-      // and no filter control was ever given its display rules. #status-filter
-      // got away with it (no inline display:none in the markup) and
-      // #location-filter with it (props-only, so hidden is the right default),
-      // but #fandom-filter and #brand-filter must be SHOWN by code on the
-      // default tab and so stayed at their markup `display: none` until the user
-      // clicked a tab. That is the whole of the "they only appear after I switch
-      // tabs" bug. This also rebuilds and prunes their options against the
-      // costumes loadAllData() has just fetched.
-      //
-      // Deliberately NOT in loadAllData(): that also runs after every create,
-      // edit and delete, and syncFilterControls() resets the filter selections --
-      // which would wipe an active filter every time the user saved a costume.
       syncFilterControls();
-    }
-
-    // ==========================================================================
-    // AUTH FLOW
-    // ==========================================================================
-    async function handleLogin(e) {
-      e.preventDefault();
-      const form = e.target;
-      const username = form.username.value.trim();
-      const password = form.password.value;
-
-      document.getElementById('login-error').style.display = 'none';
-      showLoading(true);
-
-      try {
-        const result = await api('/api/auth/login', {
-          method: 'POST',
-          auth: false,
-          body: JSON.stringify({ username: username, password: password })
-        });
-
-        if (result && result.require2FA) {
-          // 2FA path: this response carries NO access token, only a tempToken.
-          state.tempToken = result.tempToken;
-          sessionStorage.setItem(TEMP_TOKEN_KEY, result.tempToken);
-          showOtp(result);
-          showToast('Verification code requested.', 'info');
-        } else {
-          storeSession(result);
-          await loadAllData();
-          showDashboard();
-          showToast('Welcome back, ' + ((result.user && result.user.username) || 'user') + '!', 'success');
-        }
-      } catch (err) {
-        showAuthError('login-error', err);
-      } finally {
-        showLoading(false);
-      }
-    }
-
-    async function handleOtpVerify(e) {
-      e.preventDefault();
-      const otp = String(new FormData(e.target).get('otp') || '').trim();
-      const tempToken = state.tempToken || sessionStorage.getItem(TEMP_TOKEN_KEY);
-
-      if (!tempToken) {
-        showAuthError('otp-error', new ApiError('Your sign-in attempt expired. Please sign in again.', 401, 'NO_TEMP_TOKEN'));
-        return;
-      }
-
-      document.getElementById('otp-error').style.display = 'none';
-      showLoading(true);
-
-      try {
-        const result = await api('/api/auth/2fa/verify', {
-          method: 'POST',
-          auth: false,
-          body: JSON.stringify({ tempToken: tempToken, otp: otp })
-        });
-
-        state.tempToken = null;
-        sessionStorage.removeItem(TEMP_TOKEN_KEY);
-        storeSession(result);
-        await loadAllData();
-        showDashboard();
-        showToast('Signed in.', 'success');
-      } catch (err) {
-        showAuthError('otp-error', err);
-      } finally {
-        showLoading(false);
-      }
-    }
-
-    async function resendOtp() {
-      const tempToken = state.tempToken || sessionStorage.getItem(TEMP_TOKEN_KEY);
-      if (!tempToken) {
-        showToast('Your sign-in attempt expired. Please sign in again.', 'error');
-        return;
-      }
-      showLoading(true);
-      try {
-        const result = await api('/api/auth/2fa/resend', {
-          method: 'POST',
-          auth: false,
-          body: JSON.stringify({ tempToken: tempToken })
-        });
-        showToast(result.message || 'A new code was sent.', 'success');
-      } catch (err) {
-        showToast(describeAuthError(err), 'error');
-      } finally {
-        showLoading(false);
-      }
-    }
-
-    async function logout() {
-      const ok = await confirmAction({
-        title: 'Sign out?',
-        message: 'You will need your password (and a Telegram code, if 2FA is on) to sign back in.',
-        confirmLabel: 'Sign out'
-      });
-      if (!ok) return;
-
-      const refreshToken = state.refreshToken || sessionStorage.getItem(REFRESH_TOKEN_KEY);
-      try {
-        if (state.token) {
-          await api('/api/auth/logout', {
-            method: 'POST',
-            body: JSON.stringify({ refreshToken: refreshToken })
-          });
-        }
-      } catch (err) {
-        console.warn('Server-side logout failed (ignored):', err.message);
-      } finally {
-        clearSession();
-        showLogin();
-        showToast('Signed out.', 'info');
-      }
     }
 
     // ==========================================================================
@@ -3619,9 +2799,9 @@
 
     // ==========================================================================
     // DELEGATED GRID EVENTS
-    // Bound once at boot. The previous code called bindGridEvents() from init()
-    // but the function did not exist anywhere in the file, so every page load
-    // threw ReferenceError and the session-restore branch never ran.
+    // Bound once at boot, and BEFORE loadAllData(): every card action is
+    // dispatched by these listeners, so a grid that rendered before they
+    // existed would have dead buttons on it.
     // ==========================================================================
     function bindGridEvents() {
       ['costumes-grid', 'props-grid', 'lenses-grid', 'brands-grid', 'fandoms-grid'].forEach(gridId => {
@@ -3637,15 +2817,21 @@
           // THE SINGLE CLIENT-SIDE CHOKE POINT FOR EVERY CARD ACTION.
           // Every renderer in this file emits `data-action`, and this one
           // delegated listener is the only thing that turns that attribute into
-          // a mutation. Gating HERE is what makes the role check complete: a
+          // a mutation. Gating HERE is what makes the write check complete: a
           // control a renderer failed to hide still cannot reach its handler.
           // Hiding (applyRoleVisibility) is the UX half; this is the half that
-          // refuses. Neither replaces the server's requireWriteAccess().
+          // refuses.
           //
-          // 'open-gallery' is deliberately absent — viewing photos is a read,
-          // and a viewer must be able to browse the gallery in full.
+          // DEAD AS WRITTEN, DELIBERATELY. canWrite() is now constant-true, so
+          // this never refuses and the toast below is unreachable — that is the
+          // point of keeping the check rather than deleting it: it is the one
+          // place every card mutation passes through, so reinstating roles is a
+          // change to canWrite() alone and no renderer has to be touched.
+          //
+          // 'open-gallery' is deliberately absent from WRITE_ACTIONS: viewing
+          // photos is a read, and browsing the gallery is always allowed.
           if (WRITE_ACTIONS.indexOf(action) !== -1 && !canWrite()) {
-            showToast('Your account is read-only, so that action is not available.', 'error');
+            showToast('This action is not available.', 'error');
             return;
           }
 
@@ -3793,7 +2979,7 @@
         syncFilterDimensionSelects();
         renderCostumes(getFilteredCostumes());
       } catch (err) {
-        if (err.status === 401) return;   // forceLogout already ran
+        if (err.status === 401) return;   // a proxy refusal: leave the grid as it was
         renderEmptyState('costumes-grid', {
           icon: '⚠️',
           title: 'Could not load costumes',
@@ -3811,7 +2997,7 @@
         state.props = Array.isArray(data.props) ? data.props : [];
         renderProps(getFilteredProps());
       } catch (err) {
-        if (err.status === 401) return;
+        if (err.status === 401) return;   // a proxy refusal, not a data failure
         renderEmptyState('props-grid', {
           icon: '⚠️',
           title: 'Could not load props',
@@ -3829,7 +3015,7 @@
         state.lenses = Array.isArray(data.lenses) ? data.lenses : [];
         renderLenses(getFilteredLenses());
       } catch (err) {
-        if (err.status === 401) return;
+        if (err.status === 401) return;   // a proxy refusal, not a data failure
         renderEmptyState('lenses-grid', {
           icon: '⚠️',
           title: 'Could not load lenses',
@@ -3845,13 +3031,14 @@
     // ==========================================================================
     // These two lists back the brand and fandom <select>s on the add/edit
     // costume modals and the "Reference Lists" tab. A 401 is swallowed for the
-    // same reason as everywhere else: forceLogout() has already run.
+    // same reason as everywhere else: the reverse proxy refused the request,
+    // which is not a data failure the grid can say anything useful about.
     async function loadBrands() {
       try {
         const data = await api('/api/brands');
         state.brands = Array.isArray(data.brands) ? data.brands : [];
       } catch (err) {
-        if (err.status === 401) return;
+        if (err.status === 401) return;   // a proxy refusal, not a data failure
         state.brands = [];
       }
       renderBrands();
@@ -3863,7 +3050,7 @@
         const data = await api('/api/fandoms');
         state.fandoms = Array.isArray(data.fandoms) ? data.fandoms : [];
       } catch (err) {
-        if (err.status === 401) return;
+        if (err.status === 401) return;   // a proxy refusal, not a data failure
         state.fandoms = [];
       }
       renderFandoms();
@@ -4141,9 +3328,10 @@
             ? '        <a href="' + escapeHtml(store) + '" target="_blank" rel="noopener noreferrer" style="font-size:0.72rem; color:var(--info);">Store ↗</a>'
             : '',
           '      </div>',
-          // All three are writes, so a viewer gets an empty group rather than a
-          // removed one — the card is a flex row and dropping the group would
-          // leave the name stretching oddly. The dispatcher still refuses them.
+          // All three are writes, so the group is conditional. When it is not
+          // emitted, the card is a flex row and dropping the group would leave
+          // the name stretching oddly — hence the empty-group branch below
+          // rather than an omission.
           writable
             ? '      <div style="display:flex; gap:6px; flex:0 0 auto;">'
               + '<button type="button" class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px;" data-action="rename-brand" data-id="' + idAttr(brand.id) + '" data-name="' + escapeHtml(name) + '">Rename</button>'
@@ -4188,10 +3376,8 @@
       await Promise.all([loadCostumes(), loadProps(), loadLenses(), loadBrands(), loadFandoms()]);
       updateMetrics();
       populateCostumeSelects();
-      updateSecurityTab();
-      // Runs AFTER the renderers, so it also corrects anything they drew while
-      // a different role was active — e.g. a tab restored from sessionStorage
-      // before /api/auth/profile refreshed state.user.
+      // No-op since the role ladder was removed, but it still runs after the
+      // renderers so a reinstated role would be applied in the same place.
       applyRoleVisibility();
     }
 
@@ -4274,13 +3460,13 @@
         const status = clean(c.status).toUpperCase() || 'IN_POSSESSION';
         const statusClass = 'badge-' + status.toLowerCase();
         const images = costumeImages(c);
-        // The real URL goes in data-image-src, NOT in src: /uploads sits behind
-        // the authenticated static mount and an <img> cannot send a bearer
-        // header, so hydrateAuthenticatedImages() fetches the bytes through api()
-        // and swaps in an object URL. escapeHtml still guards the attribute, and
-        // safeUrl (applied inside parseImageUrls) has already rejected any URL
-        // that is not http(s) or a rooted path. See "Authenticated image
-        // delivery" above.
+        // The real URL goes in data-image-src, NOT in src: the fetch/Blob/object-URL
+        // pipeline exists so a decoded image can sit behind a fixed-size
+        // placeholder while the grid re-renders, and an <img> cannot do that, so
+        // hydrateAuthenticatedImages() fetches the bytes through api() and swaps
+        // in an object URL. escapeHtml still guards the attribute, and safeUrl
+        // (applied inside parseImageUrls) has already rejected any URL that is not
+        // http(s) or a rooted path. See "IMAGE DELIVERY" above.
         const thumb = images.length
           ? '<img src="' + IMAGE_LOADING_PIXEL + '" data-image-src="' + escapeHtml(images[0]) + '" alt="' + escapeHtml(clean(c.character) || 'Costume') + '" loading="lazy">'
           : MEDIA_PLACEHOLDER_HTML;
@@ -4324,10 +3510,10 @@
         }
 
         // Write controls. The upload button is a `data-write-only` element so
-        // applyRoleVisibility() hides it for a viewer; the dispatcher refuses
-        // the action too. `canWrite()` is read once per card rather than per
-        // button, so the whole card is consistent even if the role changed
-        // between two renders.
+        // applyRoleVisibility() can hide it; the dispatcher refuses the action
+        // too. `canWrite()` is read once per card rather than per button, so
+        // the whole card is consistent even if the answer changed between two
+        // renders.
         const writable = canWrite();
 
         return [
@@ -4365,8 +3551,8 @@
           notes ? '<p style="font-size:0.82rem; color:var(--text-muted); margin-top:10px;">' + escapeHtml(notes) + '</p>' : '',
           '  </div>',
           // .card-actions is `justify-content: space-between` with two
-          // children. For a viewer the right-hand group is emitted as an EMPTY
-          // div rather than removed, which keeps the left anchor (the
+          // children. When the right-hand group is not emitted it is written as
+          // an EMPTY div rather than removed, which keeps the left anchor (the
           // "Reference ↗" link, or its placeholder span) on the same side and
           // the row from collapsing to full width.
           '  <div class="card-actions">',
@@ -4419,9 +3605,9 @@
           '    </div>',
           notes ? '<p style="font-size:0.85rem; color:var(--text-muted); margin-top:8px;">' + escapeHtml(notes) + '</p>' : '',
           '  </div>',
-          // The right-hand group becomes an EMPTY div for a viewer rather than
-          // being removed, so the `space-between` row keeps its shape and the
-          // left anchor stays put. Same reasoning as renderCostumes().
+          // The right-hand group becomes an EMPTY div rather than being removed,
+          // so the `space-between` row keeps its shape and the left anchor stays
+          // put. Same reasoning as renderCostumes().
           '  <div class="card-actions">',
           '    <span></span>',
           writable
@@ -4493,7 +3679,7 @@
         }
 
         // "Mark as Opened" issues PATCH /api/lenses/:id/open, so it is a write
-        // and is suppressed for a viewer along with Edit/Delete.
+        // and is gated on the same answer as Edit/Delete.
         const showOpenButton = writable
           && (clean(l.isOpened) === '0' || (!toBool(l.isOpened) && status === 'UNOPENED'));
 
@@ -5101,16 +4287,6 @@
     }
 
     function switchTab(tab) {
-      // The Users tab is admin-only. Refusing it HERE — not merely hiding its
-      // button — is what makes the restriction hold for a deep link, a stale
-      // tab, or a console call. The endpoint is admin-guarded as well; this
-      // half is what stops an admin panel being rendered to someone who can
-      // only ever see errors in it.
-      if (tab === 'users' && !isAdmin()) {
-        showToast('Only an administrator can manage users and roles.', 'error');
-        tab = 'costumes';
-      }
-
       state.currentTab = tab;
       document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.tab === tab);
@@ -5120,13 +4296,9 @@
       document.getElementById('tab-props').style.display = tab === 'props' ? 'block' : 'none';
       document.getElementById('tab-lenses').style.display = tab === 'lenses' ? 'block' : 'none';
       document.getElementById('tab-lists').style.display = tab === 'lists' ? 'block' : 'none';
-      document.getElementById('tab-users').style.display = tab === 'users' ? 'block' : 'none';
-      document.getElementById('tab-security').style.display = tab === 'security' ? 'block' : 'none';
       // The filter bar only describes costumes/props/lenses, so it is hidden on
-      // the non-inventory tabs — now three of them (lists, users, security)
-      // rather than two.
-      document.getElementById('filter-bar').style.display =
-        (tab === 'security' || tab === 'lists' || tab === 'users') ? 'none' : 'flex';
+      // the Reference Lists tab rather than shown over a panel it cannot filter.
+      document.getElementById('filter-bar').style.display = tab === 'lists' ? 'none' : 'flex';
 
       // The new costumes-only controls (#fandom-filter, #brand-filter and the
       // Clear button) are NOT toggled inline here -- they are handled by the
@@ -5136,31 +4308,29 @@
       // bar without a matching hide rule and leaking onto Props and Lenses.
       syncFilterControls();
       filterItems();
-
-      // LAZY LOAD. The user list is fetched the first time an admin opens this
-      // tab, NOT on every dashboard load: a viewer or a curator would
-      // otherwise pay for a guaranteed 403 on every sign-in for a panel they
-      // can never see. Re-opening the tab reuses the cached list.
-      if (tab === 'users' && !state.usersLoaded && !state.usersLoading) loadUsers();
-
-      // Same lazy-load reasoning for the CORS editor: it is admin-only, so a
-      // viewer or curator would otherwise pay for a guaranteed 403 on every
-      // single sign-in by opening a tab they have no use for. The isAdmin()
-      // check is the client-side half; authorize('admin') on the route is the
-      // half that enforces.
-      if (tab === 'security' && isAdmin() && !state.corsLoaded && !state.corsLoading) {
-        loadCorsSettings();
-      }
     }
 
     // ==========================================================================
-    // ADMIN — CORS ALLOWED ORIGINS (Security tab)
+    // CORS ALLOWED ORIGINS
     // ==========================================================================
+    // NOTE: the editor UI that used to live here was in the Security tab and was
+    // removed along with it. The functions below are left in place deliberately —
+    // they are the only client half of the /api/settings/cors contract, which
+    // still exists server-side and must not change. Every DOM lookup in here is
+    // `if (!el) return`-guarded, so with the panel gone they are inert rather
+    // than broken, and moving this editor to a new tab is a matter of restoring
+    // the markup and the switchTab() call.
+    //
+    // The six elements they write to (cors-source, cors-origin-list,
+    // cors-env-default, cors-origin-input, cors-origin-error, cors-message) are
+    // exactly the ids the removed panel held, which is why those six guards
+    // exist at all and are not defensive noise.
+    //
     // DOM APIs throughout, never innerHTML. Two reasons, and both matter here:
     // an origin is attacker-influenced text, and every chip needs its own
     // live click listener for the remove button. escapeHtml() would handle the
     // first; it does nothing for the second. Building the node once and
-    // binding the listener to it is the same approach buildUserRow() takes.
+    // binding the listener to it solves both.
     //
     // The `maxOrigins` cap is duplicated from the server on purpose: the server
     // is the authority and will reject anything over the limit with a 400, but
@@ -5207,7 +4377,7 @@
       // choice is visible and informed rather than silent.
       if (/^http:\/\//i.test(origin)) {
         const warn = makeEl('span', 'cors-chip-warn', 'unencrypted');
-        warn.title = 'This origin is plain HTTP. Traffic, including your bearer token, travels unencrypted.';
+        warn.title = 'This origin is plain HTTP. All traffic to it travels unencrypted.';
         chip.appendChild(warn);
       }
 
@@ -5392,342 +4562,6 @@
       });
     }
 
-    // ==========================================================================
-    // ADMIN — USERS & ROLES
-    // ==========================================================================
-    function showUsersError(message) {
-      const box = document.getElementById('users-error');
-      if (!box) return;
-      box.textContent = message || '';
-      box.style.display = message ? 'block' : 'none';
-    }
-
-    /**
-     * Build one user row.
-     *
-     * DOM APIs, never innerHTML. A username and an email are both chosen at
-     * signup, so they are exactly the kind of value the rest of this file
-     * escapes — but here there is a second reason: each row needs a live
-     * `change` listener, and a template string would mean re-binding every
-     * listener on every repaint. Building the node once and attaching the
-     * listener to it is both safer and simpler.
-     */
-    function buildUserRow(user, assignableRoles) {
-      const row = makeEl('div', 'user-row');
-      const isSelf = !!(state.user && clean(user.id) === clean(state.user.id));
-      if (isSelf) row.classList.add('is-self');
-
-      const identity = makeEl('div', 'user-identity');
-      const nameRow = makeEl('div', 'user-name');
-      nameRow.appendChild(document.createTextNode(clean(user.username) || '(no username)'));
-      if (isSelf) nameRow.appendChild(makeEl('span', 'tag-chip active', 'this is you'));
-      identity.appendChild(nameRow);
-
-      const metaBits = [];
-      if (clean(user.email)) metaBits.push(clean(user.email));
-      metaBits.push('2FA ' + (toBool(user.telegram2FAEnabled) ? 'on' : 'off'));
-      if (clean(user.createdAt)) metaBits.push('joined ' + clean(user.createdAt).split('T')[0]);
-      identity.appendChild(makeEl('div', 'user-meta', metaBits.join(' · ')));
-      row.appendChild(identity);
-
-      const select = document.createElement('select');
-      select.className = 'user-role-select';
-      // THE OPTIONS COME FROM THE SERVER'S `assignableRoles`, never from a list
-      // hardcoded here. That is the entire point of the field: the dropdown
-      // cannot offer a role the PATCH route would reject with 400, and a role
-      // added server-side appears here with no frontend change.
-      const roles = Array.isArray(assignableRoles) ? assignableRoles : [];
-      roles.forEach(role => {
-        const option = document.createElement('option');
-        option.value = clean(role);
-        option.textContent = clean(role);
-        select.appendChild(option);
-      });
-
-      const currentRole = clean(user.role);
-      // A stored role outside the allowlist (legacy data) is still shown, as a
-      // one-off option, so the select reflects reality instead of silently
-      // displaying the first role in the list.
-      if (currentRole && roles.indexOf(currentRole) === -1) {
-        const orphan = document.createElement('option');
-        orphan.value = currentRole;
-        orphan.textContent = currentRole + ' (current)';
-        select.appendChild(orphan);
-      }
-      select.value = currentRole;
-
-      // The server refuses a self-change with 400, so the control is disabled
-      // rather than offered and then rejected. This is the one role change
-      // that is ALWAYS refused, so offering it would be pure noise.
-      select.disabled = isSelf;
-      if (isSelf) select.title = 'You cannot change your own role.';
-
-      select.addEventListener('change', () => changeUserRole(user, select.value));
-      row.appendChild(select);
-
-      // "Reset password" — mints a one-time reset file for THIS account.
-      //
-      // The button is marked data-write-only so applyRoleVisibility() hides it
-      // from anyone who is not a writer, exactly like the other admin actions,
-      // rather than introducing a second visibility rule. The click handler
-      // ALSO re-checks isAdmin() — see requestPasswordReset() — because a
-      // hidden button is still reachable from the keyboard, from devtools, or
-      // from a row rendered before the role changed. Hiding is presentation;
-      // refusing the call is the control.
-      const resetBtn = document.createElement('button');
-      resetBtn.type = 'button';
-      resetBtn.className = 'btn btn-secondary';
-      resetBtn.style.padding = '6px 12px';
-      resetBtn.style.fontSize = '0.8rem';
-      resetBtn.setAttribute('data-write-only', '');
-      // DB-derived text via textContent, never innerHTML.
-      resetBtn.textContent = 'Reset password';
-      resetBtn.title = 'Generate a one-time password reset file for this account.';
-      resetBtn.addEventListener('click', () => requestPasswordReset(user));
-      row.appendChild(resetBtn);
-
-      return row;
-    }
-
-    /** Paint the users tab from whatever loadUsers() last fetched. */
-    function renderUsers() {
-      const list = document.getElementById('users-list');
-      if (!list) return;
-      list.innerHTML = '';
-      // A repaint of the list clears the generated-file panel too. The token in
-      // it is single-use and shown once by design; leaving it on screen after
-      // the list is re-fetched (which loadUsers(true) does after a role change,
-      // for instance) would leave a live credential sitting in a panel the
-      // admin has stopped looking at.
-      clearResetFilePanel();
-
-      if (!state.users.length) {
-        list.appendChild(makeEl('p', 'user-meta', 'No accounts were returned.'));
-        return;
-      }
-      state.users.forEach(user => list.appendChild(buildUserRow(user, state.assignableRoles)));
-    }
-
-    /**
-     * GET /api/auth/users — admin only.
-     *
-     * The response deliberately omits passwordHash and twoFactorSecret, so
-     * nothing sensitive can reach the DOM even by accident.
-     */
-    async function loadUsers(force) {
-      if (!isAdmin()) return;                 // the endpoint is admin-only too
-      if (state.usersLoading) return;
-      if (state.usersLoaded && !force) return; // lazy: once per session
-
-      state.usersLoading = true;
-      showUsersError('');
-      try {
-        const data = await api('/api/auth/users');
-        state.users = Array.isArray(data.users) ? data.users : [];
-        state.assignableRoles = Array.isArray(data.assignableRoles) ? data.assignableRoles : [];
-        state.usersLoaded = true;
-        renderUsers();
-      } catch (err) {
-        // describeAuthError() is the shared ApiError translator. A 403 here
-        // means this session's token no longer carries the admin role, which is
-        // worth saying plainly instead of showing a generic failure.
-        showUsersError(describeAuthError(err));
-      } finally {
-        state.usersLoading = false;
-      }
-    }
-
-    /**
-     * PATCH /api/auth/users/:id/role.
-     *
-     * On failure the panel is re-rendered from the server's own state rather
-     * than left showing the rejected choice — otherwise the dropdown would
-     * claim a role the database does not have.
-     */
-    async function changeUserRole(user, role) {
-      if (!isAdmin() || !canWrite()) {
-        showUsersError('You are not permitted to change roles.');
-        renderUsers();
-        return;
-      }
-      const id = clean(user && user.id);
-      if (!id || !role) return;
-      if (role === clean(user.role)) return;
-
-      try {
-        await api('/api/auth/users/' + encodeURIComponent(id) + '/role', {
-          method: 'PATCH',
-          body: JSON.stringify({ role: role })
-        });
-        showUsersError('');
-        // Re-read rather than patching the local copy: the server is the only
-        // authority on what a role change actually did, and it may have
-        // refused for a reason the dropdown cannot express.
-        await loadUsers(true);
-        showToast('"' + (clean(user.username) || id) + '" is now a ' + role + '.', 'success');
-      } catch (err) {
-        showUsersError(describeAuthError(err));
-        renderUsers();                        // snap the <select> back
-      }
-    }
-
-    // ==========================================================================
-    // ADMIN — MINT A PASSWORD RESET FILE
-    // ==========================================================================
-    /** Hide and empty the generated-file panel, and drop the token from state. */
-    function clearResetFilePanel() {
-      state.resetFileContents = null;
-      state.resetFileName = null;
-      const panel = document.getElementById('reset-file-panel');
-      const box = document.getElementById('reset-file-contents');
-      const name = document.getElementById('reset-file-username');
-      if (box) box.value = '';
-      if (name) name.textContent = '';
-      if (panel) panel.classList.add('is-hidden');
-    }
-
-    /**
-     * POST /api/auth/users/:id/password-reset — mint a one-time file.
-     *
-     * CONFIRMATION IS REQUIRED, because this is destructive in a way the other
-     * admin actions are not: pressing it INVALIDATES any reset file already
-     * outstanding for that account. An admin who mints one "to have a spare" and
-     * then mints another has silently broken the first — the user holding it
-     * will be told it is invalid, with no way to tell that from a typo. The
-     * confirm dialog says so, and the panel warns again afterwards.
-     *
-     * The admin check is repeated here even though the button is already
-     * data-write-only and the server enforces authorize('admin'). Same rule as
-     * changeUserRole(): the hidden button is not the control.
-     */
-    async function requestPasswordReset(user) {
-      if (!isAdmin() || !canWrite()) {
-        showUsersError('You are not permitted to generate reset files.');
-        return;
-      }
-      const id = clean(user && user.id);
-      const username = clean(user && user.username);
-      if (!id) return;
-
-      const ok = await confirmAction({
-        title: 'Generate a reset file?',
-        message: 'This creates a one-time password reset file for "' + (username || id) + '". '
-          + 'Any reset file already generated for this account stops working immediately, '
-          + 'and you will only be able to see the new file once.',
-        confirmLabel: 'Generate file'
-      });
-      if (!ok) return;
-
-      showUsersError('');
-      showLoading(true);
-      try {
-        const data = await api('/api/auth/users/' + encodeURIComponent(id) + '/password-reset', {
-          method: 'POST'
-        });
-
-        // Held in memory only — never sessionStorage, never localStorage. A
-        // token in a persisted store would still be live on a machine the admin
-        // has walked away from.
-        state.resetFileContents = String((data && data.fileContents) || '');
-        // The server already sanitises this for a filename, but it is still a
-        // value from the wire, so it is trimmed to something a download
-        // attribute can safely carry.
-        state.resetFileName = clean(data && data.fileName) || 'cosplay-cms-reset.txt';
-
-        document.getElementById('reset-file-contents').value = state.resetFileContents;
-        document.getElementById('reset-file-username').textContent = username;
-        document.getElementById('reset-file-panel').classList.remove('is-hidden');
-        showToast('Reset file generated. Download it now — it is not retrievable later.', 'success');
-      } catch (err) {
-        showUsersError(describeAuthError(err));
-      } finally {
-        showLoading(false);
-      }
-    }
-
-    /**
-     * Save the generated file, built ENTIRELY IN THE BROWSER.
-     *
-     * Nothing is written on the server. The server returns the text; the .txt
-     * is assembled here from a Blob and handed to the browser through an object
-     * URL, so no file lands in data/uploads (which is served by the image
-     * routes and is not a place to put a credential) and no new endpoint is
-     * needed. The same Blob also backs the "Copy" button, so both read from
-     * one source.
-     *
-     * The object URL is revoked in a finally: a Blob URL pins its blob in
-     * memory until it is revoked or the document unloads, so leaking one per
-     * click would grow the page's footprint for the session.
-     */
-    function downloadResetFile() {
-      const contents = state.resetFileContents;
-      if (!contents) {
-        showToast('Generate a reset file first.', 'error');
-        return;
-      }
-      let url = null;
-      try {
-        // 'text/plain' + a Blob with a trailing newline: the file opens
-        // cleanly in a text editor instead of running the last line into EOF.
-        const blob = new Blob([contents + '\n'], { type: 'text/plain;charset=utf-8' });
-        url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = state.resetFileName || 'cosplay-cms-reset.txt';
-        // Not appended to the document: a synthetic anchor fires a download in
-        // every current browser without ever joining the live DOM.
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      } catch (err) {
-        showToast('Could not create the download. Use Copy instead.', 'error');
-      } finally {
-        if (url) URL.revokeObjectURL(url);
-      }
-    }
-
-    /**
-     * Copy the file text to the clipboard.
-     *
-     * navigator.clipboard needs a secure context; on plain http:// it is simply
-     * absent, so the legacy execCommand path is kept as a fallback rather than
-     * leaving the button dead on the LAN deployment this app actually runs on.
-     */
-    function copyResetFile() {
-      const contents = state.resetFileContents;
-      if (!contents) {
-        showToast('Generate a reset file first.', 'error');
-        return;
-      }
-      const done = () => showToast('Reset file copied to the clipboard.', 'success');
-      const failed = () => showToast('Could not copy automatically — select the text and copy it manually.', 'error');
-
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(contents).then(done, () => legacyCopy(contents, done, failed));
-        return;
-      }
-      legacyCopy(contents, done, failed);
-    }
-
-    function legacyCopy(text, done, failed) {
-      try {
-        const holder = document.createElement('textarea');
-        holder.value = text;
-        // Off-screen but NOT display:none — a hidden element cannot be
-        // selected, and execCommand('copy') copies the selection.
-        holder.setAttribute('readonly', '');
-        holder.style.position = 'fixed';
-        holder.style.top = '-1000px';
-        holder.style.opacity = '0';
-        document.body.appendChild(holder);
-        holder.select();
-        const ok = document.execCommand('copy');
-        document.body.removeChild(holder);
-        ok ? done() : failed();
-      } catch (_) {
-        failed();
-      }
-    }
 
     function populateCostumeSelects() {
       // The add-prop form and the edit-prop form each get their own <select>,
@@ -6563,7 +5397,7 @@
       // Belt and braces: the dispatcher already gates `upload`, but the picker
       // is the thing that reaches the filesystem, so it re-checks for itself.
       if (!canWrite()) {
-        showToast('Your account is read-only, so photos cannot be uploaded.', 'error');
+        showToast('Photos cannot be uploaded.', 'error');
         return;
       }
       state.imageUploadTargetId = costumeId;
@@ -6787,12 +5621,12 @@
     // GALLERY / LIGHTBOX
     // ==========================================================================
     // WHY THE <img> IS NOT src="/uploads/…"
-    // `/uploads` is a guarded mount and an <img> cannot send an Authorization
-    // header, so every photo — thumbnail and lightbox alike — goes through
+    // The photos are not objects the grid can hand straight to the browser, so
+    // every one of them — thumbnail and lightbox alike — goes through
     // loadImageObjectUrl(), the SAME cached, LRU-bounded, revocable pipeline the
     // grid already uses. That reuse is the point: a second delivery path would
-    // mean a second set of object URLs to revoke on logout and a second cache to
-    // bound, and revokeAllImageObjectUrls() only knows about one of them.
+    // mean a second set of object URLs to revoke and a second cache to bound,
+    // and revokeAllImageObjectUrls() only knows about one of them.
     function paintLightboxImage(url) {
       const img = document.getElementById('lightbox-img');
       if (!img) return;
@@ -6833,8 +5667,8 @@
       prev.disabled = g.index <= 0;
       next.disabled = g.index >= total - 1;
 
-      // The delete control is a WRITE. applyRoleVisibility() hides it for a
-      // viewer, and deleteLightboxImage() refuses the call independently.
+      // The delete control is a WRITE. applyRoleVisibility() can hide it, and
+      // deleteLightboxImage() re-checks for itself independently.
       const del = document.getElementById('lightbox-delete');
       if (del) del.classList.toggle('is-hidden', !canWrite());
     }
@@ -6900,7 +5734,7 @@
       const g = state.gallery;
       if (!g) return;
       if (!canWrite()) {
-        showToast('Your account is read-only, so photos cannot be deleted.', 'error');
+        showToast('Photos cannot be deleted.', 'error');
         return;
       }
 
@@ -6973,7 +5807,7 @@
       // openModal() is their only caller, so the check lives here rather than
       // on each button. Hiding a control is presentation; this is the refusal.
       if (!canWrite()) {
-        showToast('Your account is read-only, so nothing can be added or edited.', 'error');
+        showToast('Nothing can be added or edited.', 'error');
         return;
       }
       const form = dialog.querySelector('form');
@@ -6987,89 +5821,15 @@
     }
 
     // ==========================================================================
-    // SECURITY TAB
-    // ==========================================================================
-    async function generateNewBreakGlassKey() {
-      const ok = await confirmAction({
-        title: 'Generate a new emergency key?',
-        message: 'The current recovery key (if you saved one) is invalidated immediately. The new key is shown exactly once.',
-        confirmLabel: 'Generate key'
-      });
-      if (!ok) return;
-
-      try {
-        const result = await api('/api/auth/break-glass/generate', { method: 'POST' });
-        if (!result.recoveryKey) throw new ApiError('The server did not return a recovery key.', 500, 'NO_KEY');
-
-        document.getElementById('break-glass-key').textContent = result.recoveryKey;
-        document.getElementById('break-glass-display').style.display = 'block';
-        showToast('Emergency key generated. Copy it now — it is shown once.', 'success');
-      } catch (err) {
-        showToast('Could not generate a recovery key: ' + err.message, 'error');
-      }
-    }
-
-    function copyBreakGlassKey() {
-      const key = document.getElementById('break-glass-key').textContent;
-      if (!key) {
-        showToast('There is no key to copy yet.', 'error');
-        return;
-      }
-      if (!navigator.clipboard || !navigator.clipboard.writeText) {
-        showToast('Clipboard is unavailable — select and copy the key manually.', 'error');
-        return;
-      }
-      navigator.clipboard.writeText(key).then(
-        () => showToast('Emergency key copied to clipboard.', 'success'),
-        () => showToast('Could not copy automatically — select the key and copy it manually.', 'error')
-      );
-    }
-
-    async function toggle2FA() {
-      const current = !!(state.user && toBool(state.user.telegram2FAEnabled));
-      try {
-        // PATCH (the phase-5 spec verb) with an explicit flag, so the badge
-        // reflects the server response instead of a hardcoded string.
-        const result = await api('/api/auth/2fa/toggle', {
-          method: 'PATCH',
-          body: JSON.stringify({ enabled: !current })
-        });
-        const fromTop = toBool(result.telegram2FAEnabled);
-        const enabled = result.telegram2FAEnabled !== undefined
-          ? fromTop
-          : toBool(result.user && result.user.telegram2FAEnabled);
-        if (result.user) {
-          state.user = Object.assign({}, result.user, { telegram2FAEnabled: enabled });
-          sessionStorage.setItem(USER_KEY, JSON.stringify(state.user));
-        }
-        updateSecurityTab();
-        showToast(result.message || ('2FA ' + (enabled ? 'enabled' : 'disabled')), enabled ? 'success' : 'info');
-      } catch (err) {
-        showToast(describeAuthError(err), 'error');
-      }
-    }
-
-    function updateSecurityTab() {
-      const user = state.user || {};
-
-      const badge = document.getElementById('2fa-status-badge');
-      const enabled = toBool(user.telegram2FAEnabled);
-      badge.textContent = enabled ? 'Enabled' : 'Disabled';
-      badge.className = enabled ? 'badge badge-in_possession' : 'badge badge-wishlist';
-
-      const chatId = clean(user.telegramChatId);
-      document.getElementById('sec-username').textContent = clean(user.username) || '-';
-      document.getElementById('sec-email').textContent = clean(user.email) || '-';
-      document.getElementById('sec-telegram-id').textContent = chatId || 'Not linked';
-      document.getElementById('sec-role').textContent = clean(user.role) || 'user';
-
-      // 2FA can only be enabled when Telegram is configured server-side.
-      document.getElementById('sec-telegram-warning').style.display = (enabled || chatId) ? 'none' : 'block';
-    }
-
-    // ==========================================================================
     // BOOT
     // ==========================================================================
+    /**
+     * The one boot path. There is no session to restore and no screen to choose
+     * between any more, so this binds the delegated listeners, builds the static
+     * swatch row, and loads the dashboard data — in that order, because every
+     * card action is dispatched by the listeners bindGridEvents() attaches and
+     * would be silently dead on a grid that rendered before they existed.
+     */
     async function init() {
       bindGridEvents();
       // The Add Lens modal's swatch row holds no state, so it is built once here
@@ -7077,81 +5837,29 @@
       // openEditLens() because what is "selected" depends on the row being opened.
       renderColorSwatches('add-lens-swatches', 'add-lens-color', 'add-lens-color-native', '', '', 'add');
 
-      const retryButton = document.getElementById('boot-retry-button');
-      if (retryButton) {
-        // Retry re-enters restoreSession() only. init() itself is NOT re-run,
-        // because bindGridEvents() attaches delegated listeners unconditionally
-        // and a second pass would fire every card action twice.
-        retryButton.addEventListener('click', () => { restoreSession(); });
-      }
-
-      await restoreSession();
-    }
-
-    /**
-     * THE BOOT. Decides what the first screen is, and shows nothing until it knows.
-     *
-     * WHY THE LOGIN SCREEN IS NOT SHOWN FIRST. Role is a JWT claim, so a
-     * restore that succeeds is headed for the DASHBOARD, not for login --
-     * login is only the correct answer once the server has actually said the
-     * session is no good. Painting login optimistically and then replacing it
-     * with the dashboard is what produced the login-screen flash on every
-     * refresh, so #screen-login now ships hidden and showLogin() below is the
-     * ONLY thing that reveals it. Do not "simplify" this back to
-     * `showLogin(); if (token) ...`.
-     */
-    async function restoreSession() {
-      // Covers the whole boot with an opaque splash: no screen is visible, so
-      // there is nothing underneath to flash.
+      // The opaque splash is what covers the dashboard during boot. Without it
+      // the user would watch five list requests land on an empty grid, one card
+      // at a time, instead of a single spinner followed by the finished page.
       showBootSplash();
 
-      const savedToken = sessionStorage.getItem(TOKEN_KEY);
-      const savedRefresh = sessionStorage.getItem(REFRESH_TOKEN_KEY);
-      const savedUser = sessionStorage.getItem(USER_KEY);
-
-      if (savedRefresh) state.refreshToken = savedRefresh;
-      if (savedUser) {
-        try { state.user = JSON.parse(savedUser); } catch (_) { state.user = null; }
-      }
-
-      if (!savedToken) {
-        // Genuinely absent -- no request to wait for, so login is now correct.
-        showLoading(false);
-        showLogin();
-        return;
-      }
-
-      state.token = savedToken;
       try {
-        // api() transparently performs ONE silent refresh + single retry if the
-        // access token has expired, so a stale 15-minute-old token still restores.
-        const data = await api('/api/auth/profile');
-        // The backend returns BOTH flat fields and a `user` object.
-        state.user = data.user || data;
-        sessionStorage.setItem(USER_KEY, JSON.stringify(state.user));
         await loadAllData();
         // Dashboard first, overlay second: the splash must be the last thing to
         // go, never the first, or the swap itself is visible.
         showDashboard();
         showLoading(false);
       } catch (err) {
-        // api() reports an unreachable server as status 0 / NETWORK_ERROR. That
-        // says NOTHING about the token -- on a home LAN the server may still be
-        // booting -- so the token is kept and the user is offered a retry
-        // instead of being logged out. A 401, a rejected malformed token, or any
-        // other real response from the server IS a verdict, and only then is the
-        // session discarded and login shown.
-        const transient = err && err.status === 0;
-        if (transient) {
-          console.warn('Session restore could not reach the server:', err.message);
-          showBootRetry('Could not reach the server. Your session has been kept — retry when it is up.');
-          return;
+        // api() reports an unreachable server as status 0 / NETWORK_ERROR. On a
+        // home LAN the box may simply not have finished booting, which says
+        // nothing about anything else — so this is the one case worth offering a
+        // retry for. Any real response from the server is a verdict: show it.
+        console.warn('Dashboard load failed:', err && err.message);
+        if (err && err.status === 0) {
+          showBootRetry('Could not reach the server — retry when it is up.');
+        } else {
+          showLoading(false);
+          showToast('Could not load the dashboard: ' + (err && err.message), 'error');
         }
-        if (err.status !== 401) console.warn('Session restore failed:', err.message);
-        clearSession();
-        showLoading(false);
-        showLogin();
-        if (err.status !== 401) showToast('Could not restore your session: ' + err.message, 'error');
       }
     }
 
@@ -7160,8 +5868,8 @@
 
   <!-- Loading Overlay.
        `.boot` (the opaque full-screen variant, see the CSS) is added and removed
-       by showBootSplash()/showLoading(false) around the session-restore request, and
-       the Retry button appears only for a transient failure. -->
+       by showBootSplash()/showLoading(false) around the initial data load, and
+       the Retry button appears only for a transient network failure. -->
   <div class="loading-overlay" id="loading-overlay">
     <div class="spinner"></div>
     <span style="color: var(--text-muted);">Loading...</span>
