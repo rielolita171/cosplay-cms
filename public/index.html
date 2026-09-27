@@ -520,6 +520,45 @@
       background: rgba(255, 255, 255, 0.05);
     }
 
+    /* Boot splash.
+     * The normal .loading-overlay is a translucent scrim meant to sit ON TOP of a
+     * screen the user is already looking at (saving a costume, and so on). During
+     * BOOT there is no such screen: the outcome of the session-restore request is
+     * still unknown, so the login screen must stay hidden. An opaque, non-scrim
+     * variant is used for that window so nothing underneath is ever visible. It
+     * is the SAME #loading-overlay element (the same z-index and spinner) with a
+     * single extra class, so the existing showLoading(true/false) path for later
+     * data loads is untouched.
+     */
+    .loading-overlay.boot {
+      background: var(--bg);
+      backdrop-filter: none;
+      z-index: 9997;
+    }
+
+    .boot-retry {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      max-width: min(420px, 80vw);
+      text-align: center;
+    }
+
+    .loading-overlay.boot .boot-retry {
+      display: flex;
+    }
+
+    /* While the boot outcome is unknown the spinner is the only thing on screen. */
+    .loading-overlay.boot.is-retrying .spinner {
+      display: none;
+    }
+
+    .boot-retry-message {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+
     /* Loading overlay */
     .loading-overlay {
       position: fixed;
@@ -1101,7 +1140,13 @@
 <body>
 
   <!-- LOGIN SCREEN -->
-  <section id="screen-login" class="screen">
+  <!-- Ships HIDDEN. Every other screen ships hidden and is revealed by the code
+       that decides it should be seen; the login screen used to ship VISIBLE, so
+       every refresh painted it before init() had even asked the server whether a
+       session existed. init() calls showLogin() only once that question is
+       answered, which is what removed the flash. Do not "restore" the visible
+       default here. -->
+  <section id="screen-login" class="screen" style="display: none;">
     <div class="auth-container">
       <div class="auth-card">
         <div class="auth-header">
@@ -3066,7 +3111,42 @@
     // ==========================================================================
     function showLoading(show) {
       const overlay = document.getElementById('loading-overlay');
-      if (overlay) overlay.classList.toggle('active', !!show);
+      if (!overlay) return;
+      overlay.classList.toggle('active', !!show);
+      // Turning the overlay off also clears the boot classes, so an opaque boot
+      // splash can never outlive the boot that raised it.
+      if (!show) overlay.classList.remove('boot', 'is-retrying');
+    }
+
+    // The opaque, full-viewport splash shown for the WHOLE of the boot. It is the
+    // SAME #loading-overlay element as the ordinary data-load scrim, so the
+    // existing showLoading() path for later loads (saving a costume and friends)
+    // is untouched; `boot` is only an extra class that swaps the translucent
+    // background for a solid one.
+    function showBootSplash() {
+      const overlay = document.getElementById('loading-overlay');
+      if (!overlay) return;
+      overlay.classList.add('boot');
+      overlay.classList.remove('is-retrying');
+      overlay.classList.add('active');
+    }
+
+    /**
+     * The retry affordance for a TRANSIENT boot failure.
+     *
+     * `status === 0` is api()'s NETWORK_ERROR: the request never reached the
+     * server. That proves nothing about whether the stored token is still good --
+     * on a home LAN the box may simply not have finished booting -- so the token
+     * is KEPT and a retry is offered instead of dumping the user on the login
+     * screen and silently logging them out.
+     */
+    function showBootRetry(message) {
+      const label = document.getElementById('boot-retry-message');
+      if (label) label.textContent = message;
+      const overlay = document.getElementById('loading-overlay');
+      if (!overlay) return;
+      overlay.classList.add('boot', 'active');
+      overlay.classList.add('is-retrying');
     }
 
     function showScreen(screen) {
@@ -6996,7 +7076,34 @@
       // rather than on every open. The Edit Lens row is rebuilt by
       // openEditLens() because what is "selected" depends on the row being opened.
       renderColorSwatches('add-lens-swatches', 'add-lens-color', 'add-lens-color-native', '', '', 'add');
-      showLoading(false);
+
+      const retryButton = document.getElementById('boot-retry-button');
+      if (retryButton) {
+        // Retry re-enters restoreSession() only. init() itself is NOT re-run,
+        // because bindGridEvents() attaches delegated listeners unconditionally
+        // and a second pass would fire every card action twice.
+        retryButton.addEventListener('click', () => { restoreSession(); });
+      }
+
+      await restoreSession();
+    }
+
+    /**
+     * THE BOOT. Decides what the first screen is, and shows nothing until it knows.
+     *
+     * WHY THE LOGIN SCREEN IS NOT SHOWN FIRST. Role is a JWT claim, so a
+     * restore that succeeds is headed for the DASHBOARD, not for login --
+     * login is only the correct answer once the server has actually said the
+     * session is no good. Painting login optimistically and then replacing it
+     * with the dashboard is what produced the login-screen flash on every
+     * refresh, so #screen-login now ships hidden and showLogin() below is the
+     * ONLY thing that reveals it. Do not "simplify" this back to
+     * `showLogin(); if (token) ...`.
+     */
+    async function restoreSession() {
+      // Covers the whole boot with an opaque splash: no screen is visible, so
+      // there is nothing underneath to flash.
+      showBootSplash();
 
       const savedToken = sessionStorage.getItem(TOKEN_KEY);
       const savedRefresh = sessionStorage.getItem(REFRESH_TOKEN_KEY);
@@ -7008,12 +7115,13 @@
       }
 
       if (!savedToken) {
+        // Genuinely absent -- no request to wait for, so login is now correct.
+        showLoading(false);
         showLogin();
         return;
       }
 
       state.token = savedToken;
-      showLoading(true);
       try {
         // api() transparently performs ONE silent refresh + single retry if the
         // access token has expired, so a stale 15-minute-old token still restores.
@@ -7022,24 +7130,47 @@
         state.user = data.user || data;
         sessionStorage.setItem(USER_KEY, JSON.stringify(state.user));
         await loadAllData();
+        // Dashboard first, overlay second: the splash must be the last thing to
+        // go, never the first, or the swap itself is visible.
         showDashboard();
+        showLoading(false);
       } catch (err) {
+        // api() reports an unreachable server as status 0 / NETWORK_ERROR. That
+        // says NOTHING about the token -- on a home LAN the server may still be
+        // booting -- so the token is kept and the user is offered a retry
+        // instead of being logged out. A 401, a rejected malformed token, or any
+        // other real response from the server IS a verdict, and only then is the
+        // session discarded and login shown.
+        const transient = err && err.status === 0;
+        if (transient) {
+          console.warn('Session restore could not reach the server:', err.message);
+          showBootRetry('Could not reach the server. Your session has been kept — retry when it is up.');
+          return;
+        }
         if (err.status !== 401) console.warn('Session restore failed:', err.message);
         clearSession();
+        showLoading(false);
         showLogin();
         if (err.status !== 401) showToast('Could not restore your session: ' + err.message, 'error');
-      } finally {
-        showLoading(false);
       }
     }
 
     init();
   </script>
 
-  <!-- Loading Overlay -->
+  <!-- Loading Overlay.
+       `.boot` (the opaque full-screen variant, see the CSS) is added and removed
+       by showBootSplash()/showLoading(false) around the session-restore request, and
+       the Retry button appears only for a transient failure. -->
   <div class="loading-overlay" id="loading-overlay">
     <div class="spinner"></div>
     <span style="color: var(--text-muted);">Loading...</span>
+    <div class="boot-retry" id="boot-retry">
+      <span class="boot-retry-message" id="boot-retry-message">
+        Could not reach the server. Your session has been kept.
+      </span>
+      <button type="button" class="btn btn-primary" id="boot-retry-button">Retry</button>
+    </div>
   </div>
 </body>
 </html>
