@@ -1,0 +1,89 @@
+# ==============================================================================
+# cosplay-cms build context exclusions
+#
+# Kept in sync with .gitignore's intent, with two hard rules:
+#
+#   1. NEVER add `!` negation rules. A `data/` exclusion plus a negation is the
+#      classic way to accidentally ship the production database.
+#   2. MUST NOT exclude: init_db.sql, src/, public/, package.json,
+#      package-lock.json. Those five are the entire runtime. Excluding
+#      init_db.sql produces an image that boots healthy and then 500s on every
+#      data route, which is the single worst failure mode here.
+#
+# Only the DEPS stage reads package-lock.json; that is exactly why it must be in
+# the context.
+# ==============================================================================
+
+# --- Secrets: MUST NEVER ENTER THE BUILD CONTEXT ---------------------------
+# The live .env holds the real API_KEY, JWT_SECRET and SESSION_SECRET. Copying
+# it into an image bakes credentials into an immutable layer, where they stay
+# readable by anyone who can pull the image or read a layer history. It would
+# also be silently overridden by the compose env_file/environment block.
+# `.env.*` also covers .env.example. That is intentional: the template is
+# documentation, never a runtime input, so it has no business in an image layer.
+# It is NOT pulled back in with a `!` rule — see rule 1 at the top.
+.env
+.env.*
+
+# --- Data: MUST COME FROM A VOLUME, NEVER BE BAKED IN ----------------------
+# Baked-in data is unrecoverable-on-overwrite, grows the image without bound, and
+# quietly shadows the volume mount.
+data
+data/**
+
+# --- Dependencies: installed by `npm ci` inside the image -------------------
+# Copying the host's node_modules also breaks arch independence (the host may not
+# be linux-x64) and defeats the whole point of the deps stage.
+node_modules
+npm-debug.log*
+yarn-error.log*
+
+# --- VCS --------------------------------------------------------------------
+.git
+.gitignore
+.gitattributes
+
+# --- Source inventory: the real data directory is the volume, not the repo ---
+imports
+
+# --- Documentation: none of it is a runtime input --------------------------
+*.md
+HANDOFF-*.md
+phase-*-setup/
+.github/
+prisma
+README.md
+CHANGELOG.md
+
+# --- Inert or non-runtime code ---------------------------------------------
+# verify.js and scripts/test_*.js are local harnesses; test_phase5.js in
+# particular mutates a data/ copy and must never be part of an image.
+verify.js
+scripts/test_*.js
+scripts/test_*.sh
+workflows
+
+# --- Local toolchain and OS noise ------------------------------------------
+.nvmrc
+.DS_Store
+Thumbs.db
+*.swp
+*.log
+.vscode
+.idea
+*.tsbuildinfo
+coverage
+.eslintcache
+
+# --- Docker's own files ----------------------------------------------------
+# Not needed inside the image, and excluding Dockerfile keeps it out of the
+# context checksum so editing a comment does not bust the build cache.
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
+
+# --- Backups and local scratch ---------------------------------------------
+*.bak
+*.sql.gz
+tmp_newscript.js
