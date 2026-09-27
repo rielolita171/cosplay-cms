@@ -595,6 +595,173 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// ============================================================================
+// DELETE /:id/images — remove ONE image from a costume's gallery
+// ============================================================================
+// WHY A DEDICATED ENDPOINT, WHEN THE FRONTEND COULD JUST PUT A SHORTER ARRAY
+// The dashboard can already recompute `imageUrls` and PUT it through the
+// whitelisted field, which would need no new backend at all. It was rejected
+// because that leaves the file on disk forever: the row forgets the picture
+// while the bytes stay in data/uploads, so deleting every image from a costume
+// reclaims nothing and the directory grows without bound. Owning the removal
+// here is what makes the disk actually shrink.
+//
+// A SECOND REASON: the unlink must be conditional. The same upload can be
+// referenced by more than one costume, and removing the last mention of a
+// shared URL is the ONLY point at which the file is truly garbage. So the
+// cross-reference COUNT decides the unlink; skipping it would let one costume's
+// delete break another's thumbnail.
+router.delete('/:id/images', async (req, res) => {
+  try {
+    // Validate the payload BEFORE the lookup. A missing/malformed `url` is a
+    // request error (400) and must not be reported as "no such costume" (404)
+    // just because the id in the path is also wrong — the caller learns nothing
+    // about which of the two was wrong. Ordering it this way also keeps a
+    // syntactically invalid id from ever reaching the SQL layer.
+    const rawUrl = req.body ? req.body.url : undefined;
+    if (typeof rawUrl !== 'string' || rawUrl.trim().length === 0) {
+      return res.status(400).json({
+        error: 'url is required and must be a non-empty string',
+        code: 'VALIDATION_ERROR'
+      });
+    }
+    const url = rawUrl.trim();
+    // Same bound the array entries are held to, so a caller cannot make the
+    // response or the LIKE-style comparison below work on an unbounded string.
+    if (url.length > MAX_IMAGE_URL_LENGTH) {
+      return res.status(400).json({
+        error: `url must be at most ${MAX_IMAGE_URL_LENGTH} characters`,
+        code: 'VALIDATION_ERROR'
+      });
+    }
+
+    const id = idParam(req.params.id) || '';
+
+    // Read the stored array. An empty result means either "no such costume" or
+    // "imageUrls IS NULL"; both are 404 for this endpoint's purposes, because
+    // there is no gallery to remove anything from either way.
+    const stored = await queryDb(`SELECT imageUrls FROM "Costume" WHERE id = ${esc(id)};`);
+    if (!stored) {
+      return res.status(404).json({ error: 'Costume not found', code: 'NOT_FOUND' });
+    }
+
+    let current;
+    try {
+      current = JSON.parse(stored);
+    } catch (parseError) {
+      // The column is TEXT holding a JSON array, so an unparseable value is
+      // corrupt data, not a bad request. Surfacing it as 500 (rather than
+      // silently overwriting the column with a fresh array) means the operator
+      // finds out instead of losing whatever the column was meant to hold.
+      throw Object.assign(
+        new Error('Stored imageUrls for this costume is not a JSON array'),
+        { status: 500 }
+      );
+    }
+    if (!Array.isArray(current)) {
+      throw Object.assign(
+        new Error('Stored imageUrls for this costume is not a JSON array'),
+        { status: 500 }
+      );
+    }
+
+    if (!current.includes(url)) {
+      // 404, not 400: the request was well formed, this costume simply does
+      // not have that image. Repeating the delete is not the fix.
+      return res.status(404).json({
+        error: 'Image is not on this costume',
+        code: 'NOT_FOUND'
+      });
+    }
+
+    const remaining = current.filter((entry) => entry !== url);
+    // Reuse the shared writer-side validator so the array this route persists
+    // is held to exactly the same rules as one arriving from the dashboard.
+    // It cannot throw here (the entries already passed it on the way in), but
+    // routing it through the same call is what stops the two writers drifting.
+    const serialized = normalizeImageUrls(remaining);
+
+    await queryDb(
+      `UPDATE "Costume" SET imageUrls = ${esc(serialized)}, `
+      + `updatedAt = ${esc(new Date().toISOString())} WHERE id = ${esc(id)};`
+    );
+
+    // Only now that this costume no longer points at the file: is anything ELSE
+    // still pointing at it? json_each matches whole array elements, so a
+    // substring collision ("/uploads/a.webp" vs "/uploads/a.webp.bak") cannot
+    // produce a false "still referenced".
+    const stillReferenced = Number(await queryDb(
+      `SELECT COUNT(*) FROM "Costume" WHERE id <> ${esc(id)} `
+      + `AND EXISTS (SELECT 1 FROM json_each("Costume".imageUrls) WHERE value = ${esc(url)});`
+    )) || 0;
+
+    let fileDeleted = false;
+    if (stillReferenced === 0) {
+      const fileName = uploadFileNameFor(url);
+      if (fileName) {
+        const fs = require('fs').promises;
+        const path = require('path');
+        // Same directory images.js serves from. Note this is resolved from
+        // __dirname, not from the process cwd, so it stays correct no matter
+        // which directory the server was started in.
+        const filePath = path.join(__dirname, '../../data/uploads', fileName);
+        try {
+          await fs.unlink(filePath);
+          fileDeleted = true;
+        } catch (unlinkError) {
+          // The row is already correct, which is what the caller actually
+          // asked for, so a failure here must not be reported as a failed
+          // delete. ENOENT simply means the bytes were already gone. Anything
+          // else (a permission problem) is surfaced in the response so the
+          // orphaned file is not silently forgotten.
+          if (unlinkError.code !== 'ENOENT') {
+            res.json({
+              id, url, removed: true, remaining, fileDeleted: false,
+              warning: `Removed from the costume but could not delete the file: ${unlinkError.code}`
+            });
+            return;
+          }
+        }
+      }
+    }
+
+    res.json({
+      id,
+      url,
+      removed: true,
+      remaining,
+      stillReferenced,
+      fileDeleted
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+/**
+ * Map an `/uploads/...` URL to a bare filename, or null when the URL does not
+ * point into the upload directory.
+ *
+ * A delete endpoint that builds a filesystem path out of caller input is a
+ * path-traversal endpoint unless this refuses everything that is not a plain
+ * filename. `path.basename` alone is not enough: it would happily reduce
+ * `../../etc/passwd` to `passwd` and then unlink a file that was never ours.
+ * So the remainder must be a single segment containing no separator and no
+ * parent reference at all.
+ *
+ * @param {string} url
+ * @returns {string|null}
+ */
+function uploadFileNameFor(url) {
+  const prefix = '/uploads/';
+  if (typeof url !== 'string' || !url.startsWith(prefix)) return null;
+  const name = url.slice(prefix.length);
+  if (name.length === 0) return null;
+  if (name.includes('/') || name.includes('\\')) return null;
+  if (name.includes('..') || name.includes('\0')) return null;
+  return name;
+}
+
 module.exports = router;
 
 /**
