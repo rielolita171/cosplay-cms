@@ -1,0 +1,117 @@
+# ==============================================================================
+# cosplay-cms — single-service deployment stack
+#
+#   cp .env.example .env   # fill in JWT_SECRET and API_KEY
+#   docker compose up -d --build
+#
+# The project's own docker-compose sketch in
+# cosplay_cms_phase_by_phase_implementation_server_setup_guide.md:419-426 is
+# WRONG and is deliberately not followed: it maps the wrong host port, mounts
+# host paths at /data (which is not where the app reads or writes — it uses
+# /app/data), and runs a Prisma generate step for a Prisma schema that no
+# runtime code touches.
+# ==============================================================================
+
+services:
+  cms:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cosplay-cms:local
+
+    # The app shuts down gracefully and cleanly exits 0 on SIGTERM; `unless-stopped`
+    # means it comes back after a reboot, but stays down after an explicit
+    # `docker compose stop`.
+    restart: unless-stopped
+
+    # Host port is remapped; the container-internal port is ALWAYS 4001.
+    # workflows/n8n_contact_lens_expiry_alert.json hardcodes 4001, so remapping
+    # the host side is the only way to run this on a busy machine without
+    # breaking n8n. Use CMS_PORT on the host, never change PORT inside.
+    ports:
+      - "${CMS_PORT:-4001}:4001"
+
+    # Values come from the real .env. Missing values warn at up, do not fail.
+    env_file:
+      - .env
+
+    # Explicit overrides layered ON TOP of env_file, so the container is correct
+    # even if .env is missing or incomplete. These are the values the image and
+    # the app require regardless of operator preference.
+    environment:
+      # Matches the image's EXPOSE and src/server.js. Do not remap internally.
+      PORT: "4001"
+      # Drives the production-only guards: JWT_SECRET is mandatory
+      # (src/middleware/auth.js:5 throws at load) and must be strong
+      # (src/server.js:20-36 exits(1) on a placeholder).
+      NODE_ENV: "production"
+      # Absolute, on the volume below. db.js's own default is the relative
+      # 'data/db/cms.db' resolved against cwd=/app, which points here too; this
+      # is just the same answer said out loud.
+      DATABASE_PATH: "/app/data/db/cms.db"
+
+    # Defence in depth: the image already sets USER node (1000:1000), and this
+    # restates it so the container stays non-root even if someone later rebuilds
+    # from a modified base image that drops the USER directive.
+    user: "1000:1000"
+
+    # ONE volume at /app/data, covering both data/db/ and data/uploads/.
+    #
+    # Why one and not two: the database and the uploaded costume photos are one
+    # logical unit — the DB stores the image filenames that resolve inside
+    # data/uploads. A single volume means one backup command and one restore
+    # that cannot be half-applied; with two volumes it is possible to restore a
+    # new database that points at image files from the old one, and the only
+    # symptom is broken thumbnails. Restoring a single volume is atomic in
+    # exactly the way these two things need to be atomic in.
+    #
+    # The independent-backup argument is real but weaker than it looks: the
+    # images are large and change rarely while the DB changes constantly, so
+    # splitting them invites backing up the DB nightly and the images never.
+    # If you genuinely need that split (e.g. uploads on a larger, slower disk),
+    # replace the single mount below with:
+    #
+    #     volumes:
+    #       - cms-db:/app/data/db
+    #       - cms-uploads:/app/data/uploads
+    #
+    # and declare both at the bottom. That works because the Dockerfile creates
+    # and chowns BOTH subdirectories in the image, so each fresh volume inherits
+    # 1000:1000 ownership from its own mount point. Note the consequence: a
+    # half-restored pair is the failure mode described above.
+    #
+    # SINGLE VOLUME AT /app/data — the database and uploads ship together, always
+    # consistent, backed up and restored as one unit.
+    volumes:
+      - cms-data:/app/data
+
+    # src/server.js:539 — SIGTERM/SIGINT closes the listener and exits 0 in
+    # milliseconds; a 9s failsafe exits hard if that hangs. 15s gives that
+    # failsafe real headroom, so a normal `docker compose stop` completes on the
+    # app's own clean exit and never escalates to SIGKILL mid-write.
+    stop_grace_period: 15s
+
+    # PID 1 NOTE:
+    # The entrypoint ends in `exec node /app/src/server.js`, so Node IS PID 1 and
+    # receives SIGTERM directly — no init shim is required, and that is the
+    # normal, correct configuration. The commented `init: true` below is left in
+    # only as a troubleshooting switch: enabling it inserts tini as PID 1, which
+    # reaps orphaned zombie processes. tini FORWARDS signals, so the app still
+    # shuts down cleanly, but `docker logs` interleaves tini's own output and the
+    # `exec` line from the entrypoint no longer describes the real process tree.
+    # Only turn it on if you actually observe unreaped children.
+    # init: true
+
+    # Uncomment for local debugging (shell in, then `docker compose logs -f`).
+    # stdin_open: true
+    # tty: true
+
+    # Deliberately NOT set:
+    #   restart handling is above; logging defaults to the json-file driver, which
+    #   is appropriate for `docker logs` and for a log shipper to pick up.
+    #   No privileged mode, no host networking, no host PID/IPC namespace: the
+    #   service needs none of them and each one would widen its blast radius.
+
+volumes:
+  cms-data:
+    name: cosplay-cms-data
