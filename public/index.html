@@ -388,6 +388,49 @@
       backdrop-filter: blur(4px);
     }
 
+    /* Top-right close button, injected into every dialog at boot by
+       installModalCloseButtons(). The form modals could only be dismissed with
+       the Cancel button in the footer, which on a long form sits below the fold
+       on a short window — so the way out was not always on screen. */
+    .modal-close {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      width: 32px;
+      height: 32px;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 1.15rem;
+      line-height: 1;
+      cursor: pointer;
+      z-index: 2;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+    }
+    .modal-close:hover {
+      color: var(--danger);
+      border-color: var(--danger);
+      background: rgba(239, 68, 68, 0.1);
+    }
+    .modal-close:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    /* The button is positioned against the dialog box, so the dialog must be a
+       containing block. Not all engines treat a `dialog` as positioned, hence
+       the explicit `relative` rather than relying on the default `static`. */
+    dialog {
+      position: relative;
+    }
+    /* The lightbox manages its own chrome and sizes to the viewport; an injected
+       close button would land on top of the image controls it already has. */
+    #modal-lightbox .modal-close,
+    #modal-confirm .modal-close,
+    #modal-text-entry .modal-close {
+      display: none;
+    }
+
     .form-group {
       margin-bottom: 14px;
     }
@@ -5819,6 +5862,69 @@
       dialog.showModal();
     }
 
+    /**
+     * Dismissal route for each dialog, by id.
+     *
+     * WHY THIS TABLE EXISTS — read before adding a dialog to it.
+     *
+     * Calling `dialog.close()` is correct for the plain form modals, and WRONG
+     * for the two dialogs that return a promise: #modal-confirm resolves
+     * confirmAction() and #modal-text-entry resolves promptText(). A bare
+     * .close() on either of those leaves `state.confirmResolver` /
+     * `state.textEntryResolver` pending forever, so the `await` never returns
+     * and the caller's error handling and follow-up code never run. Their
+     * dismissal is therefore `settleConfirm(false)` and `settleTextEntry(null)`
+     * respectively, which is exactly what Esc and the Cancel button do.
+     *
+     * `closeModal()` below is the public helper and is the only thing that should
+     * ever dismiss a dialog; anything calling `.close()` directly on one of the
+     * two promise dialogs has this bug.
+     */
+    const MODAL_DISMISS_ROUTES = {
+      'modal-confirm': () => settleConfirm(false),
+      'modal-text-entry': () => settleTextEntry(null)
+    };
+
+    /**
+     * Give every dismissible dialog a close button in its top-right corner.
+     *
+     * Injected rather than written into the markup because there are eleven
+     * dialogs and hand-maintaining a button in each is exactly the sort of thing
+     * that rots. The button is created with DOM APIs and its label is a text
+     * node, so nothing here is an HTML string.
+     *
+     * Idempotent: a dialog that already has one is skipped, so calling this
+     * again (a new dialog added later, or a re-render) is harmless.
+     */
+    function installModalCloseButtons() {
+      document.querySelectorAll('dialog').forEach(dialog => {
+        if (dialog.querySelector(':scope > .modal-close')) return;
+        if (dialog.id === 'modal-lightbox') return;   // has its own close control
+        if (dialog.id === 'modal-confirm') return;    // outcome is Cancel/Accept
+        if (dialog.id === 'modal-text-entry') return; // outcome is Cancel/Save
+
+        const button = makeEl('button', 'modal-close', '×');
+        button.type = 'button';
+        button.setAttribute('aria-label', 'Close');
+        // `closest` rather than a captured reference: the handler below can never
+        // be bound to the wrong dialog.
+        button.addEventListener('click', () => dismissDialog(dialog.id));
+        dialog.appendChild(button);
+      });
+    }
+
+    /**
+     * Close a dialog through its own dismissal route (see MODAL_DISMISS_ROUTES).
+     *
+     * @param {string} id
+     */
+    function dismissDialog(id) {
+      const settle = MODAL_DISMISS_ROUTES[id];
+      if (settle) { settle(); return; }
+      const dialog = document.getElementById(id);
+      if (dialog && dialog.open) dialog.close();
+    }
+
     function closeModal(id) {
       const dialog = document.getElementById(id);
       if (dialog && dialog.open) dialog.close();
@@ -5836,6 +5942,10 @@
      */
     async function init() {
       bindGridEvents();
+      // Before anything can open: the × buttons are injected into the markup
+      // rather than authored into each dialog, so they exist by the time the
+      // first modal is shown.
+      installModalCloseButtons();
       // The Add Lens modal's swatch row holds no state, so it is built once here
       // rather than on every open. The Edit Lens row is rebuilt by
       // openEditLens() because what is "selected" depends on the row being opened.
