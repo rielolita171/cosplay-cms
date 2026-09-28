@@ -1250,6 +1250,7 @@
         <button class="tab-btn" data-tab="props" onclick="switchTab('props')">⚔️ Props & Accessories</button>
         <button class="tab-btn" data-tab="lenses" onclick="switchTab('lenses')">👁️ Contact Lenses</button>
         <button class="tab-btn" data-tab="lists" onclick="switchTab('lists')">🏷️ Reference Lists</button>
+        <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">⚙️ Settings</button>
       </div>
 
       <!-- Filter Bar -->
@@ -1394,6 +1395,58 @@
             <p class="ref-search-empty" id="fandoms-list-message" hidden></p>
             <div class="items-grid" id="fandoms-grid" style="margin-top: 16px;"></div>
           </div>
+        </div>
+      </section>
+
+      <!-- Settings Tab Content: the CORS allowlist editor.
+           The client half of this feature (loadCorsSettings / addCorsOrigin /
+           saveCorsSettings / resetCorsSettings, plus the chip renderer) was
+           already in this file and was left in place when the admin-only
+           Security tab was removed. Every DOM lookup in it is guarded with
+           `if (!el) return`, so it was dormant rather than broken — the panel
+           simply had no markup left to write into. The six ids below are
+           exactly the six those functions look up: cors-source,
+           cors-origin-list, cors-env-default, cors-origin-input,
+           cors-origin-error and cors-message.
+
+           No restart is needed to change the allowlist. The server persists the
+           row first and swaps its in-memory cache from a res.on('finish')
+           handler, so the NEXT request is judged against the new list. -->
+      <section id="tab-settings" style="display: none;">
+        <div class="metric-card" style="max-width: 720px;">
+          <h3 style="font-size: 1rem; margin-bottom: 4px;">CORS allowed origins</h3>
+          <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 16px;">
+            The browser origins allowed to call this server from another hostname.
+            A plain <code>http://</code> origin is flagged, because traffic to it
+            is unencrypted.
+          </p>
+
+          <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 6px;">
+            Currently in force: <strong id="cors-source">not loaded</strong>
+          </p>
+          <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 16px;">
+            Server default (<code>CORS_ORIGIN</code> in <code>.env</code>):
+            <span id="cors-env-default">(none)</span>
+          </p>
+
+          <div id="cors-origin-list"
+               style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px;"></div>
+          <p class="field-error" id="cors-origin-error"></p>
+
+          <div style="display: flex; gap: 8px;">
+            <input type="text" class="form-control" id="cors-origin-input"
+                   placeholder="https://cms.example.com" maxlength="200"
+                   onkeydown="if (event.key === 'Enter') { event.preventDefault(); addCorsOrigin(); }">
+            <button type="button" class="btn btn-secondary" onclick="addCorsOrigin()">Add</button>
+          </div>
+
+          <div class="modal-actions" style="margin-top: 18px;">
+            <button type="button" class="btn btn-primary" onclick="saveCorsSettings()">Save</button>
+            <button type="button" class="btn btn-secondary" onclick="resetCorsSettings()">
+              Reset to server default
+            </button>
+          </div>
+          <p id="cors-message" style="font-size: 0.8rem; margin: 10px 0 0;"></p>
         </div>
       </section>
 
@@ -4343,9 +4396,20 @@
       document.getElementById('tab-props').style.display = tab === 'props' ? 'block' : 'none';
       document.getElementById('tab-lenses').style.display = tab === 'lenses' ? 'block' : 'none';
       document.getElementById('tab-lists').style.display = tab === 'lists' ? 'block' : 'none';
+      document.getElementById('tab-settings').style.display = tab === 'settings' ? 'block' : 'none';
       // The filter bar only describes costumes/props/lenses, so it is hidden on
-      // the Reference Lists tab rather than shown over a panel it cannot filter.
-      document.getElementById('filter-bar').style.display = tab === 'lists' ? 'none' : 'flex';
+      // the Reference Lists and Settings tabs rather than shown over a panel it
+      // cannot filter.
+      document.getElementById('filter-bar').style.display =
+        (tab === 'lists' || tab === 'settings') ? 'none' : 'flex';
+
+      // The allowlist is fetched the first time Settings is opened rather than on
+      // every boot: it is a request nothing else on the page needs, and an
+      // operator who never visits the tab should not pay for it. Both flags in
+      // `state` are the guard the existing loader already keeps.
+      if (tab === 'settings' && !state.corsLoaded && !state.corsLoading) {
+        loadCorsSettings();
+      }
 
       // The new costumes-only controls (#fandom-filter, #brand-filter and the
       // Clear button) are NOT toggled inline here -- they are handled by the
