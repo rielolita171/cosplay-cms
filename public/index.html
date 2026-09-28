@@ -468,6 +468,65 @@
       grid-column: 1 / -1;
     }
 
+    /* --- Upload progress bar -----------------------------------------------
+       Fixed to the bottom-centre so it never overlaps the toast, which sits
+       bottom-right, nor the header controls at the top. */
+    .upload-progress {
+      position: fixed;
+      left: 50%;
+      bottom: 28px;
+      transform: translateX(-50%);
+      width: min(420px, calc(100vw - 32px));
+      padding: 14px 16px;
+      background: #1e2230;
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      box-shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.7);
+      z-index: 9996;
+    }
+    .upload-progress-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      font-size: 0.85rem;
+      margin-bottom: 8px;
+    }
+    #upload-progress-pct {
+      font-variant-numeric: tabular-nums;
+      color: var(--text-muted);
+    }
+    .upload-progress-track {
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+    }
+    .upload-progress-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 999px;
+      background: var(--accent, #6366f1);
+      /* Width is animated on a short curve so the bar glides rather than
+         stepping between the coarse increments upload progress arrives in. */
+      transition: width 0.2s ease-out;
+    }
+    /* Held at full while the server processes, so the bar never looks stalled
+       during the part of the wait that the byte counter cannot measure. */
+    .upload-progress-fill.is-processing {
+      background: var(--success, #22c55e);
+      animation: upload-pulse 1.1s ease-in-out infinite;
+    }
+    @keyframes upload-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.55; }
+    }
+    .upload-progress-detail {
+      margin: 8px 0 0;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
     .toast {
       position: fixed;
       bottom: 24px;
@@ -1933,6 +1992,26 @@
   <!-- Toast Notification -->
   <div class="toast" id="toast"></div>
 
+  <!-- UPLOAD PROGRESS.
+       Shown while a photo selection is being sent, because a multi-megabyte
+       upload is slow enough that without it the only feedback is a frozen page
+       and no way to tell a working upload from a hung one.
+
+       It counts BYTES SENT, not server-side work, so it reaches 100% as soon as
+       the last byte leaves the browser. It then holds at "Processing…" until
+       the response arrives, because the server-side sharp conversion is a real
+       and visible part of the wait that the byte counter cannot measure. -->
+  <div class="upload-progress" id="upload-progress" hidden>
+    <div class="upload-progress-head">
+      <span id="upload-progress-label">Uploading photos…</span>
+      <span id="upload-progress-pct">0%</span>
+    </div>
+    <div class="upload-progress-track">
+      <div class="upload-progress-fill" id="upload-progress-fill"></div>
+    </div>
+    <p class="upload-progress-detail" id="upload-progress-detail"></p>
+  </div>
+
   <script>
     'use strict';
 
@@ -2539,6 +2618,122 @@
         this.code = code || null;
         this.payload = payload || null;
       }
+    }
+
+    /**
+     * UPLOAD PROGRESS UI.
+     *
+     * Three small functions rather than a class, because there is exactly one
+     * progress bar in the document and it holds no state beyond what is already
+     * mirrored into the DOM. updateUploadProgress() is the only writer, so the
+     * markup and the numbers can never disagree.
+     *
+     * The two phases are deliberate. Bytes sent is something the browser can
+     * really measure. Server-side work — the sharp resize and WebP encode — is
+     * NOT observable from here, so past the point where every byte has left the
+     * browser the bar is HELD and relabelled "Processing…" rather than left
+     * sitting on a number that implies nothing more is happening.
+     */
+    function updateUploadProgress(fraction, phase, detail) {
+      const box = document.getElementById('upload-progress');
+      const fill = document.getElementById('upload-progress-fill');
+      const pct = document.getElementById('upload-progress-pct');
+      const label = document.getElementById('upload-progress-label');
+      const note = document.getElementById('upload-progress-detail');
+      if (!box || !fill) return;
+
+      const processing = phase === 'processing';
+      const safeFraction = Number.isFinite(fraction) ? Math.max(0, Math.min(1, fraction)) : 0;
+
+      box.hidden = false;
+      fill.style.width = Math.round(safeFraction * 100) + '%';
+      fill.classList.toggle('is-processing', processing);
+
+      if (pct) {
+        pct.textContent = processing ? 'processing…' : Math.round(safeFraction * 100) + '%';
+      }
+      if (label) {
+        label.textContent = processing ? 'Processing photos…' : 'Uploading photos…';
+      }
+      if (note) note.textContent = detail || '';
+    }
+
+    function hideUploadProgress() {
+      const box = document.getElementById('upload-progress');
+      if (box) box.hidden = true;
+    }
+
+    /**
+     * Send ONE request through XMLHttpRequest so upload progress can be
+     * reported, resolving with the same shape api() resolves with.
+     *
+     * WHY XHR AND NOT fetch(): `fetch` still exposes no upload-progress event in
+     * any shipping browser — the body is handed to the network stack and the
+     * page learns nothing until a response arrives. `xhr.upload.onprogress` is
+     * the only way to show a byte count. api() is deliberately left on fetch and
+     * remains the chokepoint for every non-upload request; this is a parallel
+     * path used ONLY by the two upload routes.
+     *
+     * The error contract matches api() exactly, so moving a call site across
+     * does not change its error handling: a non-2xx answer becomes the same
+     * ApiError carrying the server's `error` string and machine-readable
+     * `code`, and a transport failure becomes the same NETWORK_ERROR.
+     *
+     * @param {string} path
+     * @param {FormData} formData
+     * @param {(fraction:number|null)=>void} [onProgress] 0..1 while sending;
+     *        `null` when the total size is not computable
+     * @returns {Promise<object>}
+     */
+    function apiUpload(path, formData, onProgress) {
+      return new Promise((resolve, reject) => {
+        if (typeof XMLHttpRequest === 'undefined') {
+          // A browser without XHR still uploads fine; it just cannot report
+          // progress. Refusing to send would break uploading over a missing
+          // nicety, so fall back to the fetch path with no progress reporting.
+          api(path, { method: 'POST', body: formData }).then(resolve, reject);
+          return;
+        }
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', path, true);
+        // Content-Type is deliberately NOT set here. The browser has to add the
+        // multipart boundary itself; setting the header by hand yields a body
+        // multer cannot parse.
+
+        xhr.upload.onprogress = event => {
+          if (!onProgress) return;
+          // `lengthComputable` is false when the total is unknown, and then
+          // loaded/total is NaN — which must be passed on as null, not coerced
+          // to 0%, or the bar would appear to stall at the start.
+          onProgress(event.lengthComputable && event.total > 0
+            ? event.loaded / event.total
+            : null);
+        };
+
+        xhr.onload = () => {
+          let data = null;
+          try { data = JSON.parse(xhr.responseText); } catch (_) { data = null; }
+
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(data === null ? {} : data);
+            return;
+          }
+          reject(new ApiError(
+            (data && data.error) || ('Request failed (HTTP ' + xhr.status + ')'),
+            xhr.status,
+            (data && data.code) || null,
+            data
+          ));
+        };
+
+        xhr.onerror = () => reject(new ApiError(
+          'Network error — could not reach the server. Is it running?', 0, 'NETWORK_ERROR'
+        ));
+        xhr.ontimeout = () => reject(new ApiError('The upload timed out.', 0, 'TIMEOUT'));
+
+        xhr.send(formData);
+      });
     }
 
     // The server may answer with HTML (express error page) or with an empty body.
@@ -5599,25 +5794,49 @@
      */
     async function uploadImageBatch(files) {
       const form = new FormData();
+      const plural = files.length + ' photo' + (files.length === 1 ? '' : 's');
 
-      if (files.length === 1) {
-        form.append('image', files[0]);        // field name fixed by the backend
-        const result = await api('/api/images/upload', { method: 'POST', body: form });
-        const url = safeUrl(result.url || result.processedUrl);
-        if (!url) throw new ApiError('The server did not return a usable image URL.', 500, 'BAD_UPLOAD_RESPONSE');
-        return [url];
-      }
+      // Bytes actually sent. `null` means the browser could not compute the
+      // total, which is shown as an indeterminate "sending..." rather than as a
+      // misleading 0%.
+      const onProgress = fraction => {
+        if (fraction === null) updateUploadProgress(0, 'uploading', 'sending...');
+        else updateUploadProgress(fraction, 'uploading', plural);
+      };
+      // The server-side resize/encode is real work the byte counter cannot see,
+      // so the bar holds at full and says so until the response lands.
+      const onProcessing = () => updateUploadProgress(1, 'processing', plural + ' uploaded - resizing');
 
-      files.forEach(file => form.append('images', file));   // field name fixed by the backend
-      const result = await api('/api/images/upload-multiple', { method: 'POST', body: form });
-      const images = Array.isArray(result.images) ? result.images : [];
-      const urls = images
-        .map(entry => safeUrl(entry && (entry.url || entry.processedUrl)))
-        .filter(Boolean);
-      if (!urls.length) {
-        throw new ApiError('The server did not return any usable image URLs.', 500, 'BAD_UPLOAD_RESPONSE');
+      try {
+        if (files.length === 1) {
+          form.append('image', files[0]);      // field name fixed by the backend
+          onProgress(0);
+          const sending = apiUpload('/api/images/upload', form, onProgress);
+          onProcessing();
+          const result = await sending;
+          const url = safeUrl(result.url || result.processedUrl);
+          if (!url) throw new ApiError('The server did not return a usable image URL.', 500, 'BAD_UPLOAD_RESPONSE');
+          return [url];
+        }
+
+        files.forEach(file => form.append('images', file)); // field name fixed by the backend
+        onProgress(0);
+        const sending = apiUpload('/api/images/upload-multiple', form, onProgress);
+        onProcessing();
+        const result = await sending;
+        const images = Array.isArray(result.images) ? result.images : [];
+        const urls = images
+          .map(entry => safeUrl(entry && (entry.url || entry.processedUrl)))
+          .filter(Boolean);
+        if (!urls.length) {
+          throw new ApiError('The server did not return any usable image URLs.', 500, 'BAD_UPLOAD_RESPONSE');
+        }
+        return urls;
+      } finally {
+        // Runs on success AND on failure, so a rejected upload cannot leave a
+        // progress bar frozen on the screen for good.
+        hideUploadProgress();
       }
-      return urls;
     }
 
     /**
