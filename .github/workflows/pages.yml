@@ -1,0 +1,67 @@
+name: Deploy profile site to GitHub Pages
+
+# Publishes docs/ to GitHub Pages on every push to main.
+#
+# To turn this on, in the repository settings go to
+#   Pages -> Build and deployment -> Source: "GitHub Actions".
+# The job below grants itself the pages:write scope; a workflow cannot
+# enable the setting itself.
+
+on:
+  push:
+    branches: [main]
+  # Lets the site be re-run from the Actions tab without a commit.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never run two deploys at once, and cancel an in-flight one when a newer
+# commit lands — otherwise a slow older build can publish over a newer one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      # No build step and no dependencies: docs/ is already the artifact.
+      # The only guard worth having is a check that the screenshots the page
+      # references actually exist, so a broken deploy fails here rather than
+      # shipping a page full of missing images.
+      - name: Verify screenshot assets are present
+        run: |
+          set -euo pipefail
+          missing=0
+          for shot in dashboard costumes props reference-lists; do
+            if [ ! -f "docs/assets/screenshots/${shot}.png" ]; then
+              echo "Missing screenshot: docs/assets/screenshots/${shot}.png"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::Screenshot assets are missing. Run scripts/capture-screenshots.js against a live instance, or update docs/index.html to match the files present."
+            exit 1
+          fi
+
+      - name: Upload the Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

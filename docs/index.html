@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cosplay CMS — Inventory for costumes, props &amp; lenses</title>
+<meta name="description" content="A self-hosted, no-build inventory system for cosplay costumes, props, contact lenses and makers. Express + SQLite, single-file frontend, deployable with Docker.">
+<meta property="og:title" content="Cosplay CMS — Inventory for costumes, props &amp; lenses">
+<meta property="og:description" content="Self-hosted cosplay inventory management. Express + SQLite, no build step, no CDN.">
+<meta property="og:type" content="website">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<a class="skip-link" href="#features">Skip to content</a>
+
+<!-- ============================ HERO ============================ -->
+<header class="hero" id="top">
+  <div class="glow glow-a" aria-hidden="true"></div>
+  <div class="glow glow-b" aria-hidden="true"></div>
+
+  <nav class="nav container">
+    <a class="brand" href="#top">
+      <span class="brand-mark" aria-hidden="true">👘</span>
+      <span class="brand-text">Cosplay<b>CMS</b></span>
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#gallery">Screenshots</a>
+      <a href="#stack">Stack</a>
+      <a href="#quickstart">Quick start</a>
+      <a class="btn btn-sm" href="https://github.com/rielolita171/cosplay-cms" target="_blank" rel="noopener">GitHub ↗</a>
+    </div>
+  </nav>
+
+  <div class="hero-inner container">
+    <span class="pill">Self-hosted · No build step · No CDN</span>
+    <h1>Every costume, prop and lens<br><span class="grad">in one place.</span></h1>
+    <p class="lede">
+      Cosplay CMS is a private inventory system for the things that actually
+      accumulate: costume entries, the weapons that go with them, the contact
+      lenses you have open, and the makers who built your props. One Express
+      server, one SQLite file, one self-contained HTML page.
+    </p>
+
+    <div class="cta-row">
+      <a class="btn btn-primary" href="#quickstart">Get started</a>
+      <a class="btn btn-ghost" href="#gallery">See the interface ↓</a>
+    </div>
+
+    <ul class="hero-stats">
+      <li><b>0</b><span>build steps</span></li>
+      <li><b>0</b><span>login screens</span></li>
+      <li><b>1</b><span>SQLite file</span></li>
+      <li><b>7</b><span>inventory tabs</span></li>
+    </ul>
+  </div>
+</header>
+
+<!-- ============================ APP SHOT ============================ -->
+<section class="shot-wrap">
+  <div class="container">
+    <figure class="shot-frame">
+      <div class="shot-bar">
+        <span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span>
+        <span class="shot-url">localhost:4001 — dashboard</span>
+      </div>
+      <img src="assets/screenshots/dashboard.png" width="1440" height="900"
+           alt="The Cosplay CMS dashboard: five metric cards showing total costumes, collection worth, active loans, active contact lenses and lenses expiring soon, above the tab navigation.">
+    </figure>
+    <figcaption class="shot-cap">
+      The dashboard. Metrics are summed from the same rows the cards render, so
+      the number can never disagree with the list underneath it.
+    </figcaption>
+  </div>
+</section>
+
+<!-- ============================ FEATURES ============================ -->
+<section class="section" id="features">
+  <div class="container">
+    <p class="eyebrow">What it does</p>
+    <h2>Built for a real wardrobe, not a demo</h2>
+    <p class="section-lede">
+      Every feature exists because a cosplayer with a growing collection
+      actually needed it — status tracking, loan records, photo milestones,
+      expiry alerts, and a maker directory to call when a prop breaks.
+    </p>
+
+    <div class="grid">
+      <article class="card">
+        <div class="card-ico">👘</div>
+        <h3>Costume catalogue</h3>
+        <p>Fandom, character, brand, size, full-set flag, buy and sell prices,
+           notes and reference links. Status moves a record between
+           <em>In Possession</em>, <em>On Loan</em>, <em>To Be Sold</em> and
+           <em>Wishlist</em> — and the Wishlist is just a filtered view of the
+           same rows, so nothing is ever duplicated.</p>
+      </article>
+
+      <article class="card">
+        <div class="card-ico">⚔️</div>
+        <h3>Props &amp; weapons</h3>
+        <p>Category, condition, storage location and notes, optionally linked to
+           the costume it belongs to — so the Astesia sword shows up on the
+           Astesia card.</p>
+      </article>
+
+      <article class="card">
+        <div class="card-ico">👁️</div>
+        <h3>Contact lenses &amp; expiry</h3>
+        <p>Per-vial tracking with unopened, active, expiring-soon, expired and
+           disposed states. A scheduled checker pushes expiry warnings to
+           Telegram so a vial is never worn a month past its date.</p>
+      </article>
+
+      <article class="card">
+        <div class="card-ico">🛠️</div>
+        <h3>Maker corner</h3>
+        <p>The people who built your props: name, type — prop, weapon or
+           accessory — and contact links. Each card carries real
+           <code>tel:</code> and <code>mailto:</code> buttons, so reaching a
+           maker is one tap rather than a note in a phone.</p>
+      </article>
+
+      <article class="card">
+        <div class="card-ico">🏷️</div>
+        <h3>Reference lists</h3>
+        <p>Brands and fandoms as first-class, searchable tables with store
+           links, not free text sprinkled through a notes field. Duplicate
+           detection is near-string, so “1/3 Delusion” and “1/3  delusion ” are
+           caught rather than both saved.</p>
+      </article>
+
+      <article class="card">
+        <div class="card-ico">📸</div>
+        <h3>Photos &amp; milestones</h3>
+        <p>Multi-image galleries per record, processed and re-encoded by
+           <code>sharp</code> and renamed to opaque UUIDs, with a progress bar
+           and percentage while uploading. Milestone checkboxes for costume
+           test, event day and photo session.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ SCREENSHOT GALLERY ============================ -->
+<section class="section section-alt" id="gallery">
+  <div class="container">
+    <p class="eyebrow">Screenshots</p>
+    <h2>The app, tab by tab</h2>
+    <p class="section-lede">
+      Real captures of a running instance — not mockups. Dark theme, a single
+      HTML file, no framework. Screenshot selection is limited to tabs whose data
+      contains nothing private.
+    </p>
+
+    <div class="shots">
+      <figure class="shot-card">
+        <img src="assets/screenshots/costumes.png" loading="lazy" alt="The Costumes tab: a responsive card grid of costume entries with thumbnails, fandom, character, brand, size, status badges and prices.">
+        <figcaption><b>Costumes</b> — card grid with status badges, prices and photo strips.</figcaption>
+      </figure>
+      <figure class="shot-card">
+        <img src="assets/screenshots/props.png" loading="lazy" alt="The Props &amp; Accessories tab listing weapons such as the Aquila Favonia, Clow Wand and Hysilens Dual Sword, with category and condition.">
+        <figcaption><b>Props &amp; Accessories</b> — weapons and accessories, linked back to their costume.</figcaption>
+      </figure>
+      <figure class="shot-card">
+        <img src="assets/screenshots/reference-lists.png" loading="lazy" alt="The Reference Lists tab with side-by-side Brands &amp; Makers and Fandoms panels, each with its own create form and search box.">
+        <figcaption><b>Reference Lists</b> — brands and fandoms, each with an independent search.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ STACK ============================ -->
+<section class="section" id="stack">
+  <div class="container stack-grid">
+    <div>
+      <p class="eyebrow">Under the hood</p>
+      <h2>Boring on purpose</h2>
+      <p class="section-lede">
+        There is no framework, no bundler, no transpiler and no CDN request.
+        The frontend is one <code>public/index.html</code> with an inline
+        stylesheet and one inline script. You clone it, run it, and it works —
+        which means it still works in five years.
+      </p>
+      <ul class="ticks">
+        <li>Node 22+, Express 5, <code>sqlite3</code> via short-lived child processes</li>
+        <li>Validation and SQL escaping on every write — a bad request is a 400, never a half-written row</li>
+        <li>Rate limiting on <code>/api</code>, Helmet, CORS allowlist</li>
+        <li><code>sharp</code> for image processing; <code>multer</code> for uploads</li>
+        <li>Dockerfile and compose file included; SQLite file and uploads live in <code>data/</code></li>
+      </ul>
+    </div>
+    <div class="panel">
+      <div class="panel-row"><span>Frontend</span><b>Vanilla HTML/CSS/JS</b></div>
+      <div class="panel-row"><span>Backend</span><b>Express 5</b></div>
+      <div class="panel-row"><span>Database</span><b>SQLite (CLI child process)</b></div>
+      <div class="panel-row"><span>Images</span><b>sharp + multer</b></div>
+      <div class="panel-row"><span>Alerts</span><b>Telegram + n8n</b></div>
+      <div class="panel-row"><span>Auth</span><b>None, by design</b></div>
+      <div class="panel-row"><span>Dependencies</span><b>8</b></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ QUICKSTART ============================ -->
+<section class="section section-alt" id="quickstart">
+  <div class="container">
+    <p class="eyebrow">Quick start</p>
+    <h2>Running in two commands</h2>
+
+    <div class="code-tabs" role="tablist" aria-label="Install method">
+      <button class="code-tab active" role="tab" aria-selected="true" data-mode="npm">Node</button>
+      <button class="code-tab" role="tab" aria-selected="false" data-mode="docker">Docker</button>
+    </div>
+
+    <div class="code-block" data-mode="npm">
+<pre><code><span class="c-p"># clone and install</span>
+git clone https://github.com/rielolita171/cosplay-cms.git
+cd cosplay-cms
+npm install
+
+<span class="c-p"># run — listens on PORT (default 4001)</span>
+npm start
+
+<span class="c-p"># open http://localhost:4001</span></code></pre>
+    </div>
+
+    <div class="code-block" data-mode="docker" hidden>
+<pre><code><span class="c-p"># build and start the stack</span>
+docker compose up -d --build
+
+<span class="c-p"># compose binds the port to loopback:</span>
+<span class="c-c">#   127.0.0.1:${CMS_PORT:-4001}:4001</span>
+<span class="c-c"># so it is invisible to the LAN and</span>
+<span class="c-c"># you must tunnel in.</span>
+
+<span class="c-p"># open http://localhost:4001</span></code></pre>
+    </div>
+
+    <div class="note">
+      <b>Configuration</b> is read from <code>.env</code> at the repository root.
+      The names that matter are <code>PORT</code>, <code>NODE_ENV</code>,
+      <code>DATABASE_PATH</code>, <code>API_KEY</code>, <code>CORS_ORIGIN</code>
+      and <code>TELEGRAM_BOT_TOKEN</code>. Keep their values in <code>.env</code> —
+      never in a commit.
+    </div>
+
+    <div class="note warn">
+      <b>This build has no authentication.</b> That is deliberate: it is a
+      single-user box, and the boundary is the network, not the application.
+      Keep the port on a trusted LAN or VPN, put an authenticating reverse proxy
+      in front, or tunnel it —
+      <code>ssh -L 4001:127.0.0.1:4001 user@host</code>.
+      <b>Do not publish the port to the internet.</b>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ CTA ============================ -->
+<section class="section cta">
+  <div class="container cta-inner">
+    <h2>Fork it, run it, make it yours</h2>
+    <p class="section-lede">
+      The database is one file. Point it at your own wardrobe and it is
+      already yours.
+    </p>
+    <div class="cta-row center">
+      <a class="btn btn-primary" href="https://github.com/rielolita171/cosplay-cms" target="_blank" rel="noopener">View on GitHub ↗</a>
+      <a class="btn btn-ghost" href="https://github.com/rielolita171/cosplay-cms#readme" target="_blank" rel="noopener">Read the docs</a>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container footer-inner">
+    <span>Cosplay CMS — built for one cosplayer, shared freely.</span>
+    <span><a href="https://github.com/rielolita171/cosplay-cms" target="_blank" rel="noopener">rielolita171/cosplay-cms</a></span>
+  </div>
+</footer>
+
+<script src="assets/site.js" defer></script>
+</body>
+</html>
