@@ -111,20 +111,37 @@ async function countCostumesUsing(name) {
 }
 
 // ============================================================================
-// GET /api/fandoms - List fandoms with their costume usage count
+// GET /api/fandoms - List fandoms with their costume usage count and pagination
 // ============================================================================
 router.get('/', async (req, res) => {
   try {
+    // Pagination: page (1-based), limit (10, 25, 50)
+    const pageNum = Math.max(1, parseInt(req.query.page) || 1);
+    const limitNum = [10, 25, 50].includes(parseInt(req.query.limit)) ? parseInt(req.query.limit) : 25;
+    const offset = (pageNum - 1) * limitNum;
+
     // LEFT-equivalent correlated subquery, so a fandom with zero costumes still
     // appears in the management list.
+    const countSql = `SELECT COUNT(*) FROM "Fandom";`;
+    const countResult = await queryDb(countSql);
+    const totalCount = parseInt(countResult, 10) || 0;
+
     const sql = `SELECT f.id, f.name, f.nameLower, f.createdAt, f.updatedAt,
                         (SELECT COUNT(*) FROM "Costume" c
                           WHERE LOWER(TRIM(c.fandom)) = f.nameLower) AS costumeCount
-                 FROM "Fandom" f
-                 ORDER BY f.name COLLATE NOCASE ASC;`;
+                   FROM "Fandom" f
+                   ORDER BY f.name COLLATE NOCASE ASC
+                   LIMIT ${limitNum} OFFSET ${offset};`;
     const fandoms = parseSqlResult(await queryDb(sql), FANDOM_COLUMNS.concat(['costumeCount']));
 
-    res.json({ count: fandoms.length, fandoms });
+    res.json({
+      count: fandoms.length,
+      totalCount: totalCount,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(totalCount / limitNum),
+      fandoms
+    });
   } catch (error) {
     respondWithError(res, error);
   }

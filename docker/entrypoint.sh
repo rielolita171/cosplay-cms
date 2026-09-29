@@ -80,7 +80,25 @@ log "schema applied to ${DB_FILE} (${TABLE_COUNT} tables present)"
 # Asserting the specific tables the app actually queries means the check states what
 # it is for: "every table the routes read from exists", which stays correct across
 # schema changes in both directions.
-REQUIRED_TABLES="Brand Fandom Costume Prop ContactLens ServerSetting TelegramChat"
+# "Maker" is here because /api/makers reads it, and this list exists precisely
+# to be "every table the routes read from exists". A boot that passed without it
+# would come up healthy, serve every other tab, and 500 on the Maker Corner tab
+# alone.
+#
+# SAFE ON AN EXISTING VOLUME, and that is worth being explicit about because it
+# looks like it should not be. The check runs AFTER init_db.sql has been applied
+# above, and init_db.sql is CREATE TABLE IF NOT EXISTS throughout — which CREATES
+# a table that is missing rather than skipping it. The "IF NOT EXISTS" guard only
+# makes it a no-op when the table is ALREADY there. Verified against a simulated
+# old volume holding only Costume/Prop/ContactLens: re-running init_db.sql added
+# Brand, Fandom, TelegramChat, Maker and ServerSetting, and the check then passed.
+#
+# The reason it could NOT be added is the ALTER case, not the CREATE case. A
+# statement that adds a COLUMN to an existing table has no equivalent here, which
+# is why src/services/db.js initSchema() keeps a duplicate of the Maker CREATE —
+# that is what covers a bare `npm start` against an old database, where no
+# entrypoint runs at all.
+REQUIRED_TABLES="Brand Fandom Costume Prop ContactLens Maker ServerSetting TelegramChat"
 
 MISSING=""
 for table in ${REQUIRED_TABLES}; do

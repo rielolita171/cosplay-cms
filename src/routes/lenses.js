@@ -58,6 +58,18 @@ const LENS_COLUMNS = [
   'createdAt', 'updatedAt', 'colorHex'
 ];
 
+// `imageUrl` IS DELIBERATELY STILL LISTED, even though contact lenses have no
+// photo and nothing in this app writes the column any more. It is a POSITIONAL
+// map, not a projection: GET / queries `SELECT *` and hands the rows to
+// parseSqlResult(), which walks this array by index. Dropping the name here
+// would not remove the column's VALUE from the pipe-delimited output — it
+// would silently shift every field after it, so `createdAt` would be served
+// under the name `imageUrl`, `updatedAt` as `createdAt`, and `colorHex` would
+// be dropped off the end, taking the swatch colour with it. The lens cards
+// would render blank dates rather than fail loudly, which is the harder bug to
+// notice. The column stays in the schema for the same reason: existing rows
+// keep whatever they were saved with instead of being destroyed by a cleanup.
+
 // `color` remains the free-text NAME and keeps its 80-char cap; `colorHex` is the
 // optional, strictly-validated #RRGGBB companion. Both live side by side: the
 // name is what the user reads, searches (GET /?color=) and already has bespoke
@@ -89,7 +101,7 @@ function checkExpiryStatus(expiryDate) {
 }
 
 // ============================================================================
-// GET /api/lenses - List all lenses with filtering
+// GET /api/lenses - List all lenses with filtering and pagination
 // ============================================================================
 router.get('/', async (req, res) => {
   try {
@@ -100,21 +112,35 @@ router.get('/', async (req, res) => {
     const color = textParam(req.query.color, { name: 'color', maxLength: MAX_LENS_COLOR_LENGTH });
     const brand = textParam(req.query.brand, { name: 'brand', maxLength: MAX_LENS_BRAND_LENGTH });
 
+    // Pagination: page (1-based), limit (10, 25, 50)
+    const pageNum = Math.max(1, parseInt(req.query.page) || 1);
+    const limitNum = [10, 25, 50].includes(parseInt(req.query.limit)) ? parseInt(req.query.limit) : 25;
+    const offset = (pageNum - 1) * limitNum;
+
     let where = '1=1';
     if (status) where += ` AND status = ${esc(status)}`;
     if (color) where += ` AND color LIKE ${esc(`%${color}%`)}`;
     if (brand) where += ` AND brand LIKE ${esc(`%${brand}%`)}`;
 
-    // SELECT * so the cards receive prescription/purchaseDate/notes/imageUrl,
-    // which the previous 6-column projection dropped.
+    // SELECT * so the cards receive prescription/purchaseDate/notes, which the
+    // previous 6-column projection dropped. LENS_COLUMNS must therefore stay a
+    // complete, order-for-order match of the table — see the note above it.
     // ORDER BY character is a hard-coded column — nothing user-supplied reaches
     // an identifier position anywhere in this file.
-    const sql = `SELECT * FROM "ContactLens" WHERE ${where} ORDER BY character ASC;`;
+    const countSql = `SELECT COUNT(*) FROM "ContactLens" WHERE ${where};`;
+    const countResult = await queryDb(countSql);
+    const totalCount = parseInt(countResult, 10) || 0;
+
+    const sql = `SELECT * FROM "ContactLens" WHERE ${where} ORDER BY character ASC LIMIT ${limitNum} OFFSET ${offset};`;
     const result = await queryDb(sql);
     const lenses = parseSqlResult(result, LENS_COLUMNS);
 
     res.json({
       count: lenses.length,
+      totalCount: totalCount,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(totalCount / limitNum),
       lenses: lenses,
       statuses: LENS_STATUSES
     });

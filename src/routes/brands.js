@@ -156,20 +156,37 @@ async function countCostumesUsing(name) {
 }
 
 // ============================================================================
-// GET /api/brands - List brands with their costume usage count
+// GET /api/brands - List brands with their costume usage count and pagination
 // ============================================================================
 router.get('/', async (req, res) => {
   try {
+    // Pagination: page (1-based), limit (10, 25, 50)
+    const pageNum = Math.max(1, parseInt(req.query.page) || 1);
+    const limitNum = [10, 25, 50].includes(parseInt(req.query.limit)) ? parseInt(req.query.limit) : 25;
+    const offset = (pageNum - 1) * limitNum;
+
     // LEFT JOIN on the lower-cased name is the soft-reference lookup. LEFT (not
     // INNER) so a brand with zero costumes still appears in the management list.
+    const countSql = `SELECT COUNT(*) FROM "Brand";`;
+    const countResult = await queryDb(countSql);
+    const totalCount = parseInt(countResult, 10) || 0;
+
     const sql = `SELECT b.id, b.name, b.nameLower, b.storeUrl, b.createdAt, b.updatedAt,
                         (SELECT COUNT(*) FROM "Costume" c
                           WHERE LOWER(TRIM(c.brand)) = b.nameLower) AS costumeCount
-                 FROM "Brand" b
-                 ORDER BY b.name COLLATE NOCASE ASC;`;
+                   FROM "Brand" b
+                   ORDER BY b.name COLLATE NOCASE ASC
+                   LIMIT ${limitNum} OFFSET ${offset};`;
     const brands = parseSqlResult(await queryDb(sql), BRAND_COLUMNS.concat(['costumeCount']));
 
-    res.json({ count: brands.length, brands });
+    res.json({
+      count: brands.length,
+      totalCount: totalCount,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(totalCount / limitNum),
+      brands
+    });
   } catch (error) {
     respondWithError(res, error);
   }

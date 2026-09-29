@@ -63,6 +63,25 @@ function runSql(sql) {
  * Strings are the only caller-supplied type that reaches SQL; everything else
  * is coerced to a number/boolean by the caller.
  */
+/**
+ * Quote a value for inline SQL.
+ *
+ * THE ESCAPE IS `''`, AND THAT IS CORRECT ONLY FOR THE UNICODE SQL LITERALS.
+ * SQLite has no backslash escape sequence, so a doubled single quote is the way
+ * to put a quote inside a string literal here — the SQL-standard spelling that
+ * happens to be exactly what SQLite accepts. (It is not a no-op: SQLite does
+ * honour `''`, it simply also happens to accept the double-quote and bracket
+ * forms that other engines do not.)
+ *
+ * KEEP THIS IN MIND WHEREVER esc() IS USED. Any statement that is later handed
+ * to a `json_*` function is parsed a SECOND time by that function's own SQL
+ * parser, and inside that second parse `''` is two separate quote characters,
+ * not one escaped quote. The strings that go there must be serialised with
+ * json_quote()/json_array() instead, which is what normalizeImageUrls() and
+ * its siblings do for the `imageUrls` columns. The "b" in the value that a
+ * doubled quote would protect against is a single closing quote in that
+ * context, so the failure is a syntax error rather than an injection.
+ */
 function esc(value) {
   if (value === null || value === undefined) return 'NULL';
   return `'${String(value).replace(/'/g, "''")}'`;
@@ -180,6 +199,38 @@ async function initSchema() {
       );
     `).catch((error) => {
       console.warn('⚠️  TelegramChat table not created:', error.message);
+    });
+
+    // MAKER CORNER — same reasoning as TelegramChat above, for the same reason.
+    //
+    // init_db.sql declares "Maker", but that file is CREATE-IF-NOT-EXISTS ONLY,
+    // so it cannot add the table to a volume that was built before Maker Corner
+    // existed. Without this statement every request to /api/makers would fail
+    // with "no such table: Maker" on exactly the databases that are already
+    // deployed, which is the whole point of a migration.
+    //
+    // The column list is spelled out here rather than reused from init_db.sql,
+    // because the two files cannot drift-check each other: this is the only copy
+    // an existing database ever runs. It matches init_db.sql exactly, and
+    // MAKER_COLUMNS in src/routes/makers.js is POSITIONAL — a column added to
+    // one and not the other would mislabel every field in the response.
+    await runSql(`
+      CREATE TABLE IF NOT EXISTS "Maker" (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        makerType TEXT NOT NULL,
+        sosmed TEXT,
+        whatsapp TEXT,
+        notes TEXT,
+        createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+    `).catch((error) => {
+      // Its own catch, like every other migration here: the dashboard has to
+      // boot whether or not this succeeded. Without the table the Maker tab
+      // shows an empty state and its POSTs return a readable 500; the rest of
+      // the app is untouched.
+      console.warn('⚠️  Maker table not created:', error.message);
     });
 
     // ONE-TIME MIGRATION of the operator's chat id out of the old account table.

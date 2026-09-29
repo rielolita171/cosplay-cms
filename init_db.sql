@@ -124,6 +124,53 @@ CREATE TABLE IF NOT EXISTS "ContactLens" (
   colorHex TEXT
 );
 
+-- MAKER CORNER
+-- The people who build the things in this collection: the commissions, the prop
+-- makers, the accessory sellers. A maker is a CONTACT with a speciality, not a
+-- costume and not a prop — the same person may have made three different props
+-- for three different costumes, so linking one Maker row to a costume would
+-- have to be many-to-many and there is nothing in the brief that needs it.
+--
+-- WHY A TABLE AND NOT A COLUMN ON "Prop"
+-- A maker is entered once and reused. As a column it would be retyped on every
+-- prop by hand, one spelling drift per row ("Rina", "Rina.", "rina"), and a
+-- correction would have to be made N times.
+--
+-- `makerType` is a CLOSED SET, enforced by the API (enumParam in
+-- src/routes/makers.js) and mirrored in the form's <select>. It is the answer to
+-- "what do they make?", which is what the Corner is sorted and filtered by.
+--
+--   PROP       — the whole prop (sword, shield, staff)
+--   WEAPON     — specifically a weapon
+--   ACCESSORY  — jewellery, belts, pouches, hairpieces
+--
+-- `sosmed` is the maker's SOCIAL MEDIA LINK — one URL to their profile, not a
+-- handle and not a per-network column. It is http(s)-only and validated at the
+-- API boundary (the same rule as "Brand".storeUrl: no javascript:, no data:,
+-- no protocol-relative '//evil.tld'), because the dashboard renders it as an
+-- <a href>; a client-side filter alone is not a control. Any platform works —
+-- Instagram, TikTok, Bluesky, X, a Linktree — so nothing is allowlisted by host.
+--
+-- `whatsapp` is TEXT, not a number: WhatsApp ids carry a country code, a
+-- national number and often '+' and spaces, and a numeric column would force
+-- the user to strip all of that. It is stored as typed; the digits are
+-- validated only when the client builds the wa.me link, which is the single
+-- place the number is ever interpreted.
+--
+-- NO COSTUME LINK, and no photos: a maker entry is a directory entry. The props
+-- they built remain props, with their own photos, and point back here through
+-- their notes if the operator wants the trail.
+CREATE TABLE IF NOT EXISTS "Maker" (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  makerType TEXT NOT NULL,
+  sosmed TEXT,
+  whatsapp TEXT,
+  notes TEXT,
+  createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Runtime server settings (currently the CORS allowlist).
 --
 -- A key/value table rather than columns on an existing table, because these

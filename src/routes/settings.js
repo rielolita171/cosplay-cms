@@ -14,6 +14,8 @@ const express = require('express');
 const router = express.Router();
 
 const settings = require('../services/settings');
+const telegramConfig = require('../services/telegramConfig');
+const telegram = require('../services/telegramService');
 const { rateLimit } = require('../middleware/rateLimit');
 
 /**
@@ -215,6 +217,316 @@ router.post('/settings/cors/reset', corsWriteLimiter, async (req, res) => {
     });
   } catch (error) {
     console.error('❌ reset CORS settings error:', error);
+    res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+  }
+});
+
+// ============================================================================
+// TELEGRAM NOTIFICATION SETTINGS
+// ============================================================================
+//
+// The Telegram block below lives in THIS router rather than in a new file for
+// one reason: it is the same class of thing. Both are runtime configuration the
+// container has no other way to edit, both persist to "ServerSetting", and both
+// are edited from the same Settings tab. A separate file would be a separate
+// mount point for no separation in threat model — and the note at the top of
+// this file, that a control which rewrites runtime configuration should never be
+// edited as a side effect of changing a costume, applies verbatim.
+//
+// The routes are UNAUTHENTICATED, consistent with the CORS routes above and
+// with the rest of the browser-facing app: authn is the reverse proxy's job
+// (see src/server.js). What that makes essential here — and the reason the
+// read endpoint is shaped the way it is — is that the token must not be
+// retrievable through it. Nothing in the response body is the secret.
+//
+// The limiter below is deliberately much tighter than the CORS one. The CORS
+// list is worth at most 30 edits an hour. This is a credential that can be used
+// to send arbitrary messages to arbitrary chats, and the two test buttons make
+// a NETWORK CALL to Telegram on every press, so an unbounded endpoint here would
+// be both a brute-force surface and a way to spend the operator's rate limit.
+const telegramWriteLimiter = rateLimit({
+  name: 'settings-telegram-write',
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: 'Too many Telegram setting changes. Please slow down.'
+});
+
+/**
+ * Test-send limiter. Separate from the write limiter and far tighter, because
+ * this endpoint does not change anything: it just makes the server talk to
+ * Telegram. Ten an hour is well above a human debugging a token and well below
+ * anything that should be able to use this as a relay.
+ */
+const telegramTestLimiter = rateLimit({
+  name: 'settings-telegram-test',
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  message: 'Too many test messages. Telegram testing is limited to 10 an hour.'
+});
+
+/**
+ * GET /api/settings/telegram — the effective config, never the token itself.
+ *
+ * The shape is deliberately a DESCRIPTION of the token rather than the token:
+ *
+ *   { configured: bool, source: 'database'|'env'|'none',
+ *     botId, secretLength, fingerprint }
+ *
+ * `source` answers "why is this not the one I saved", `botId` (the public half,
+ * the one in an @username link) makes the right token identifiable at a glance,
+ * and `fingerprint` lets an admin confirm the in-force token is still the one
+ * they pasted without the secret ever being readable from the page. An endpoint
+ * that echoed the token back would make the whole thing a credential exfiltration
+ * surface for anyone who can reach the port, which on this app is anyone who
+ * reached the CORS allowlist at all.
+ */
+router.get('/settings/telegram', async (req, res) => {
+  try {
+    const [config, thresholdDays] = await Promise.all([
+      telegramConfig.getTelegramConfig(),
+      telegramConfig.getExpiryThresholdDays()
+    ]);
+    res.json({
+      token: config.token,
+      chatId: config.chatId,
+      // The window the daily lens-expiry check will use.
+      thresholdDays,
+      limits: {
+        maxTokenLength: telegramConfig.MAX_TOKEN_LENGTH,
+        maxThresholdDays: telegramConfig.MAX_THRESHOLD_DAYS,
+        defaultThresholdDays: telegramConfig.DEFAULT_THRESHOLD_DAYS
+      }
+    });
+  } catch (error) {
+    console.error('❌ read Telegram settings error:', error);
+    res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+  }
+});
+
+/**
+ * PUT /api/settings/telegram/token — save a bot token.
+ *
+ * Body: { token: string }
+ *
+ * The token is validated, persisted, and pushed into the transport in one
+ * awaited unit, so it is live for the very next test button press. See
+ * saveTelegramToken() in services/telegramConfig.js for why this deliberately
+ * does NOT use the CORS route's defer-the-swap-until-after-the-response trick.
+ *
+ * An invalid token answers 400 with the reason and the CURRENT config attached,
+ * so the form can redraw itself without a second round trip. That is not a leak:
+ * the config is the same description GET returns, and it is what stops a failed
+ * save from blanking the fields the admin had already filled in.
+ */
+router.put('/settings/telegram/token', telegramWriteLimiter, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const result = await telegramConfig.saveTelegramToken(body.token);
+    if (!result.ok) {
+      return res.status(400).json({
+        error: result.error,
+        code: result.code,
+        config: { token: result.config.token, chatId: result.config.chatId }
+      });
+    }
+    res.json({
+      ok: true,
+      token: result.config.token,
+      chatId: result.config.chatId
+    });
+  } catch (error) {
+    console.error('❌ write Telegram token error:', error);
+    res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+  }
+});
+
+/**
+ * POST /api/settings/telegram/token/clear — drop the saved token.
+ *
+ * A delete rather than a write of "", so that "there is no override" and "the
+ * override is blank" cannot become the same state — the absence of the row IS
+ * the mechanism by which the .env value resumes, and the same one CORS uses.
+ */
+router.post('/settings/telegram/token/clear', telegramWriteLimiter, async (req, res) => {
+  try {
+    const result = await telegramConfig.clearTelegramToken();
+    res.json({ ok: true, token: result.config.token, chatId: result.config.chatId });
+  } catch (error) {
+    console.error('❌ clear Telegram token error:', error);
+    res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+  }
+});
+
+/**
+ * PUT /api/settings/telegram/chat — save the delivery chat id.
+ *
+ * Body: { chatId: string }   (an empty string CLEARS it)
+ *
+ * A chat id is validated as a signed integer because that is the only shape
+ * Telegram has. Rejecting "not a number" here turns a confusing 400 from
+ * api.telegram.org ("chat not found") into a clear message at the point of
+ * entry, and it also means the value is never pasted into a request body with
+ * whatever the operator's clipboard happened to contain.
+ */
+router.put('/settings/telegram/chat', telegramWriteLimiter, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const raw = (body.chatId === null || body.chatId === undefined) ? '' : String(body.chatId).trim();
+
+    if (raw) {
+      if (!/^-?\d+$/.test(raw)) {
+        const current = await telegramConfig.getTelegramConfig();
+        return res.status(400).json({
+          error: 'A Telegram chat id is a whole number, optionally starting with a minus for a group. Get it by messaging @userinfobot.',
+          code: 'VALIDATION_ERROR',
+          config: { token: current.token, chatId: current.chatId }
+        });
+      }
+      // Telegram ids are 32-bit-ish; anything past this is a pasted error page
+      // or a conversation id in a newer format, and would only fail at send time.
+      if (raw.replace('-', '').length > 20) {
+        const current = await telegramConfig.getTelegramConfig();
+        return res.status(400).json({
+          error: 'That is not a Telegram chat id — it is too long to be one.',
+          code: 'VALIDATION_ERROR',
+          config: { token: current.token, chatId: current.chatId }
+        });
+      }
+    }
+
+    const result = await telegramConfig.saveTelegramChatId(raw);
+    res.json({ ok: true, token: result.config.token, chatId: result.config.chatId });
+  } catch (error) {
+    console.error('❌ write Telegram chat id error:', error);
+    res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+  }
+});
+
+/**
+ * POST /api/settings/telegram/verify-token — is this token real?
+ *
+ * Runs getMe, which asks Telegram who the bot is WITHOUT sending a message.
+ *
+ * This is the test to press first, and the reason is diagnostic: a send-message
+ * test has two independent ways to fail — a bad token and a bad chat id — and
+ * Telegram reports both as a flat 400, so a failing send cannot tell them
+ * apart. getMe isolates the credential. If this passes and the send still
+ * fails, the token is fine and the problem is the chat.
+ *
+ * Answered 200 with `ok: false` for an expected outcome (a rejected token) and
+ * 4xx/5xx only for genuine server trouble, so the UI can show the reason as a
+ * result rather than as an error. There is no 200-with-ok:false trap for the
+ * caller to have to remember to check — the field is named `ok` precisely so it
+ * reads the same as the {ok:true} every other write in this file returns.
+ */
+router.post('/settings/telegram/verify-token', telegramTestLimiter, async (req, res) => {
+  try {
+    const result = await telegram.getBotInfo();
+    res.json(result);
+  } catch (error) {
+    console.error('❌ verify Telegram token error:', error);
+    res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+  }
+});
+
+/**
+ * POST /api/settings/telegram/test-message — send a real test message.
+ *
+ * Body: { text?: string }   (an omitted or empty text uses a default)
+ *
+ * The ONE place in this codebase where a deliberately-written message is sent
+ * by hand, so the honest sender is used rather than sendTelegramMessage() — see
+ * the long note on sendTelegramMessageStrict(). The difference that matters:
+ * sendTelegramMessage() reports success when the token is missing, when the
+ * network is down, and when the request times out, which is right for the 2FA
+ * path and catastrophic for a button labelled "Send test".
+ *
+ * The message is NOT written into the ServerSetting table. It is a diagnostic
+ * message, and a persisted copy of whatever was last typed into a test box is
+ * not state the app needs — nothing reads it back.
+ */
+router.post('/settings/telegram/test-message', telegramTestLimiter, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const chatId = await telegramConfig.getTelegramConfig().then(cfg => cfg.chatId);
+    const text = (typeof body.text === 'string' && body.text.trim())
+      ? body.text.trim()
+      : '✅ <b>Cosplay CMS</b> — this is a test notification. If you can read this, Telegram delivery is working.';
+
+    if (!chatId) {
+      return res.status(400).json({
+        error: 'No chat id is configured yet, so there is nowhere to send the test. Save one first.',
+        code: 'CHAT_MISSING'
+      });
+    }
+
+    const result = await telegram.sendTelegramMessageStrict(chatId, text);
+    // A Telegram refusal is a real, expected answer — the whole purpose of this
+    // button — so it is 200 with ok:false and the reason, not a 5xx.
+    res.json(result);
+  } catch (error) {
+    console.error('❌ send Telegram test message error:', error);
+    res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+  }
+});
+
+/**
+ * PUT /api/settings/telegram/threshold — how many days ahead to alert.
+ *
+ * Body: { days: number|string }   (an omitted, null or empty value RESETS to the
+ *                                  built-in default rather than storing a blank)
+ *
+ * This is the setting the alert window lives in, and it is the reason the whole
+ * Telegram block exists. The daily lens-expiry check in this same process asks
+ * "what is expiring?" once a day; the ANSWER to that question is this number.
+ * The window used to be hardcoded in an external scheduler's URL, which meant
+ * changing it meant editing a file in another application by hand. Now it is
+ * here, in the app, editable without a restart — the checker re-reads it on
+ * every run, so a change takes effect on the next check, not the next boot.
+ *
+ * Accepted as a number or a numeric string, because an <input type="number">
+ * still hands the DOM a string and a JSON client may legitimately send either.
+ * Anything that is not a whole number in [0, MAX_THRESHOLD_DAYS] is a 400 that
+ * NAMES the range, because a threshold of -3 or 9999 is not a value to be
+ * silently rounded into something plausible — the operator would then wonder
+ * why their lenses are not being flagged.
+ */
+router.put('/settings/telegram/threshold', telegramWriteLimiter, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const raw = (body.days === null || body.days === undefined) ? '' : String(body.days).trim();
+    const current = await telegramConfig.getTelegramConfig();
+    const reject = (message) => res.status(400).json({
+      error: message,
+      code: 'VALIDATION_ERROR',
+      config: { token: current.token, chatId: current.chatId }
+    });
+
+    // '' means "no override" -> back to the default. A blank box must not store a
+    // blank, for the same reason a blank token does not: the ABSENCE of the row
+    // is what makes the default apply.
+    let days = null;
+    if (raw !== '') {
+      if (!/^\d+$/.test(raw)) {
+        return reject('The alert window must be a whole number of days, 0 or more.');
+      }
+      days = Number(raw);
+      if (days > telegramConfig.MAX_THRESHOLD_DAYS) {
+        return reject('The alert window cannot be more than ' + telegramConfig.MAX_THRESHOLD_DAYS +
+          ' days — beyond that you would be warned about every lens you own, every day.');
+      }
+    }
+
+    const saved = await telegramConfig.setExpiryThresholdDays(days);
+    res.json({
+      ok: true,
+      thresholdDays: saved,
+      isDefault: days === null,
+      token: current.token,
+      chatId: current.chatId
+    });
+  } catch (error) {
+    console.error('❌ write Telegram threshold error:', error);
     res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
   }
 });

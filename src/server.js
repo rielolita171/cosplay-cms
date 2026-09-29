@@ -81,6 +81,8 @@ app.use(helmet({
 // backs the cache up). DEFAULT_CORS_ORIGIN now lives in settings.js so the
 // fallback has exactly one definition.
 const settings = require('./services/settings');
+const telegramConfig = require('./services/telegramConfig');
+const lensExpiryChecker = require('./services/lensExpiryChecker');
 
 app.use(cors({
   origin(origin, callback) {
@@ -193,6 +195,11 @@ app.get('/api/version', (req, res) => {
       'GET /api/props/:id',
       'PUT /api/props/:id',
       'DELETE /api/props/:id',
+      'GET /api/makers',
+      'POST /api/makers',
+      'GET /api/makers/:id',
+      'PUT /api/makers/:id',
+      'DELETE /api/makers/:id',
       'GET /api/lenses',
       'POST /api/lenses',
       'GET /api/lenses/:id',
@@ -248,6 +255,13 @@ app.use('/props', propsRoutes);
 const lensesRoutes = require('./routes/lenses');
 app.use('/api/lenses', lensesRoutes);
 app.use('/lenses', lensesRoutes);
+
+// Maker Corner — the maker directory. Mounted on the same double path as the
+// other data routers (the un-prefixed alias is how the rest of this server is
+// wired, so a Maker link should not be the odd one out).
+const makerRoutes = require('./routes/makers');
+app.use('/api/makers', makerRoutes);
+app.use('/makers', makerRoutes);
 
 // Image endpoints. The browser app and n8n both use these, and the API key is
 // still accepted where the router asks for it.
@@ -315,6 +329,34 @@ db.initSchema()
     // falls back to the .env/default list and retries on the next request.
     return settings.primeCache();
   })
+  .then(() => {
+    // Push the admin-saved Telegram token into the transport. This MUST run
+    // before the first notification is attempted: a token saved through the
+    // Settings form is in the database, not in process.env, so without this
+    // the server would keep using the .env token (or none) until the next
+    // restart — a setting the UI reports as "saved" that quietly is not in
+    // force. primeTelegramConfig() is chained rather than raced so the startup
+    // report below can trust its result.
+    return telegramConfig.primeTelegramConfig();
+  })
+  .then(source => {
+    reportTelegramConfig(source);
+  })
+  .then(() => {
+    // The daily expiry check starts LAST, and only once the token it will send
+    // with is already in the transport. Starting it earlier would mean the
+    // first tick could read a stale token; starting it unconditionally at all
+    // would mean a process that is only being used as an API keeps a timer it
+    // never needs.
+    //
+    // A missing token or chat id does NOT stop the timer. That is deliberate:
+    // the operator may paste a token into Settings minutes after the server
+    // booted, and a checker that had switched itself off at boot would need a
+    // restart to come back — which is exactly the thing the settings screen
+    // promises never to require. The check re-reads the config every run, so it
+    // simply does nothing until there is something to send with.
+    lensExpiryChecker.start();
+  })
   .catch((error) => {
     console.error('❌ Schema initialisation failed:', error.message);
   });
@@ -329,17 +371,23 @@ db.initSchema()
  * arrive — and refusing to boot over it would be the wrong trade.
  *
  * It never prints a chat id, a bot token, or any credential.
+ *
+ * `source` is the resolution result handed back by primeTelegramConfig(). This
+ * check used to read process.env directly, which was the only place a token
+ * could live. Now that one can also come from "ServerSetting", reading the env
+ * here would print a loud "NOT CONFIGURED" warning at the top of every boot
+ * for an installation whose token was perfectly well saved in the UI — teaching
+ * the operator to ignore this banner, which is the opposite of its purpose.
  */
-async function reportTelegramConfig() {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const configured = !!token && !token.includes('$(') && !token.includes('your_') && !token.includes('here');
-  if (configured) return;
+function reportTelegramConfig(source) {
+  if (source === 'database' || source === 'env') return;
 
   console.warn('\n' + '='.repeat(60));
-  console.warn('⚠️  TELEGRAM_BOT_TOKEN IS NOT CONFIGURED.');
+  console.warn('⚠️  NO TELEGRAM BOT TOKEN IS CONFIGURED.');
   console.warn('   Notification messages will NOT be delivered — the service falls back');
   console.warn('   to printing them to the log instead of sending them.');
-  console.warn('   Fix: set a real bot token in .env (from @BotFather).');
+  console.warn('   Fix: paste a token from @BotFather into Settings → Telegram, or set');
+  console.warn('        TELEGRAM_BOT_TOKEN in .env. Both work; the UI wins if both are set.');
   console.warn('='.repeat(60) + '\n');
 }
 
@@ -380,8 +428,10 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('   GET  /api/version');
   console.log('');
   console.log('🔓 Data routes: /api/costumes, /api/brands, /api/fandoms, /api/props,');
-  console.log('               /api/lenses, /api/images  — NO AUTHENTICATION REQUIRED');
+  console.log('               /api/lenses, /api/makers, /api/images  — NO AUTHENTICATION REQUIRED');
   console.log('🤖 API-key routes: /api/notifications (X-CMS-API-KEY required)');
+  console.log('🔔 Lens expiry alerts: checked daily by this server itself — no external');
+  console.log('   scheduler, no n8n. Window and credentials: Settings → Telegram.');
   console.log('\n⚠️  This server does not authenticate anyone. Anyone who can reach this');
   console.log('   port has full read AND write access to every record. Keep it on a');
   console.log('   trusted network only — do not publish it to the internet.\n');
@@ -445,6 +495,11 @@ function shutdown(signal) {
     console.error(`   ⏱️  ${SHUTDOWN_FAILSAFE_MS}ms elapsed with connections still open, forcing exit (code 1).`);
     process.exit(1);
   }, SHUTDOWN_FAILSAFE_MS);
+
+  // Stop the daily check before draining. The timer is already unref'd so it
+  // cannot hold the process open by itself, but clearing it here means a
+  // shutdown never has an in-flight alert racing the exit.
+  lensExpiryChecker.stop();
 
   // server.close() reports its error argument; there is no error to expect here,
   // but an explicit handler keeps a future failure from becoming an unhandled

@@ -21,7 +21,7 @@
     },
     {
       "parameters": {
-        "url": "http://localhost:4001/api/notifications/contact-lenses/expiring?days=14",
+        "url": "http://localhost:4001/api/notifications/contact-lenses/expiring",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [

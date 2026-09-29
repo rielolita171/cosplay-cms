@@ -15,6 +15,48 @@ const MAX_LOCATION_LENGTH = 160;
 const MAX_PROP_NOTES_LENGTH = 2000;
 const MAX_COSTUME_ID_LENGTH = 64;
 
+// Image validation constants (max 3 photos for props)
+const MAX_PROP_IMAGES = 3;
+const MAX_IMAGE_URL_LENGTH = 2048;
+
+/**
+ * Validate an incoming `imageUrls` value for props.
+ * @returns {string|null} the canonical JSON string to persist, or null when the
+ *   field is absent (null === "leave the column alone").
+ * @throws {Error} with `status = 400` when the value is malformed.
+ */
+function normalizePropImageUrls(value) {
+  if (value === undefined || value === null) return null;
+
+  let urls;
+  if (Array.isArray(value)) {
+    urls = value;
+  } else if (typeof value === 'string') {
+    try {
+      urls = JSON.parse(value);
+    } catch (parseError) {
+      throw Object.assign(new Error('imageUrls must be a JSON array of strings'), { status: 400 });
+    }
+  } else {
+    throw Object.assign(new Error('imageUrls must be a JSON array of strings'), { status: 400 });
+  }
+
+  if (!Array.isArray(urls)) {
+    throw Object.assign(new Error('imageUrls must be a JSON array of strings'), { status: 400 });
+  }
+  if (urls.length > MAX_PROP_IMAGES) {
+    throw Object.assign(new Error(`imageUrls accepts at most ${MAX_PROP_IMAGES} entries`), { status: 400 });
+  }
+  for (const url of urls) {
+    if (typeof url !== 'string' || url.length === 0 || url.length > MAX_IMAGE_URL_LENGTH) {
+      throw Object.assign(new Error('imageUrls entries must be non-empty strings of at most '
+        + `${MAX_IMAGE_URL_LENGTH} characters`), { status: 400 });
+    }
+  }
+
+  return JSON.stringify(urls);
+}
+
 // Execute SQL queries helper
 async function queryDb(sql) {
   return new Promise((resolve, reject) => {
@@ -54,7 +96,7 @@ function parseSqlResult(output, columns) {
 }
 
 // ============================================================================
-// GET /api/props - List all props with filtering
+// GET /api/props - List all props with filtering and pagination
 // ============================================================================
 router.get('/', async (req, res) => {
   try {
@@ -67,6 +109,11 @@ router.get('/', async (req, res) => {
     const category = textParam(req.query.category, { name: 'category', maxLength: MAX_CATEGORY_LENGTH });
     const condition = textParam(req.query.condition, { name: 'condition', maxLength: MAX_CONDITION_LENGTH });
 
+    // Pagination: page (1-based), limit (10, 25, 50)
+    const pageNum = Math.max(1, parseInt(req.query.page) || 1);
+    const limitNum = [10, 25, 50].includes(parseInt(req.query.limit)) ? parseInt(req.query.limit) : 25;
+    const offset = (pageNum - 1) * limitNum;
+
     // Columns are aliased with the `p.` prefix because the query joins "Costume".
     let where = '1=1';
     if (costumeId) where += ` AND p.costumeId = ${esc(costumeId)}`;
@@ -77,16 +124,25 @@ router.get('/', async (req, res) => {
     // `p.*` restores notes/imageUrls, which the narrow column list omitted.
     // ORDER BY p.name is a hard-coded column — nothing user-supplied reaches an
     // identifier position anywhere in this file.
+    const countSql = `SELECT COUNT(*) FROM "Prop" p LEFT JOIN "Costume" c ON c.id = p.costumeId WHERE ${where};`;
+    const countResult = await queryDb(countSql);
+    const totalCount = parseInt(countResult, 10) || 0;
+
     const sql = `SELECT p.*, c.character AS costumeName
                  FROM "Prop" p
                  LEFT JOIN "Costume" c ON c.id = p.costumeId
                  WHERE ${where}
-                 ORDER BY p.name ASC;`;
+                 ORDER BY p.name ASC
+                 LIMIT ${limitNum} OFFSET ${offset};`;
     const result = await queryDb(sql);
     const props = parseSqlResult(result, PROP_COLUMNS);
 
     res.json({
       count: props.length,
+      totalCount: totalCount,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(totalCount / limitNum),
       props: props,
       categories: ['Weapon', 'Armor', 'Headpiece', 'Wig', 'Accessory', 'Shoes']
     });
@@ -135,7 +191,7 @@ router.get('/:id', async (req, res) => {
 // constraint, not an API rule, and it is not enforced server-side.
 router.post('/', async (req, res) => {
   try {
-    const { costumeId, name, category, location, condition, notes } = req.body;
+    const { costumeId, name, category, location, condition, notes, imageUrls } = req.body;
 
     if (!name || !category) {
       return res.status(400).json({ error: 'name and category are required' });
@@ -165,11 +221,14 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'name and category are required' });
     }
 
+    // Validate imageUrls (max 3 photos)
+    const normalizedImages = normalizePropImageUrls(imageUrls);
+
     const id = randomUUID();
     const now = new Date().toISOString();
 
-    const sql = `INSERT INTO "Prop" (id, costumeId, name, category, location, condition, notes, createdAt, updatedAt)
-                 VALUES (${esc(id)}, ${linkedCostumeId ? esc(linkedCostumeId) : 'NULL'}, ${esc(normalizedName)}, ${esc(normalizedCategory)}, ${normalizedLocation ? esc(normalizedLocation) : 'NULL'}, ${normalizedCondition ? esc(normalizedCondition) : 'NULL'}, ${normalizedNotes ? esc(normalizedNotes) : 'NULL'}, ${esc(now)}, ${esc(now)});`;
+    const sql = `INSERT INTO "Prop" (id, costumeId, name, category, location, condition, notes, imageUrls, createdAt, updatedAt)
+                 VALUES (${esc(id)}, ${linkedCostumeId ? esc(linkedCostumeId) : 'NULL'}, ${esc(normalizedName)}, ${esc(normalizedCategory)}, ${normalizedLocation ? esc(normalizedLocation) : 'NULL'}, ${normalizedCondition ? esc(normalizedCondition) : 'NULL'}, ${normalizedNotes ? esc(normalizedNotes) : 'NULL'}, ${normalizedImages ? esc(normalizedImages) : 'NULL'}, ${esc(now)}, ${esc(now)});`;
 
     await queryDb(sql);
 
@@ -180,6 +239,7 @@ router.post('/', async (req, res) => {
       category: normalizedCategory,
       location: normalizedLocation || null,
       condition: normalizedCondition || null,
+      imageUrls: normalizedImages ? JSON.parse(normalizedImages) : [],
       createdAt: now
     });
   } catch (error) {
@@ -204,6 +264,7 @@ router.post('/', async (req, res) => {
 //   location   string <= 160  same
 //   condition  string <= 120  same
 //   notes      string <= 2000 same
+//   imageUrls  JSON array of strings (max 3)
 // Absent, null or '' for name/category/location/condition/notes means "leave the
 // column alone" — the same contract these three fields always had, so an existing
 // client sending a partial body is unaffected. A body in which every field is
@@ -215,7 +276,7 @@ router.put('/:id', async (req, res) => {
   try {
     const id = idParam(req.params.id) || '';
     const body = req.body || {};
-    const { name, category, location, condition, notes } = body;
+    const { name, category, location, condition, notes, imageUrls } = body;
 
     // costumeId is validated exactly as POST does, with the same 64-char cap.
     let linkedCostumeUpdate = null;
@@ -252,6 +313,9 @@ router.put('/:id', async (req, res) => {
       throw Object.assign(new Error('category cannot be empty'), { status: 400 });
     }
 
+    // Validate imageUrls (max 3 photos)
+    const normalizedImages = normalizePropImageUrls(imageUrls);
+
     let updates = [];
     if (linkedCostumeUpdate !== null) {
       updates.push(`costumeId = ${linkedCostumeUpdate === '' ? 'NULL' : esc(linkedCostumeUpdate)}`);
@@ -261,6 +325,9 @@ router.put('/:id', async (req, res) => {
     if (textUpdate(body, 'location')) updates.push(`location = ${esc(normalizedLocation)}`);
     if (textUpdate(body, 'condition')) updates.push(`condition = ${esc(normalizedCondition)}`);
     if (textUpdate(body, 'notes')) updates.push(`notes = ${esc(normalizedNotes)}`);
+    if (normalizedImages !== null) {
+      updates.push(`imageUrls = ${esc(normalizedImages)}`);
+    }
 
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No fields to update', code: 'VALIDATION_ERROR' });

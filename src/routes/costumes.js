@@ -51,6 +51,55 @@ function parseSqlResult(output, columns) {
   });
 }
 
+/**
+ * The distinct Fandom and Brand values in the collection, for the two filter
+ * dropdowns.
+ *
+ * WHY THIS IS A QUERY AND NOT DERIVED FROM THE RETURNED ROWS
+ * The dashboard paged this list, so `costumes` is one page — 25 rows out of 86
+ * on the live database. Deriving the dropdowns from those rows (which the
+ * client did before paging existed) would offer only the fandoms that happen to
+ * sort into page 1, and a filter for any other fandom would be missing from the
+ * control that is supposed to provide it. The dropdown is a property of the
+ * COLLECTION, exactly like statusCounts, and so is computed from the whole
+ * table.
+ *
+ * UNFILTERED, like statusCounts and for the same reason: a dropdown that
+ * emptied itself as you typed in the search box would be a control the user
+ * could not reason about.
+ *
+ * Blank and NULL values are dropped. The two are indistinguishable once they
+ * have been through this project's pipe transport — a SQL NULL arrives as the
+ * empty string — so both are skipped by the same test, and neither can produce
+ * a blank <option>.
+ *
+ * Case-insensitive de-duplication: 'Blue Archive' and 'blue archive' are one
+ * value to a person reading a dropdown, and offering both would be a filter
+ * that appears to do nothing when picked. The FIRST spelling encountered is
+ * the one kept, which for an ORDER BY means the value is shown as the
+ * alphabetically-first casing rather than as whatever the newest row says.
+ */
+async function distinctCostumeValues() {
+  const result = await queryDb(
+    `SELECT DISTINCT fandom FROM "Costume" WHERE fandom IS NOT NULL AND TRIM(fandom) <> '';`
+  );
+  const brands = await queryDb(
+    `SELECT DISTINCT brand FROM "Costume" WHERE brand IS NOT NULL AND TRIM(brand) <> '';`
+  );
+  // parseSqlResult on a single-column result gives [{fandom: 'x'}, ...].
+  const collect = (output, column) => {
+    const seen = new Map();
+    parseSqlResult(output, [column]).forEach(row => {
+      const label = String(row[column] == null ? '' : row[column]).trim();
+      if (!label) return;
+      const key = label.toLowerCase();
+      if (!seen.has(key)) seen.set(key, label);
+    });
+    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
+  };
+  return { fandoms: collect(result, 'fandom'), brands: collect(brands, 'brand') };
+}
+
 // ============================================================================
 // Field validators
 // ============================================================================
@@ -330,7 +379,7 @@ async function ensureReferenceRow(table, name) {
 }
 
 // ============================================================================
-// GET /api/costumes - List all costumes with optional filtering
+// GET /api/costumes - List all costumes with optional filtering and pagination
 // ============================================================================
 router.get('/', async (req, res) => {
   try {
@@ -345,10 +394,35 @@ router.get('/', async (req, res) => {
     // an injection — it cannot widen access beyond rows the caller could already
     // list, and changing it would alter a documented filter behaviour.
     // `filters` echoes back exactly what the caller sent, unchanged.
-    const { fandom: rawFandom, status: rawStatus, brand: rawBrand } = req.query;
+    const { fandom: rawFandom, status: rawStatus, brand: rawBrand, search: rawSearch, page, limit } = req.query;
     const fandom = textParam(rawFandom, { name: 'fandom', maxLength: MAX_REFERENCE_NAME_LENGTH });
     const status = enumParam(rawStatus, COSTUME_STATUSES, 'status');
     const brand = textParam(rawBrand, { name: 'brand', maxLength: MAX_REFERENCE_NAME_LENGTH });
+    // FREE-TEXT SEARCH. Added because the dashboard filters the costume list
+    // SERVER-SIDE: with paging on, filtering the returned rows in the browser
+    // would only ever search the 25 rows of the current page, so a costume on
+    // page 4 would be unfindable by name. The same reasoning the status and
+    // fandom filters already follow.
+    const search = textParam(rawSearch, { name: 'search', maxLength: MAX_REFERENCE_NAME_LENGTH });
+
+    // Pagination: page (1-based), limit (10, 25, 50) or the literal "all".
+    //
+    // "ALL" IS A REAL OPTION, NOT JUST A BIGGER NUMBER. The three sizes exist
+    // so a long collection need not be rendered at once; they are not a cap on
+    // how many rows the caller may see. A few hundred rows render perfectly
+    // well in one go, and making someone click through four pages to look at a
+    // list of their own things is a worse default than a longer page.
+    //
+    // It is a WORD rather than a large integer on purpose. `limit=1000000`
+    // would be a denial of service delivered by a query string, and this server
+    // authenticates nobody. Spelling the unlimited case out means the statement
+    // below is always one of four fixed strings.
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const wantsAll = String(limit).trim().toLowerCase() === 'all';
+    const limitNum = wantsAll
+      ? null
+      : ([10, 25, 50].includes(parseInt(limit)) ? parseInt(limit) : 25);
+    const offset = limitNum === null ? 0 : (pageNum - 1) * limitNum;
 
     let where = '1=1';
     // The LIKE pattern is escaped as ONE string literal (esc() wraps and quotes
@@ -356,6 +430,14 @@ router.get('/', async (req, res) => {
     if (fandom) where += ` AND fandom LIKE ${esc(`%${fandom}%`)}`;
     if (status) where += ` AND status = ${esc(status)}`;
     if (brand) where += ` AND brand LIKE ${esc(`%${brand}%`)}`;
+    // One LIKE over three columns, not three separate parameters: the search box
+    // is ONE field and "blue" should find a Blue Archive costume whether the
+    // word landed in the fandom, the character or the brand. Each `%term%` is
+    // escaped individually and OR-ed, so a term containing a quote is data.
+    if (search) {
+      const like = `%${search}%`;
+      where += ` AND (character LIKE ${esc(like)} OR fandom LIKE ${esc(like)} OR brand LIKE ${esc(like)})`;
+    }
 
     // SELECT * so the list endpoint returns every column the dashboard cards
     // render (doneCostest, doneEvent, donePhotoSession, referenceUrl, imageUrls,
@@ -364,15 +446,133 @@ router.get('/', async (req, res) => {
     // ORDER BY is a hard-coded column name. Nothing user-supplied reaches an
     // identifier position anywhere in this file, which is the only correct way to
     // handle ORDER BY — there is no escaping that makes an identifier safe.
-    const sql = `SELECT * FROM "Costume" WHERE ${where} ORDER BY character ASC;`;
+    const countSql = `SELECT COUNT(*) FROM "Costume" WHERE ${where};`;
+    const countResult = await queryDb(countSql);
+    const totalCount = parseInt(countResult, 10) || 0;
+
+    // COLLECTION WORTH — the sum of every owned costume's buy price.
+    //
+    // DELIBERATELY NOT FILTERED. The card this feeds is a property of the
+    // collection, not of the current search: the number would otherwise drop to
+    // Rp 0 the moment `status=WISHLIST` was applied (no wishlist entry is also
+    // IN_POSSESSION), which reads as a broken widget rather than as a filtered
+    // total. It also cannot be summed from the returned rows, because those are
+    // one PAGE of a paged query — that would make the total silently mean
+    // "worth of page 1" and change as the user pages through.
+    //
+    // `COALESCE(..., 0)` so an empty wardrobe is 0 rather than NULL, and
+    // `COUNT(buyPrice)` so a costume with no price recorded is not silently
+    // counted as a priced one — the sub-line under the card reports how many
+    // rows actually contributed, which is what makes the number auditable.
+    // PER-STATUS COUNTS — one row per status, for the Wishlist tab's badge.
+    //
+    // UNFILTERED AND UNPAGED, for the same reason the worth total above is: the
+    // number on a tab badge is a property of the collection, not of whatever
+    // search is currently in the box. Counting the returned rows would make the
+    // badge mean "wishlist entries on page 1 of the current search" — a number
+    // that changes when you type and when you page, on a badge whose whole job
+    // is to tell you whether anything is waiting there.
+    //
+    // GROUP BY rather than four separate COUNTs: one round-trip over the pipe
+    // instead of four, and a status with no rows simply does not appear rather
+    // than needing a hard-coded zero for each.
+    const countsSql = `SELECT status, COUNT(*) FROM "Costume" GROUP BY status;`;
+    const countsResult = await queryDb(countsSql);
+
+    // FULLSET COUNT — for the "N fullset ready" sub-line on the Total Costumes
+    // card, and the reason it needed its own query rather than being counted in
+    // the browser.
+    //
+    // The dashboard counted it as `state.costumes.filter(isFullset).length`,
+    // which is correct only while the whole collection is loaded. Under paging
+    // that would silently mean "fullsets among the 25 rows on this page", and
+    // the number would change as the user paged through a card that claims to
+    // be about the collection. Same for the other two count cards — see
+    // updateMetrics() on the client.
+    //
+    // `isFullset` is an INTEGER 0/1 column (verified against the live schema),
+    // so `= 1` matches exactly what the client's toBool() treats as true. The
+    // loose form (`!= 0 AND IS NOT NULL`) was rejected: it would also count the
+    // string 'true', which no writer in this codebase produces but which a
+    // future import might, and then the two halves of the check would disagree.
+    const fullsetResult = await queryDb(
+      `SELECT COUNT(*) FROM "Costume" WHERE isFullset = 1;`
+    );
+    const fullsetCount = parseInt(fullsetResult, 10) || 0;
+    // Pre-seeded to zero so the client's `statusCounts.X` is never `undefined`
+    // for a status that currently has no rows — `undefined` would make a
+    // "0" and a "not sent yet" indistinguishable on the badge.
+    const statusCounts = {};
+    COSTUME_STATUSES.forEach(s => { statusCounts[s] = 0; });
+    parseSqlResult(countsResult, ['status', 'rowCount']).forEach(row => {
+      // A NULL status cannot survive the pipe this file reads rows through —
+      // it arrives as an empty string — so an empty key is skipped rather than
+      // given a `"": n` entry the client would then have to special-case.
+      const key = String(row.status == null ? '' : row.status).trim();
+      const count = parseInt(row.rowCount, 10);
+      if (!key || isNaN(count)) return;
+      // A status the server does not know (a row written by a newer build) is
+      // still counted rather than dropped — the badge would otherwise
+      // under-report, and the alternative is refusing to show a real row.
+      statusCounts[key] = count;
+    });
+
+    const worthSql = `
+      SELECT COALESCE(SUM(buyPrice), 0), COUNT(buyPrice)
+      FROM "Costume"
+      WHERE status = ${esc('IN_POSSESSION')} AND buyPrice IS NOT NULL;`;
+    const worthResult = await queryDb(worthSql);
+    const worthRow = parseSqlResult(worthResult, ['totalBuyPrice', 'countedCostumes'])[0] || {};
+    // Both come back as STRINGS (this transport pipes sqlite3 output), and the
+    // sum is a float accumulation over a REAL column, so it is rounded to the
+    // same 2 decimals a single price is stored at rather than printed with the
+    // binary rounding noise of a partial sum.
+    const totalBuyPrice = Math.round(Number(worthRow.totalBuyPrice) * 100) / 100 || 0;
+    const countedCostumes = parseInt(worthRow.countedCostumes, 10) || 0;
+
+    // LIMIT/OFFSET are OMITTED ENTIRELY for `limit=all` rather than
+    // interpolated as a huge number. `limitNum` is null or one of three
+    // hard-coded integers, so `paging` is always one of four fixed strings and
+    // nothing user-supplied reaches it.
+    const paging = limitNum === null ? '' : ` LIMIT ${limitNum} OFFSET ${offset}`;
+    const sql = `SELECT * FROM "Costume" WHERE ${where} ORDER BY character ASC${paging};`;
 
     const result = await queryDb(sql);
     const costumes = parseSqlResult(result, COSTUME_COLUMNS);
     
     res.json({
       count: costumes.length,
+      totalCount: totalCount,
+      page: pageNum,
+      // `limit` echoes the word back, so the client's <select> can keep showing
+      // "All" instead of silently reverting to a number the API never honoured.
+      // `page` is forced to 1 under `all`: there is only one page, and
+      // echoing back the page 3 that was asked for would have the client
+      // briefly render "page 3 of 1" before it clamped.
+      page: wantsAll ? 1 : pageNum,
+      limit: wantsAll ? 'all' : limitNum,
+      totalPages: limitNum === null
+        ? (totalCount > 0 ? 1 : 0)
+        : Math.ceil(totalCount / limitNum),
       costumes: costumes,
-      filters: { fandom: rawFandom, status: rawStatus, brand: rawBrand }
+      // Page-independent, filter-independent. The client falls back to summing
+      // the rows it holds when this is absent, which is what a cached response
+      // from before this field existed will look like.
+      totals: { totalBuyPrice, countedCostumes },
+      statusCounts: statusCounts,
+      // Whole-collection, filter- AND page-independent. Every number on a
+      // metric card is a property of the collection, so none of them is
+      // derived from the rows that happen to be on the current page. The total
+      // is the SUM of the per-status counts rather than a second COUNT(*), so
+      // the "Total Costumes" card and the Wishlist badge can never disagree
+      // about how many costumes exist — two independent counts of one table is
+      // one more thing that can drift.
+      collectionStats: {
+        totalCostumes: Object.keys(statusCounts).reduce((sum, k) => sum + statusCounts[k], 0),
+        fullsetCount: fullsetCount
+      },
+      filterOptions: await distinctCostumeValues(),
+      filters: { fandom: rawFandom, status: rawStatus, brand: rawBrand, search: search }
     });
   } catch (error) {
     // A rejected filter is a client error. Without this, the enum/length 400s
