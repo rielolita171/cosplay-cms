@@ -934,15 +934,32 @@ contract [`public/index.html`](public/index.html) depends on).
 This section exists because an operator following a wrong command is worse than
 an operator missing one. Here is exactly what has **not** been proven.
 
-**The image has never been built by automation.** The repository's only workflow,
-[`.github/workflows/pages.yml`](.github/workflows/pages.yml), publishes the
-static site in [`docs/`](docs) to GitHub Pages; **nothing in CI builds or tests
-the image.** The [`Dockerfile`](Dockerfile) and
-[`docker-compose.yml`](docker-compose.yml) were authored by an agent that had no
-access to a Docker daemon, so **the build itself is unverified**: it has not been
-run end to end, and neither has any of the commands in this document. Expect to
-iterate on the first build. The most likely thing to need a small adjustment is
-apt package availability on the pinned Debian base, not the design.
+**The image is now built and smoke-tested in CI, but has not yet been
+demonstrated against a real deployment.**
+[`.github/workflows/docker.yml`](.github/workflows/docker.yml) builds the image
+on every change that could affect it and then **runs** it, asserting the
+`sqlite3` driver is present, `sharp` loads at require time, the process is not
+root, `/app/data` is writable by the runtime user, a **data route** returns 200
+after the entrypoint applies the schema, and SIGTERM produces a clean exit 0
+rather than a SIGKILL'd 137.
+
+The data-route assertion is the one that matters. `/health` returns 200 without
+touching the database, so a green healthcheck proves nothing about the driver or
+the schema — which is precisely the failure mode this image is most likely to
+have. The smoke test therefore hits `/api/costumes`.
+
+What CI still does **not** cover:
+
+- **This document's commands.** Everything above has still never been executed by
+  an operator following it in order; the workflow builds and runs the image, not
+  the runbook.
+- **`docker-compose.yml` itself.** The workflow runs the image directly. The
+  volume layout, the `127.0.0.1` port remap and `restart: unless-stopped` are
+  configured but unexercised.
+- **A real deployment.** The first successful run on `main` will be the first
+  evidence the image builds at all. Expect that run to need a small adjustment;
+  the most likely culprit is apt package availability on the pinned Debian base,
+  not the design.
 
 **Named-volume ownership inheritance is inferred, not observed.** The reasoning
 at [`Dockerfile:105-113`](Dockerfile:105) — that Docker copies both content and

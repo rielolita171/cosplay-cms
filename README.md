@@ -248,18 +248,25 @@ it at all.
   profile, so `ExecStart` needs an absolute `node` path or an nvm install will
   fail with `203/EXEC`.
 
-### `[open]` The Docker image has never been built by automation
+### `[open]` The Docker build is automated but unproven against a real deployment
 
-- **Symptom.** None today, because nothing builds it.
-- **Mechanism.** The repository's only workflow publishes the static site in
-  [`docs/`](docs) to GitHub Pages; **nothing in CI builds or tests the image**.
-  [`Dockerfile`](Dockerfile) and [`docker-compose.yml`](docker-compose.yml) were
-  authored without access to a Docker daemon, so the build itself is unverified.
-  [`docker/entrypoint.sh`](docker/entrypoint.sh) is also POSIX `sh` and has never
-  been executed by `docker run`.
-- **Fix.** Build the image in CI, or run it once by hand and record the result in
-  DOCKER.md. Expect the first build to need a small adjustment — most likely apt
-  package availability on the pinned Debian base, not the design.
+- **Status.** [`.github/workflows/docker.yml`](.github/workflows/docker.yml)
+  builds the image on every change that could affect it, then **runs** it and
+  asserts a data route, the `sqlite3` driver, `sharp` at require time, a
+  non-root uid, a writable data dir, and a clean SIGTERM shutdown.
+- **Why a data route and not just `/health`.** `/health` returns 200 without
+  touching the database, so a green healthcheck does not prove the `sqlite3`
+  driver or the schema work. The worst failure mode for this image is one that
+  boots healthy and then 500s everywhere, and the smoke test hits
+  `/api/costumes` for exactly that reason.
+- **Still unproven.** CI has never run yet — the workflow was added after the
+  last push, so the first green run is the first evidence the image builds at
+  all. Until it passes on `main`, treat the build as reasoned rather than
+  demonstrated, and expect the first run to need a small adjustment (most likely
+  apt package availability on the pinned Debian base, not the design).
+- **Also unverified by CI.** [`docker-compose.yml`](docker-compose.yml) itself is
+  never started by the workflow, only the image it builds. The volume layout and
+  host-port remapping are still documented rather than demonstrated.
 
 ## Next
 
@@ -280,12 +287,13 @@ boot. Until that exists the boot behaviour is manually verified only, and the
 retry state machine in particular has no automated protection against a future
 edit reverting it.
 
-**3. Build the image once and record the result.** Nothing in CI builds it, so
-`Dockerfile` and `docker-compose.yml` are reasoned rather than demonstrated.
-Building it once, fixing whatever breaks, and writing the outcome into DOCKER.md
-is the cheapest way to turn a document full of unverified claims into one with a
-verified spine. Do this last: it is the item that pays off most when the code
-behind it has stopped moving.
+**3. Get the first green CI run, then exercise compose.** The workflow builds and
+runs the image, but it has never executed — so the first run is the first real
+evidence any of this works, and it is worth watching rather than ignoring. After
+it passes, bring [`docker-compose.yml`](docker-compose.yml) itself under test
+too: the workflow runs the image directly, so the volume layout and the
+`127.0.0.1` port remap remain configured but unexercised. Do this last: it is the
+item that pays off most when the code behind it has stopped moving.
 
 **Deliberately not planned.** No authentication, no roles, no multi-user. The
 boundary is the network or a reverse proxy, and the cheapest correct answer to

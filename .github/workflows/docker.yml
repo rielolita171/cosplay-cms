@@ -1,0 +1,165 @@
+name: Docker image
+
+# Builds the image and, more importantly, RUNS it.
+#
+# The image had never been built by automation: the Dockerfile and the compose
+# stack were authored without access to a Docker daemon, so the build itself was
+# unverified, and so was every command in DOCKER.md. A green build is not enough
+# here — the real failure mode this project has is an image that boots healthy and
+# then 500s on every data route, because /health does not touch the database. The
+# smoke test below therefore asserts a DATA route, not just /health.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Dockerfile'
+      - 'docker/**'
+      - 'docker-compose.yml'
+      - '.dockerignore'
+      - 'src/**'
+      - 'public/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'init_db.sql'
+      - '.github/workflows/docker.yml'
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - 'docker/**'
+      - 'docker-compose.yml'
+      - '.dockerignore'
+      - 'src/**'
+      - 'public/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'init_db.sql'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One build at a time. Cancels an in-flight run so a rapid series of pushes does
+# not queue up several slow image builds.
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build only. `--load` puts the result in the local daemon so the smoke
+      # test below can run it. Nothing is pushed: this project has no registry,
+      # and publishing an image is a decision for the maintainer, not for CI.
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: cosplay-cms:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The image is the single source of truth for the port, and the n8n
+      # workflow hardcodes 4001.
+      - name: Assert the image's invariants
+        run: |
+          set -euo pipefail
+          echo "--- sqlite3 CLI present? (the app has no in-process driver) ---"
+          docker run --rm --entrypoint sh cosplay-cms:ci -c 'command -v sqlite3 >/dev/null || { echo "::error::sqlite3 CLI missing from image"; exit 1; }; sqlite3 --version'
+
+          echo "--- sharp loads at require time? ---"
+          docker run --rm --entrypoint node cosplay-cms:ci -e "require('sharp'); console.log('sharp OK', require('sharp/package.json').version)"
+
+          echo "--- the process does not run as root ---"
+          uid="$(docker run --rm --entrypoint sh cosplay-cms:ci -c 'id -u')"
+          if [ "$uid" = "0" ]; then
+            echo "::error::container runs as root (uid 0); the image is meant to drop to the node user"
+            exit 1
+          fi
+          echo "uid=$uid"
+
+          echo "--- the data dir is writable by that user ---"
+          docker run --rm --entrypoint sh cosplay-cms:ci -c 'test -w /app/data && echo "/app/data writable"'
+
+      # The part that matters. Boots the real image, then checks a DATA route:
+      # /health returns 200 without touching the database, so a green healthcheck
+      # alone would not prove the sqlite3 driver or the schema work. This is the
+      # assertion that catches the failure mode described in the Dockerfile header.
+      - name: Smoke test the running image
+        run: |
+          set -euo pipefail
+          docker run -d --name cms-ci -p 4001:4001 cosplay-cms:ci
+
+          echo "--- waiting for boot (the entrypoint applies the schema first) ---"
+          ok=0
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4001/health >/dev/null 2>&1; then ok=1; break; fi
+            if ! docker ps --filter name=cms-ci --filter status=running -q | grep -q .; then break; fi
+            sleep 2
+          done
+
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::container never became healthy"
+            echo "===== container logs ====="
+            docker logs cms-ci || true
+            exit 1
+          fi
+
+          echo "--- /health ---"
+          curl -sf http://127.0.0.1:4001/health
+
+          echo
+          echo "--- /api/costumes (a DATA route: proves the driver AND the schema) ---"
+          if ! curl -sf http://127.0.0.1:4001/api/costumes >/dev/null; then
+            echo "::error::a data route failed. /health does not touch the database, so this is the assertion that proves the sqlite3 driver and init_db.sql actually work in the image."
+            echo "===== container logs ====="
+            docker logs cms-ci || true
+            exit 1
+          fi
+          curl -sf http://127.0.0.1:4001/api/costumes | head -c 200
+          echo
+
+          echo "--- the entrypoint reported a real table count ---"
+          docker logs cms-ci 2>&1 | grep -E 'schema applied|sqlite3 driver found' || {
+            echo "::error::entrypoint did not report the expected boot lines"
+            docker logs cms-ci || true
+            exit 1
+          }
+
+      # Proves the graceful-shutdown contract the Dockerfile and DOCKER.md both
+      # describe: `docker stop` sends SIGTERM, the entrypoint `exec`s node so the
+      # server drains and exits 0, rather than being SIGKILLed and reported as 137.
+      - name: Verify graceful shutdown
+        if: always()
+        run: |
+          set -euo pipefail
+          if ! docker ps --filter name=cms-ci --filter status=running -q | grep -q .; then
+            echo "container already stopped; nothing to check"
+            exit 0
+          fi
+          started=$(date +%s)
+          docker stop -t 30 cms-ci >/dev/null
+          elapsed=$(( $(date +%s) - started ))
+          code="$(docker inspect -f '{{.State.ExitCode}}' cms-ci)"
+          echo "stopped in ${elapsed}s with exit code ${code}"
+          if [ "$code" != "0" ]; then
+            echo "::error::expected a clean exit 0 from SIGTERM, got ${code} (137 means SIGKILL after the grace period expired)"
+            docker logs cms-ci || true
+            exit 1
+          fi
+
+      - name: Container logs
+        if: failure()
+        run: docker logs cms-ci || true
+
+      - name: Clean up
+        if: always()
+        run: docker rm -f cms-ci || true
