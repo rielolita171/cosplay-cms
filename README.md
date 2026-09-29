@@ -49,19 +49,6 @@ npm run dev        # node --watch src/server.js
 npm test           # makers, wishlist and lens-expiry suites
 ```
 
-To keep it running across crashes and reboots, use the systemd unit rather
-than a bare `npm start`:
-
-```bash
-sudo cp docker/cosplay-cms.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now cosplay-cms
-```
-
-Edit `WorkingDirectory`, `ReadWritePaths` and `ExecStart` in the unit first —
-the shipped values point at this checkout and an absolute `node` path, and
-systemd does not read your shell profile, so an nvm-installed Node will not
-resolve without one. Container deployments should use
-[`docker-compose.yml`](docker-compose.yml) instead.
 
 Configuration is read from `.env` at the repository root. The names that
 matter are `PORT`, `NODE_ENV`, `DATABASE_PATH`, `API_KEY`, `CORS_ORIGIN` and
@@ -239,6 +226,27 @@ it at all.
   asserts the splash is `display: none` after load and that the retry block is
   hidden on a successful boot. Until then, treat the boot splash as
   manually-verified-only and say so in release notes.
+
+### `[open]` No process supervisor outside Docker
+
+- **Symptom.** A bare-metal `npm start` does not come back after a crash or a
+  reboot, and a restart means finding the PID by hand.
+- **Mechanism.** There is no systemd unit and no `pm2` in this repository. A
+  bare `node` process gets nothing: it dies with the shell that started it.
+- **Not a gap in the container deployment.**
+  [`docker-compose.yml`](docker-compose.yml) sets `restart: unless-stopped`,
+  which already covers crash-restart and reboot for the supported deployment —
+  adding a host supervisor on top of that would just put two things fighting
+  over the same port.
+- **Operational hazard while it holds no supervisor.** A restart must be a manual
+  `kill -TERM <explicit PID>`. **Never** `pkill -f "src/server.js"` — that
+  pattern matches a dev server on `:4139` as well as anything on `:4001` and
+  takes both down. Read `/proc/<pid>/cwd` to confirm which process you are about
+  to signal.
+- **Fix.** If you deploy bare metal, write a unit with `Restart=on-failure` and
+  an explicit `WorkingDirectory`. Note that systemd does not read a shell
+  profile, so `ExecStart` needs an absolute `node` path or an nvm install will
+  fail with `203/EXEC`.
 
 ### `[open]` The Docker image has never been built by automation
 

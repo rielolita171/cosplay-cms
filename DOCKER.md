@@ -402,7 +402,7 @@ you are copying a database mid-write.
 
 ```bash
 # 1. If the app is running on the host outside a container, stop it.
-#    (systemd: sudo systemctl stop cosplay-cms, or Ctrl-C the npm start terminal)
+#    (or Ctrl-C the npm start terminal)
 
 # 2. Make sure the image exists so we can use it as the copy tool.
 docker compose build
@@ -1116,7 +1116,6 @@ Whichever you choose, the `X-CMS-API-KEY` value must be the real `API_KEY` from
 | [`Dockerfile`](Dockerfile) | Multi-stage build. `deps` then `runtime`. Read the header comment first — it explains the Debian, toolchain and driver decisions. |
 | [`docker/entrypoint.sh`](docker/entrypoint.sh) | Boot script. Idempotent, POSIX sh, ends in `exec node`. |
 | [`docker-compose.yml`](docker-compose.yml) | The deployment of record. Heavily commented. |
-| [`docker/cosplay-cms.service`](docker/cosplay-cms.service) | systemd unit for a bare-metal install. Not used by the container deployment. |
 | [`.env.example`](.env.example) | Copy this to `.env`. Contains only variables that are genuinely read. |
 | [`.dockerignore`](.dockerignore) | Build-context exclusions. Read the two hard rules at the top before editing. |
 | [`.gitignore`](.gitignore) | Excludes `data/`, `.env` and `*.xlsx`. |
