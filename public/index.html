@@ -2,10 +2,19 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <!-- No maximum-scale / user-scalable=no: pinch-zoom is an accessibility
+       requirement, not something to be locked down. -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Matches --bg. Without it, mobile Safari and Chrome tint their own UI
+       (address bar, notch, form controls) light while the app renders dark. -->
+  <meta name="theme-color" content="#0f1117">
   <title>Cosplay Management System (CMS)</title>
   <style>
+    /* Declared on :root so the UA renders form controls, scrollbars and the
+       canvas with DARK scrollbars. A dark app that has not said this gets a
+       light scrollbar track and white default input chrome. */
     :root {
+      color-scheme: dark;
       --bg: #0f1117;
       --card-bg: rgba(26, 31, 46, 0.85);
       --card-border: rgba(255, 255, 255, 0.08);
@@ -20,7 +29,16 @@
       --info: #3b82f6;
       --radius: 12px;
       --shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-      --transition: all 0.2s ease-in-out;
+      /* WAS `all 0.2s ease-in-out`. `transition: all` animates EVERY property
+         that happens to change, which means it also animates the ones nobody
+         looked at: a layout-triggering width/height during a tab switch, or an
+         element sliding because its content reflowed. It is also a repaint on
+         every frame of the change instead of a compositor-only opacity/transform
+         run. The properties actually animated in this app are enumerated here;
+         `all` was a default, not a requirement. */
+      --transition: color 0.2s ease-in-out, background-color 0.2s ease-in-out,
+                     border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out,
+                     opacity 0.2s ease-in-out, transform 0.2s ease-in-out;
     }
 
     * {
@@ -104,6 +122,30 @@
     }
     .btn-secondary:hover {
       background: rgba(255, 255, 255, 0.15);
+    }
+
+    /* TOUCH ERGONOMICS.
+       `touch-action: manipulation` drops the ~300ms double-tap-zoom delay, so a
+       tap on "Save" registers immediately instead of feeling laggy next to
+       every native control. It does NOT disable pinch-zoom — `manipulation`
+       is explicitly the pan-and-pinch-zoom-preserving value, which is why it
+       is used here rather than `none`.
+
+       `-webkit-tap-highlight-color` is set to transparent because this app is
+       a dense dark grid, and the default grey iOS flash lands on a card
+       button as an opaque grey square that visibly flashes over the content.
+       The :active rules below are the deliberate replacement: the tap feedback
+       is still there, it is just styled to match the app instead of the OS. */
+    button, .btn, .tab-btn, select, input[type="checkbox"], input[type="radio"] {
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* A pressed state to replace the tap-highlight flash described above.
+       transform only, so it is a compositor-friendly nudge on touch hardware
+       where a repaint is most expensive. */
+    .btn:active, .tab-btn:active {
+      transform: translateY(1px);
     }
 
     /* Metrics Grid */
@@ -227,6 +269,38 @@
        into it, so the active state gets a contrasting one. */
     .tab-btn.active .tab-count {
       background: rgba(255, 255, 255, 0.25);
+    }
+
+    /* FOCUS VISIBILITY.
+       The tab strip and the card buttons were relying on the UA default focus
+       ring, which is drawn for a light page: a thin dark outline that is close
+       to invisible against --bg (#0f1117) and disappears entirely against the
+       purple .active fill. Keyboard users had no reliable way to tell which
+       tab or card button was focused.
+
+       :focus-visible and not :focus, deliberately — the ring appears for
+       keyboard/AT navigation and is suppressed for a mouse click, so it never
+       flashes on every press. `outline` with an `outline-offset` is used rather
+       than box-shadow because outline is not clipped by a parent's overflow, and
+       these tabs sit inside .tabs-nav, which is `overflow-x: auto` — a
+       box-shadow ring would be cut off at the strip's edge. The colour is a
+       light violet so it holds contrast against both the dark page and the
+       purple active fill. */
+    :root {
+      --focus-ring: #c4b5fd;
+    }
+    .tab-btn:focus-visible,
+    .btn:focus-visible,
+    .item-card:focus-visible {
+      outline: 2px solid var(--focus-ring);
+      outline-offset: 2px;
+    }
+    /* Compound controls (the filter bar) light up as a group, so it is visible
+       that focus is inside a contained cluster rather than on one field. */
+    .filter-bar:focus-within {
+      outline: 2px solid var(--focus-ring);
+      outline-offset: 4px;
+      border-radius: var(--radius);
     }
 
     /* A zero count is hidden rather than shown as "0". An empty wishlist is
@@ -798,6 +872,47 @@
     @keyframes shimmer {
       0% { background-position: 200% 0; }
       100% { background-position: -200% 0; }
+    }
+
+    /* REDUCED MOTION.
+       All three animations in this file run on `infinite` — spin, shimmer and
+       upload-pulse. An infinite loop is the exact case the OS-level
+       "reduce motion" switch exists for: there is no end state to wait for, so
+       nothing stops it for the user but the switch. Vestibular triggers are
+       reported for large-area motion and for looping movement, and a skeleton
+       grid repainting a full-bleed gradient sweep is both.
+
+       Note WHAT is disabled and what is not. The decorative loops go; the
+       brief functional ones stay. A spinner that vanishes leaves a loading
+       state with no visible "work in progress" cue, and the shimmer is what
+       communicates that a card is a placeholder rather than empty content.
+       Both are reduced to a non-animated form rather than deleted:
+         - spin         -> a static ring. Still reads as a spinner.
+         - upload-pulse -> full opacity. Still reads as "this is live".
+         - shimmer      -> flat fill. Still reads as "placeholder".
+       Transitions go to 0s, since these are all hover/focus colour changes. */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+      }
+      .spinner {
+        animation: none !important;
+        border-top-color: var(--primary);
+        opacity: 0.85;
+      }
+      .skeleton {
+        animation: none !important;
+        background: rgba(255, 255, 255, 0.08);
+      }
+      /* The exact selector that owns `upload-pulse` (see .is-processing). Left
+         at full opacity it still reads as a live, in-flight bar — only the
+         throbbing stops. */
+      .upload-progress-fill.is-processing {
+        animation: none !important;
+      }
     }
 
     .skeleton-card {
@@ -1447,16 +1562,39 @@
         </div>
       </div>
 
-      <!-- Tab Navigation -->
-      <div class="tabs-nav">
-        <button class="tab-btn active" data-tab="costumes" onclick="switchTab('costumes')">👘 Costumes</button>
-        <button class="tab-btn" data-tab="props" onclick="switchTab('props')">⚔️ Props & Accessories</button>
-        <button class="tab-btn" data-tab="lenses" onclick="switchTab('lenses')">👁️ Contact Lenses</button>
+      <!-- Tab Navigation.
+
+           ROLES. These are tabs, and they now say so: role="tablist" on the
+           strip, role="tab" on each button, role="tabpanel" on each section,
+           tied together by aria-controls / aria-labelledby. The elements were
+           ALREADY buttons and panels before this, so no styling changes and
+           no <a> is involved — a tab is an action on the current view, not
+           navigation to a new URL, which is exactly what role="tab" is for.
+
+           The one thing this buys that a screen reader could not previously
+           infer: a tablist is announced as a single set with "tab N of 7", and
+           the reader can jump between them with its own tab-cycle commands
+           instead of walking every button and every control inside the
+           visible panel.
+
+           ARROW KEYS. Handled in the tablist's keydown listener below. This is
+           the part that was genuinely missing: without it, reaching a tab costs
+           one Tab stop per button, so getting from Costumes to Settings was
+           seven stops. Left/Right (and Home/End) now move between them, and
+           only the active tab is in the tab sequence (roving tabindex) so Tab
+           leaves the strip entirely and lands in the panel.
+
+           URL STATE. The active tab is mirrored to location.hash, so a tab is
+           linkable and survives a reload. See applyTabFromHash()/syncHash. -->
+      <div class="tabs-nav" role="tablist" aria-label="Collections" id="tabs-nav">
+        <button class="tab-btn active" role="tab" id="tabbtn-costumes" data-tab="costumes" aria-controls="tab-costumes" aria-selected="true" onclick="switchTab('costumes')">👘 Costumes</button>
+        <button class="tab-btn" role="tab" id="tabbtn-props" data-tab="props" aria-controls="tab-props" aria-selected="false" tabindex="-1" onclick="switchTab('props')">⚔️ Props &amp; Accessories</button>
+        <button class="tab-btn" role="tab" id="tabbtn-lenses" data-tab="lenses" aria-controls="tab-lenses" aria-selected="false" tabindex="-1" onclick="switchTab('lenses')">👁️ Contact Lenses</button>
         <!-- MAKER CORNER. Sits next to Props because that is the relationship:
              a maker is looked up WHILE holding the prop, not while holding a
              costume, so the tab is adjacent to the thing that provokes the
              lookup rather than filed away with the settings. -->
-        <button class="tab-btn" data-tab="makers" onclick="switchTab('makers')">🛠️ Maker Corner</button>
+        <button class="tab-btn" role="tab" id="tabbtn-makers" data-tab="makers" aria-controls="tab-makers" aria-selected="false" tabindex="-1" onclick="switchTab('makers')">🛠️ Maker Corner</button>
         <!-- THE WISHLIST TAB. A VIEW over the same Costume rows, not a second
              collection: an entry here is a costume whose status is WISHLIST, and
              the two tabs are deliberately rendering the same records so an item
@@ -1469,9 +1607,9 @@
              deliberately unfiltered and unpaged (see the comment there): a badge
              that changed when you typed in the search box would be answering a
              question nobody asked. -->
-        <button class="tab-btn" data-tab="wishlist" onclick="switchTab('wishlist')">⭐ Wishlist<span class="tab-count is-empty" id="wishlist-tab-count"></span></button>
-        <button class="tab-btn" data-tab="lists" onclick="switchTab('lists')">🏷️ Reference Lists</button>
-        <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">⚙️ Settings</button>
+        <button class="tab-btn" role="tab" id="tabbtn-wishlist" data-tab="wishlist" aria-controls="tab-wishlist" aria-selected="false" tabindex="-1" onclick="switchTab('wishlist')">⭐ Wishlist<span class="tab-count is-empty" id="wishlist-tab-count"></span></button>
+        <button class="tab-btn" role="tab" id="tabbtn-lists" data-tab="lists" aria-controls="tab-lists" aria-selected="false" tabindex="-1" onclick="switchTab('lists')">🏷️ Reference Lists</button>
+        <button class="tab-btn" role="tab" id="tabbtn-settings" data-tab="settings" aria-controls="tab-settings" aria-selected="false" tabindex="-1" onclick="switchTab('settings')">⚙️ Settings</button>
       </div>
 
       <!-- Filter Bar -->
@@ -1515,19 +1653,19 @@
            have to scroll to the very bottom of to find and then scroll all the
            way back up to use. Same placement on every tab, so it does not move
            when you switch between them. -->
-      <section id="tab-costumes">
+      <section id="tab-costumes" role="tabpanel" aria-labelledby="tabbtn-costumes" tabindex="0">
         <div id="pager-costumes"></div>
         <div class="items-grid" id="costumes-grid"></div>
       </section>
 
       <!-- Props Tab Content -->
-      <section id="tab-props" style="display: none;">
+      <section id="tab-props" role="tabpanel" aria-labelledby="tabbtn-props" tabindex="0" style="display: none;">
         <div id="pager-props"></div>
         <div class="items-grid" id="props-grid"></div>
       </section>
 
       <!-- Lenses Tab Content -->
-      <section id="tab-lenses" style="display: none;">
+      <section id="tab-lenses" role="tabpanel" aria-labelledby="tabbtn-lenses" tabindex="0" style="display: none;">
         <div id="pager-lenses"></div>
         <div class="items-grid" id="lenses-grid"></div>
       </section>
@@ -1538,7 +1676,7 @@
            each card are the entire point of the feature, so they are rendered
            as real links (see renderMakers) rather than as buttons that copy a
            number to the clipboard. -->
-      <section id="tab-makers" style="display: none;">
+      <section id="tab-makers" role="tabpanel" aria-labelledby="tabbtn-makers" tabindex="0" style="display: none;">
         <div id="pager-makers"></div>
         <div class="items-grid" id="makers-grid"></div>
       </section>
@@ -1550,7 +1688,7 @@
            the same renderer is the one arrangement where the two views cannot
            interfere. The header says what the tab is, because a card with a
            WISHLIST badge on it does not otherwise say why it is here. -->
-      <section id="tab-wishlist" style="display: none;">
+      <section id="tab-wishlist" role="tabpanel" aria-labelledby="tabbtn-wishlist" tabindex="0" style="display: none;">
         <div style="margin-bottom: 16px; color: var(--text-muted); font-size: 0.85rem;">
           Costumes you want but have not bought yet. Moving one to
           <strong>In Possession</strong> on its Edit form takes it off this list
@@ -1563,7 +1701,7 @@
       <!-- Reference Lists Tab Content (Brands + Fandoms).
            Both grids are delegated through bindGridEvents() and use the same
            data-action="..." contract as the costume/prop/lens cards. -->
-      <section id="tab-lists" style="display: none;">
+      <section id="tab-lists" role="tabpanel" aria-labelledby="tabbtn-lists" tabindex="0" style="display: none;">
         <div class="metric-card" style="margin-bottom: 20px;">
           <h2 style="font-size: 1.2rem; margin-bottom: 6px;">🏷️ Reference Lists</h2>
           <p style="color: var(--text-muted); font-size: 0.85rem;">
@@ -1670,7 +1808,7 @@
            No restart is needed to change the allowlist. The server persists the
            row first and swaps its in-memory cache from a res.on('finish')
            handler, so the NEXT request is judged against the new list. -->
-      <section id="tab-settings" style="display: none;">
+      <section id="tab-settings" role="tabpanel" aria-labelledby="tabbtn-settings" tabindex="0" style="display: none;">
         <div class="metric-card" style="max-width: 720px;">
           <h3 style="font-size: 1rem; margin-bottom: 4px;">CORS allowed origins</h3>
           <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 16px;">
@@ -2452,7 +2590,21 @@
   </dialog>
 
   <!-- Toast Notification -->
-  <div class="toast" id="toast"></div>
+  <!-- LIVE REGION. Every save, delete and failure in this app reports through
+       this one element, so without a live region the app is silent: a screen
+       reader user presses Save, the request succeeds, and nothing is ever
+       spoken. role="status" + aria-live="polite" announces it without
+       interrupting; showToast() switches this to role="alert" for error and
+       warning kinds so a failure interrupts, which is the one case where
+       waiting for a pause in speech is the wrong outcome.
+
+       aria-atomic because each toast is one whole sentence — a partial read
+       ("Costume deleted" without the count) is worse than none.
+
+       The element is never removed from the DOM, only shown and hidden: a live
+       region added at the moment of the change is frequently missed, because
+       most readers only watch regions that existed when the page loaded. -->
+  <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <!-- UPLOAD PROGRESS.
        Shown while a photo selection is being sent, because a multi-megabyte
@@ -3388,12 +3540,32 @@
     function showToast(message, type) {
       const toast = document.getElementById('toast');
       const kind = type || 'info';
+      // Errors and warnings become assertive. A failed save is the one thing in
+      // this app the user must not miss, and "polite" queues it behind whatever
+      // the reader is currently saying — which, on a page this dense, can be a
+      // while. Success stays polite so it never talks over a screen reader
+      // that is mid-sentence.
+      const isUrgent = kind === 'error' || kind === 'warning';
+      toast.setAttribute('role', isUrgent ? 'alert' : 'status');
+      toast.setAttribute('aria-live', isUrgent ? 'assertive' : 'polite');
+
+      // Clear first, then set. A live region only announces a CHANGE in its
+      // text; writing an identical string into a region that already holds it
+      // is silent. Deleting the same "Saved." twice in a row is exactly that
+      // case, and it is the most common toast in the app. No forced reflow is
+      // needed to separate the two writes — emptying the region on hide (see
+      // the timer below) already guarantees the next one is a change.
+      toast.textContent = '';
       toast.textContent = message;
+
       toast.className = 'toast toast-' + kind;
       toast.style.display = 'block';
       if (state.toastTimer) clearTimeout(state.toastTimer);
       state.toastTimer = setTimeout(() => {
         toast.style.display = 'none';
+        // Emptied on hide so the NEXT toast of the same wording is a change
+        // again, rather than a no-op write into a region that still says it.
+        toast.textContent = '';
       }, 4500);
     }
 
@@ -6003,10 +6175,78 @@
       });
     }
 
-    function switchTab(tab) {
+    const TAB_NAMES = ['costumes', 'props', 'lenses', 'makers', 'wishlist', 'lists', 'settings'];
+
+    // ARROW-KEY NAVIGATION FOR THE TAB STRIP.
+    // The WAI-ARIA tabs pattern: Left/Right move one tab, Home/End jump to the
+    // ends. Vertical arrows are deliberately NOT bound — the strip is a single
+    // horizontal row, so Up/Down belong to whatever panel the user is in.
+    //
+    // Focus MOVES with the selection (this is the "automatic activation" variant)
+    // rather than waiting for Enter/Space. Automatic is the right choice here
+    // because these tabs are cheap: every panel is already in the DOM and
+    // switchTab() does no network call for the four data tabs. Were a tab switch
+    // an expensive fetch, the manual variant would be correct so that arrowing
+    // through the strip would not fire six requests.
+    function bindTabKeyboard() {
+      const nav = document.getElementById('tabs-nav');
+      if (!nav) return;
+      nav.addEventListener('keydown', (event) => {
+        const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+        if (!keys.includes(event.key)) return;
+        // Only act when focus is actually on a tab. The strip is the listener
+        // target, so without this guard a keypress bubbling up from a card
+        // button inside the panel would also flip tabs.
+        const btn = event.target.closest('.tab-btn');
+        if (!btn) return;
+
+        const current = TAB_NAMES.indexOf(btn.dataset.tab);
+        if (current === -1) return;
+        let next = current;
+        if (event.key === 'ArrowLeft') next = (current - 1 + TAB_NAMES.length) % TAB_NAMES.length;
+        if (event.key === 'ArrowRight') next = (current + 1) % TAB_NAMES.length;
+        if (event.key === 'Home') next = 0;
+        if (event.key === 'End') next = TAB_NAMES.length - 1;
+        if (next === current) return;
+
+        event.preventDefault();
+        switchTab(TAB_NAMES[next]);
+        // Focus follows the selection, and lands on the button that is now
+        // `aria-selected="true"`. Queried after the switch rather than kept as
+        // a reference, so it can never point at a stale node.
+        const target = document.querySelector('.tab-btn[data-tab="' + TAB_NAMES[next] + '"]');
+        if (target) target.focus();
+      });
+    }
+
+    // DEEP LINKING. `#settings` in the URL opens Settings, and a reload stays
+    // on the tab you were on. An unrecognised hash is ignored rather than
+    // guessed at, so a stray anchor cannot leave the app on a blank panel.
+    function applyTabFromHash() {
+      const requested = (location.hash || '').replace('#', '');
+      if (TAB_NAMES.includes(requested) && requested !== state.currentTab) {
+        switchTab(requested, { fromHash: true });
+      }
+    }
+
+    function switchTab(tab, opts) {
+      const options = opts || {};
       state.currentTab = tab;
+      // ARIA + ROVING TABINDEX.
+      // aria-selected is what a screen reader reads to say which of the seven
+      // tabs is current; the `active` class is only the visual half. They are
+      // written together here so the two can never drift.
+      //
+      // tabindex is ROVING: the selected tab is 0 and the other six are -1. That
+      // is the documented tablist pattern and it is what makes a single Tab
+      // press move the user off the strip and into the panel. If every tab
+      // stayed at 0, reaching the Costume grid would cost seven extra stops,
+      // which is the exact complaint the arrow keys below exist to remove.
       document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.tab === tab);
+        const isActive = btn.dataset.tab === tab;
+        btn.classList.toggle('active', isActive);
+        btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        btn.tabIndex = isActive ? 0 : -1;
       });
 
       document.getElementById('tab-costumes').style.display = tab === 'costumes' ? 'block' : 'none';
@@ -6016,6 +6256,17 @@
       document.getElementById('tab-wishlist').style.display = tab === 'wishlist' ? 'block' : 'none';
       document.getElementById('tab-lists').style.display = tab === 'lists' ? 'block' : 'none';
       document.getElementById('tab-settings').style.display = tab === 'settings' ? 'block' : 'none';
+
+      // URL STATE. The tab is mirrored into the hash so it survives a reload
+      // and can be linked to or bookmarked. `options.fromHash` stops the write
+      // when we are reacting TO the hash, which would otherwise push a second
+      // identical entry and trap the Back button in a loop it can never leave.
+      if (!options.fromHash) {
+        const nextHash = '#' + tab;
+        if (location.hash !== nextHash) {
+          history.replaceState(null, '', nextHash);
+        }
+      }
       // The filter bar only describes costumes/props/lenses, so it is hidden on
       // the Reference Lists and Settings tabs rather than shown over a panel it
       // cannot filter.
@@ -8645,6 +8896,8 @@
         // rather than on every open. The Edit Lens row is rebuilt by
         // openEditLens() because what is "selected" depends on the row being opened.
         renderColorSwatches('add-lens-swatches', 'add-lens-color', 'add-lens-color-native', '', '', 'add');
+        // Tab keyboard support. Pure wiring over markup that already exists.
+        bindTabKeyboard();
       } catch (err) {
         // Non-fatal on purpose: these wire up interaction and fill one swatch
         // row. A failure means some affordance is inert, which the user can see
@@ -8663,6 +8916,14 @@
         // go, never the first, or the swap itself is visible.
         showDashboard();
         showLoading(false);
+        // The hash is applied HERE, after the base data has landed, not during
+        // the bootstrap block above. Landing on #settings immediately would
+        // otherwise kick off that tab's lazy loaders — CORS and Telegram
+        // settings, plus a makers fetch — while the splash is still up and the
+        // core lists are still in flight, so the deep-linked tab would race the
+        // boot it is supposed to be riding on. Doing it here means the switch
+        // is a synchronous re-render of data that has already arrived.
+        applyTabFromHash();
       } catch (err) {
         // api() reports an unreachable server as status 0 / NETWORK_ERROR. On a
         // home LAN the box may simply not have finished booting, which says
