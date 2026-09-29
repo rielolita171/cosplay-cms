@@ -203,6 +203,87 @@
       background: var(--primary);
     }
 
+    /* THE WISHLIST COUNT. A tab button is a <button>, so a count inside it has to
+       be styled to read as part of the label rather than as a second control.
+       `line-height: 1` plus an explicit min-width is what keeps a two-digit
+       count from making the button visibly taller than its neighbours — the
+       badge grows sideways only. */
+    .tab-count {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 1px 7px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.12);
+      color: inherit;
+      font-size: 0.72rem;
+      font-weight: 700;
+      line-height: 1.4;
+      min-width: 20px;
+      text-align: center;
+      vertical-align: middle;
+    }
+
+    /* While the active tab is the primary colour, the muted chip disappears
+       into it, so the active state gets a contrasting one. */
+    .tab-btn.active .tab-count {
+      background: rgba(255, 255, 255, 0.25);
+    }
+
+    /* A zero count is hidden rather than shown as "0". An empty wishlist is
+       simply an empty tab, and a "0" on a tab is noise that has to be read and
+       dismissed on every visit. The element is kept in the DOM (not removed)
+       so its text can be written again when a costume moves to WISHLIST. */
+    .tab-count.is-empty {
+      display: none;
+    }
+
+    /* PAGINATION. One bar per tab, rendered by renderPager() into the
+       #pager-<tab> container that sits directly after that tab's grid. It is
+       built with DOM APIs and textContent, never innerHTML with interpolated
+       numbers, for the same reason every other control here is. */
+    .pager {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 24px;
+      padding-top: 16px;
+      border-top: 1px solid var(--card-border);
+    }
+
+    .pager .btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .pager-status {
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      min-width: 150px;
+      text-align: center;
+    }
+
+    .pager-size {
+      background: var(--card-bg);
+      color: var(--text);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 0.85rem;
+    }
+
+    /* Shown only when a list is genuinely truncated by the page size. See
+       renderPager() — this is the difference between "you are looking at a
+       page" and "some of your data is not on screen and there is no way to
+       reach it", which look identical otherwise. */
+    .pager-warning {
+      width: 100%;
+      text-align: center;
+      color: var(--warning);
+      font-size: 0.8rem;
+    }
+
     /* Search & Filter Bar */
     .filter-bar {
       display: flex;
@@ -1048,6 +1129,40 @@
       cursor: default;
     }
 
+    /* A thumbnail with its own × on the corner, used only by the prop photo
+       blocks. The × is a SIBLING of the thumbnail button rather than a child:
+       nested inside, a single click would bubble to the lightbox and open the
+       photo the user just asked to remove. */
+    .media-thumb-group {
+      position: relative;
+      display: inline-flex;
+      flex: 0 0 auto;
+    }
+    .media-thumb-remove {
+      position: absolute;
+      top: -5px;
+      right: -5px;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 9999px;
+      border: 1px solid var(--card-border);
+      background: var(--danger);
+      color: #ffffff;
+      font-size: 0.72rem;
+      line-height: 1;
+      cursor: pointer;
+      z-index: 1;
+      transition: var(--transition);
+    }
+    .media-thumb-remove:hover {
+      background: #dc2626;
+      transform: scale(1.1);
+    }
+
     /* The "open the lightbox" overlay. Centred, and BELOW the upload button in
        stacking order so the two never fight over the same clicks. */
     .media-expand-btn {
@@ -1267,7 +1382,7 @@
           <p>Home Server Inventory & Milestones</p>
         </div>
         <div class="header-actions">
-          <!-- The three "+ Add …" buttons are the write entry points. They keep
+          <!-- The four "+ Add …" buttons are the write entry points. They keep
                the data-write-only attribute and openModal()'s canWrite() guard
                even though the app no longer has roles: both are now constants
                that always pass, and leaving them in place is what means a future
@@ -1275,16 +1390,37 @@
                than a change spread over every call site. See canWrite(). -->
           <button class="btn btn-secondary" data-write-only onclick="openModal('modal-add-lens')">+ Add Lens</button>
           <button class="btn btn-secondary" data-write-only onclick="openModal('modal-add-prop')">+ Add Prop</button>
+          <button class="btn btn-secondary" data-write-only onclick="openModal('modal-add-maker')">+ Add Maker</button>
           <button class="btn btn-primary" data-write-only onclick="openModal('modal-add-costume')">+ New Costume</button>
         </div>
       </header>
 
       <!-- Metrics Cards -->
+      <!-- FIVE cards now, where there were four. The grid is `auto-fit
+           minmax(240px, 1fr)`, so the fifth wraps onto a second row on a narrow
+           screen and reflows to five columns on a wide one without any
+           breakpoint — which is why there is no `repeat(5, …)` to keep in sync
+           with the card count. -->
       <div class="metrics-grid">
         <div class="metric-card">
           <div class="metric-title">Total Costumes</div>
           <div class="metric-value" id="metric-total-costumes">--</div>
           <div class="metric-sub" style="color: var(--success);" id="metric-fullset-count">-- fullsets</div>
+        </div>
+        <!-- COLLECTION WORTH. Summed from the Costume.buyPrice column that is
+             already collected on every card, so there is no extra query and no
+             way for this number to disagree with the prices shown on the cards.
+
+             WORTH, NOT COST: it sums only IN_POSSESSION costumes. A costume on
+             loan is not in the wardrobe, one flagged TO_BE_SOLD is stock on
+             its way out, and a WISHLIST entry is something not yet bought — all
+             three would inflate a total that is supposed to answer "what is my
+             collection worth". The excluded rows are counted underneath so the
+             number can be audited rather than merely trusted. -->
+        <div class="metric-card">
+          <div class="metric-title">Collection Worth</div>
+          <div class="metric-value" id="metric-collection-worth">--</div>
+          <div class="metric-sub" id="metric-collection-worth-note">Buy prices of owned costumes</div>
         </div>
         <div class="metric-card">
           <div class="metric-title">Out On Loan / Rent</div>
@@ -1308,16 +1444,34 @@
         <button class="tab-btn active" data-tab="costumes" onclick="switchTab('costumes')">👘 Costumes</button>
         <button class="tab-btn" data-tab="props" onclick="switchTab('props')">⚔️ Props & Accessories</button>
         <button class="tab-btn" data-tab="lenses" onclick="switchTab('lenses')">👁️ Contact Lenses</button>
+        <!-- MAKER CORNER. Sits next to Props because that is the relationship:
+             a maker is looked up WHILE holding the prop, not while holding a
+             costume, so the tab is adjacent to the thing that provokes the
+             lookup rather than filed away with the settings. -->
+        <button class="tab-btn" data-tab="makers" onclick="switchTab('makers')">🛠️ Maker Corner</button>
+        <!-- THE WISHLIST TAB. A VIEW over the same Costume rows, not a second
+             collection: an entry here is a costume whose status is WISHLIST, and
+             the two tabs are deliberately rendering the same records so an item
+             can be moved between them by editing its status and nothing else.
+
+             Sits directly after Costumes because it IS costumes — putting it
+             further away would imply the wishlist is a different kind of thing,
+             and it is not. The count inside the label is written by
+             updateWishlistCount() from the server's `statusCounts`, which is
+             deliberately unfiltered and unpaged (see the comment there): a badge
+             that changed when you typed in the search box would be answering a
+             question nobody asked. -->
+        <button class="tab-btn" data-tab="wishlist" onclick="switchTab('wishlist')">⭐ Wishlist<span class="tab-count is-empty" id="wishlist-tab-count"></span></button>
         <button class="tab-btn" data-tab="lists" onclick="switchTab('lists')">🏷️ Reference Lists</button>
         <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">⚙️ Settings</button>
       </div>
 
       <!-- Filter Bar -->
       <div class="filter-bar" id="filter-bar">
-        <input type="text" class="search-input" id="search-input" placeholder="Search by character or fandom..." oninput="filterItems()">
+        <input type="text" class="search-input" id="search-input" placeholder="Search by character or fandom..." oninput="filterItems(true)">
         <!-- Options are rebuilt per tab by syncFilterControls() so one control
              serves costumes(status) / props(category) / lenses(status). -->
-        <select class="select-input" id="status-filter" onchange="filterItems()">
+        <select class="select-input" id="status-filter" onchange="filterItems(true)">
           <option value="">All Statuses</option>
           <option value="IN_POSSESSION">In Possession</option>
           <option value="ON_RENT">On Rent</option>
@@ -1325,7 +1479,7 @@
           <option value="WISHLIST">Wishlist</option>
         </select>
         <!-- Props-only filter dimension (checklist: "filter across name/category/location") -->
-        <input type="text" class="search-input" id="location-filter" style="display: none; flex: 0 1 220px; min-width: 160px;" placeholder="Filter by storage location..." oninput="filterItems()">
+        <input type="text" class="search-input" id="location-filter" style="display: none; flex: 0 1 220px; min-width: 160px;" placeholder="Filter by storage location..." oninput="filterItems(true)">
         <!-- Costumes-only filter dimensions. Same pattern as #location-filter
              above, inverted: that one is props-only, these two are costumes-only,
              and syncFilterControls() is what shows or hides them per tab.
@@ -1334,10 +1488,10 @@
              syncFilterDimensionSelects(), and rebuilt on every costume load.
              Both start at display:none so they cannot flash onto the props or
              lenses tabs in the gap before the first syncFilterControls(). -->
-        <select class="select-input" id="fandom-filter" style="display: none; flex: 0 1 200px; min-width: 150px;" onchange="filterItems()">
+        <select class="select-input" id="fandom-filter" style="display: none; flex: 0 1 200px; min-width: 150px;" onchange="filterItems(true)">
           <option value="">All Fandoms</option>
         </select>
-        <select class="select-input" id="brand-filter" style="display: none; flex: 0 1 200px; min-width: 150px;" onchange="filterItems()">
+        <select class="select-input" id="brand-filter" style="display: none; flex: 0 1 200px; min-width: 150px;" onchange="filterItems(true)">
           <option value="">All Brands</option>
         </select>
         <!-- One escape hatch for four filters. Deliberately NOT data-write-only:
@@ -1347,18 +1501,55 @@
       </div>
 
       <!-- Costumes Tab Content -->
+      <!-- THE PAGER SITS ABOVE THE GRID, directly under the filter bar. The
+           controls that NARROW the list and the controls that MOVE THROUGH it
+           belong together, and a pager below a long catalogue is something you
+           have to scroll to the very bottom of to find and then scroll all the
+           way back up to use. Same placement on every tab, so it does not move
+           when you switch between them. -->
       <section id="tab-costumes">
+        <div id="pager-costumes"></div>
         <div class="items-grid" id="costumes-grid"></div>
       </section>
 
       <!-- Props Tab Content -->
       <section id="tab-props" style="display: none;">
+        <div id="pager-props"></div>
         <div class="items-grid" id="props-grid"></div>
       </section>
 
       <!-- Lenses Tab Content -->
       <section id="tab-lenses" style="display: none;">
+        <div id="pager-lenses"></div>
         <div class="items-grid" id="lenses-grid"></div>
+      </section>
+
+      <!-- MAKER CORNER. The grid is the only child: the Maker record is a name,
+           a type, two contact links and a note, so there is no media strip and
+           no detail view — the card IS the detail. The two contact buttons on
+           each card are the entire point of the feature, so they are rendered
+           as real links (see renderMakers) rather than as buttons that copy a
+           number to the clipboard. -->
+      <section id="tab-makers" style="display: none;">
+        <div id="pager-makers"></div>
+        <div class="items-grid" id="makers-grid"></div>
+      </section>
+
+      <!-- WISHLIST TAB. Its own grid, and deliberately NOT a second set of
+           costume cards in #costumes-grid: renderCostumes() targets a grid id
+           by name, so sharing one would make both tabs fight over the same
+           innerHTML and whichever loaded last would win. A separate grid with
+           the same renderer is the one arrangement where the two views cannot
+           interfere. The header says what the tab is, because a card with a
+           WISHLIST badge on it does not otherwise say why it is here. -->
+      <section id="tab-wishlist" style="display: none;">
+        <div style="margin-bottom: 16px; color: var(--text-muted); font-size: 0.85rem;">
+          Costumes you want but have not bought yet. Moving one to
+          <strong>In Possession</strong> on its Edit form takes it off this list
+          and adds it to the collection.
+        </div>
+        <div id="pager-wishlist"></div>
+        <div class="items-grid" id="wishlist-grid"></div>
       </section>
 
       <!-- Reference Lists Tab Content (Brands + Fandoms).
@@ -1506,6 +1697,134 @@
             </button>
           </div>
           <p id="cors-message" style="font-size: 0.8rem; margin: 10px 0 0;"></p>
+        </div>
+
+        <!-- TELEGRAM NOTIFICATIONS.
+
+             THE FLOW THIS CONFIGURES, because the panel is otherwise a pair of
+             mystery boxes. THIS SERVER checks your lenses once a day, on a timer
+             of its own, and sends you a Telegram message naming whatever has
+             entered the alert window. There is no second application and no
+             external scheduler: the check is a service inside this same process
+             (src/services/lensExpiryChecker.js), so changing the window below
+             changes what tomorrow's check reports — no external edit, no restart.
+
+             AND IT DOES NOT REPEAT ITSELF. "Expiring soon" is a state, not an
+             event. A lens is messaged when it ENTERS a window (60/14/7/3/1/0
+             days) and never on every run — otherwise a 14-day window would send
+             you fourteen identical messages. The window each lens was last
+             alerted under is remembered, so tomorrow's check stays silent
+             unless something actually changed.
+
+             TWO FIELDS, not one, because Telegram needs a token AND a chat id,
+             and an operator who has configured only one of them is in a state
+             that looks configured and delivers nothing. Each is reported
+             separately above its own field so that half-done state is visible
+             rather than something you have to infer from a failing test.
+
+             THE TOKEN BOX IS ALWAYS EMPTY ON LOAD, and that is the design
+             rather than an oversight. GET /api/settings/telegram deliberately
+             never returns the secret — it returns a description (bot id, secret
+             length, fingerprint). The status line above the box is what tells
+             you a token IS saved. Prefilling would put a live credential into
+             the DOM of every page view, into browser history, and into any
+             screenshot taken to ask for help, in exchange for saving one paste.
+
+             THE TWO TEST BUTTONS ARE ORDERED BY WHAT THEY DIAGNOSE, not by what
+             they do. "Check token" asks Telegram who the bot is and sends
+             nothing, so it is safe to press with a wrong chat id and it tells
+             you which half is broken. "Send test message" only means anything
+             once both halves are right. -->
+        <div class="metric-card" style="max-width: 720px; margin-top: 20px;">
+          <h3 style="font-size: 1rem; margin-bottom: 4px;">Telegram notifications</h3>
+          <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 16px;">
+            This server checks your lenses once a day on its own — no external scheduler
+            needed. If anything has entered the alert window below, you get one Telegram
+            message naming it, and nothing is repeated until it enters a tighter window.
+            You can try it right now with the buttons at the bottom.
+          </p>
+
+          <p style="font-size: 0.78rem; margin-bottom: 6px;">
+            Bot token: <strong id="telegram-token-status">not loaded</strong>
+          </p>
+          <p style="font-size: 0.78rem; margin-bottom: 14px;">
+            Chat id: <strong id="telegram-chat-status">not loaded</strong>
+          </p>
+
+          <div class="form-group">
+            <label for="telegram-token-input">Bot token</label>
+            <input type="password" class="form-control" id="telegram-token-input"
+                   autocomplete="off" spellcheck="false" maxlength="256"
+                   placeholder="123456789:AAExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+            <div class="field-error" id="telegram-token-error"></div>
+            <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 6px;">
+              From <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a>.
+              Saved in the database and used immediately — no restart needed.
+              "Use the .env token" discards this one and goes back to
+              <code>TELEGRAM_BOT_TOKEN</code>.
+            </p>
+          </div>
+
+          <div class="modal-actions" style="margin-top: 4px;">
+            <button type="button" class="btn btn-primary" onclick="saveTelegramToken()">Save token</button>
+            <button type="button" class="btn btn-secondary" onclick="clearTelegramToken()">Use the .env token</button>
+          </div>
+          <p id="telegram-token-message" style="font-size: 0.8rem; margin: 10px 0 0;"></p>
+
+          <hr style="border: none; border-top: 1px solid var(--card-border); margin: 22px 0;">
+
+          <div class="form-group">
+            <label for="telegram-chat-input">Chat id</label>
+            <input type="text" class="form-control" id="telegram-chat-input"
+                   inputmode="numeric" autocomplete="off" maxlength="20"
+                   placeholder="123456789">
+            <div class="field-error" id="telegram-chat-error"></div>
+            <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 6px;">
+              Where the messages go. Message
+              <a href="https://t.me/userinfobot" target="_blank" rel="noopener">@userinfobot</a>
+              to get yours, or use a group's id. Add the bot to the group first.
+            </p>
+          </div>
+
+          <div class="modal-actions" style="margin-top: 4px;">
+            <button type="button" class="btn btn-primary" onclick="saveTelegramChatId()">Save chat id</button>
+          </div>
+          <p id="telegram-chat-message" style="font-size: 0.8rem; margin: 10px 0 0;"></p>
+
+          <hr style="border: none; border-top: 1px solid var(--card-border); margin: 22px 0;">
+
+          <div class="form-group">
+            <label for="telegram-threshold-input">Alert me this many days before expiry</label>
+            <input type="number" class="form-control" id="telegram-threshold-input"
+                   min="0" max="400" step="1" inputmode="numeric"
+                   placeholder="14" style="max-width: 160px;">
+            <div class="field-error" id="telegram-threshold-error"></div>
+            <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 6px;">
+              This is the window the daily job uses — it lives here, not in the scheduled
+              job's own config, so changing it takes effect on the next run. 0 means
+              "alert me only on the day it expires".
+            </p>
+          </div>
+
+          <div class="modal-actions" style="margin-top: 4px;">
+            <button type="button" class="btn btn-primary" onclick="saveTelegramThreshold()">Save window</button>
+          </div>
+          <p id="telegram-threshold-message" style="font-size: 0.8rem; margin: 10px 0 0;"></p>
+
+          <hr style="border: none; border-top: 1px solid var(--card-border); margin: 22px 0;">
+
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="telegram-test-input">Test message (optional)</label>
+            <textarea class="form-control" id="telegram-test-input" rows="2" maxlength="1000"
+                      placeholder="Leave empty to send a standard confirmation."></textarea>
+          </div>
+          <p class="field-error" id="telegram-test-error"></p>
+
+          <div class="modal-actions" style="margin-top: 4px;">
+            <button type="button" class="btn btn-secondary" onclick="testTelegramToken()">✓ Check token</button>
+            <button type="button" class="btn btn-primary" onclick="sendTelegramTestMessage()">✉ Send test message</button>
+          </div>
+          <p id="telegram-test-message" style="font-size: 0.8rem; margin: 10px 0 0;"></p>
         </div>
       </section>
 
@@ -1720,6 +2039,23 @@
         <textarea class="form-control" name="notes" id="edit-prop-notes" rows="3" maxlength="2000" placeholder="Fragile; stored flat..."></textarea>
         <div class="field-error" data-error-for="notes"></div>
       </div>
+      <div class="form-group">
+        <label>Photos (<span id="edit-prop-photo-count">0</span> / 3)</label>
+        <div class="item-media" id="edit-prop-media" style="height: 120px;">
+          <div class="media-placeholder">
+            <span class="media-icon">🖼️</span><span>No image</span>
+          </div>
+        </div>
+        <!-- Every thumbnail carries its own Remove button rather than a single
+             "clear all" control. A prop is capped at 3 photos, so freeing one
+             slot often means discarding exactly one — and the lightbox Delete
+             button is hidden for props (see renderGallery), so this is the only
+             way a prop photo can ever come off. -->
+        <div class="media-strip" id="edit-prop-strip"></div>
+        <button type="button" class="btn btn-secondary" data-action="upload-prop" data-input="prop-image-input" data-id="" style="margin-top: 8px;">📷 Upload Photos</button>
+        <input type="file" id="prop-image-input" class="upload-input-hidden" multiple accept="image/png,image/jpeg,image/webp,image/gif">
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 6px;">Up to 3 photos, 8 MB each. Click a thumbnail's × to remove it.</p>
+      </div>
       <div class="modal-actions">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-prop')">Cancel</button>
         <button type="submit" class="btn btn-primary">Save Changes</button>
@@ -1773,6 +2109,18 @@
           <option value="Minor Wear">Minor Wear</option>
           <option value="Needs Repair">Needs Repair</option>
         </select>
+      </div>
+      <div class="form-group">
+        <label>Photos (<span id="add-prop-photo-count">0</span> / 3)</label>
+        <div class="item-media" id="add-prop-media" style="height: 120px;">
+          <div class="media-placeholder">
+            <span class="media-icon">🖼️</span><span>No image</span>
+          </div>
+        </div>
+        <div class="media-strip" id="add-prop-strip"></div>
+        <button type="button" class="btn btn-secondary" data-action="upload-prop" data-input="add-prop-image-input" style="margin-top: 8px;">📷 Upload Photos</button>
+        <input type="file" id="add-prop-image-input" class="upload-input-hidden" multiple accept="image/png,image/jpeg,image/webp,image/gif">
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 6px;">Up to 3 photos, 8 MB each. They are attached when the prop is saved.</p>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-add-prop')">Cancel</button>
@@ -1830,6 +2178,112 @@
       <div class="modal-actions">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-add-lens')">Cancel</button>
         <button type="submit" class="btn btn-primary">Save Lens</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ==================================================================
+       MAKER CORNER — Add and Edit dialogs.
+
+       BOTH DIALOGS CARRY THE SAME FOUR FIELDS, and they are written out
+       separately rather than one dialog reused for both, because the
+       project already made that choice for props and lenses and a
+       second pattern would be a second thing to keep in step.
+
+       `makerType` is a plain <select> with the three values hard-written
+       in the markup, NOT a free-text box with a custom sentinel like the
+       prop category. The reason is on the route: makerType is a CLOSED SET
+       (MAKER_TYPES in src/routes/makers.js), enforced server-side by
+       enumParam. A sentinel plus a free-text box would offer the user a way
+       to type a fourth value that the API rejects with a 400 — a control
+       that cannot succeed. The filter <select> on the tab is populated from
+       the list the API returns, so those two are one source; this one is
+       static because it must render before any request completes.
+
+       `sosmed` is a URL and not a handle: the dashboard renders it as an
+       <a href>, and the server only accepts an absolute http(s) URL. That
+       is why the input carries type="url" and the hint names the shape.
+       `whatsapp` is a phone number stored exactly as typed — the
+       punctuation is never stripped on the way in. -->
+  <dialog id="modal-add-maker">
+    <h3 style="margin-bottom: 16px;">Add Maker</h3>
+    <form onsubmit="handleCreateMaker(event)" novalidate>
+      <div class="form-group">
+        <label>Maker Name *</label>
+        <input type="text" class="form-control" name="name" maxlength="120" required placeholder="e.g. Rina Prasetyo">
+        <div class="field-error" data-error-for="name"></div>
+      </div>
+      <div class="form-group">
+        <label>Makes *</label>
+        <select class="form-control" name="makerType" id="add-maker-type" required>
+          <option value="PROP">Props</option>
+          <option value="WEAPON">Weapons</option>
+          <option value="ACCESSORY">Accessories</option>
+        </select>
+        <p style="color: var(--text-muted); font-size: 0.78rem; margin-top: 6px;">What you would go to this maker for.</p>
+        <div class="field-error" data-error-for="makerType"></div>
+      </div>
+      <div class="form-group">
+        <label>Social Media Link</label>
+        <input type="url" class="form-control" name="sosmed" maxlength="2048" placeholder="https://instagram.com/yourmaker">
+        <p style="color: var(--text-muted); font-size: 0.78rem; margin-top: 6px;">One link to their profile — Instagram, TikTok, X, anything. Must start with http:// or https://</p>
+        <div class="field-error" data-error-for="sosmed"></div>
+      </div>
+      <div class="form-group">
+        <label>WhatsApp</label>
+        <input type="tel" class="form-control" name="whatsapp" maxlength="32" placeholder="+62 812-3456-7890">
+        <p style="color: var(--text-muted); font-size: 0.78rem; margin-top: 6px;">Stored exactly as you type it. Spacing, dashes and brackets are all fine.</p>
+        <div class="field-error" data-error-for="whatsapp"></div>
+      </div>
+      <div class="form-group">
+        <label>Notes</label>
+        <textarea class="form-control" name="notes" rows="2" maxlength="2000" placeholder="Lead time, what they will not take, pricing..."></textarea>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-add-maker')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Maker</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Opened from a maker card's Edit button via bindGridEvents ->
+       data-action="edit" on #makers-grid. -->
+  <dialog id="modal-edit-maker">
+    <h3 style="margin-bottom: 16px;">Edit Maker</h3>
+    <form onsubmit="handleEditMaker(event)" novalidate>
+      <div class="form-group">
+        <label>Maker Name *</label>
+        <input type="text" class="form-control" name="name" maxlength="120" required>
+        <div class="field-error" data-error-for="name"></div>
+      </div>
+      <div class="form-group">
+        <label>Makes *</label>
+        <select class="form-control" name="makerType" id="edit-maker-type" required>
+          <option value="PROP">Props</option>
+          <option value="WEAPON">Weapons</option>
+          <option value="ACCESSORY">Accessories</option>
+        </select>
+        <div class="field-error" data-error-for="makerType"></div>
+      </div>
+      <div class="form-group">
+        <label>Social Media Link</label>
+        <input type="url" class="form-control" name="sosmed" maxlength="2048">
+        <p style="color: var(--text-muted); font-size: 0.78rem; margin-top: 6px;">Clear this box to remove the link.</p>
+        <div class="field-error" data-error-for="sosmed"></div>
+      </div>
+      <div class="form-group">
+        <label>WhatsApp</label>
+        <input type="tel" class="form-control" name="whatsapp" maxlength="32">
+        <p style="color: var(--text-muted); font-size: 0.78rem; margin-top: 6px;">Clear this box to remove the number.</p>
+        <div class="field-error" data-error-for="whatsapp"></div>
+      </div>
+      <div class="form-group">
+        <label>Notes</label>
+        <textarea class="form-control" name="notes" rows="2" maxlength="2000"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-maker')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
       </div>
     </form>
   </dialog>
@@ -2259,7 +2713,10 @@
 
     // Every `data-action` that mutates something. Read from the dispatcher in
     // bindGridEvents; kept beside canWrite() so the two can be read together.
-    const WRITE_ACTIONS = ['upload', 'edit', 'delete', 'open-lens',
+    //   upload-prop / remove-prop-image are here too: they are the same kind of
+    //     mutation as `upload`, on the other grid, and leaving them out is exactly
+    //     the kind of gap this list exists to make impossible.
+    const WRITE_ACTIONS = ['upload', 'upload-prop', 'remove-prop-image', 'edit', 'delete', 'open-lens',
       'rename-brand', 'link-brand', 'rename-fandom', 'delete-brand', 'delete-fandom'];
 
     /**
@@ -2452,8 +2909,48 @@
       costumes: [],
       props: [],
       lenses: [],
+      makers: [],
+      // The Maker type closed set, adopted from the list endpoint rather than
+      // hard-coded. MAKER_TYPE_FALLBACK below is only what the filter shows
+      // during the first load; these two are replaced by the server's answer
+      // on the first successful /api/makers response.
+      makerTypes: [],
+      makerTypeLabels: {},
+      makersLoaded: false,
       brands: [],
       fandoms: [],
+      // The Wishlist is a VIEW over the costume rows, not its own array. These
+      // two are what keep that view honest: the server's UNFILTERED, UNPAGED
+      // per-status counts (so the tab badge can never mean "page 1 of whatever
+      // is in the search box"), and whether the tab has ever been opened (so a
+      // boot does not fetch a list nobody has looked at).
+      costumeStatusCounts: null,
+      // Whole-collection counts for the metric cards (total, fullsets). `null`
+      // rather than 0 so updateMetrics() can tell "the server has not sent this
+      // yet" from "there are genuinely no costumes" — the same reason
+      // costumeStatusCounts is nullable.
+      costumeCollectionStats: null,
+      // The Fandom/Brand dropdown options, from the server's DISTINCT query.
+      // NOT derived from state.costumes: that array is one page of 25 out of 86
+      // on the live database, so deriving them would offer only the fandoms that
+      // happen to sort into page 1.
+      costumeFilterOptions: null,
+      wishlist: [],
+      // Per-tab paging. `page` is 1-based and `pageSize` is one of the three
+      // sizes the API accepts. Kept as a plain object keyed by tab so each list
+      // remembers where it was, and so `page` can be reset to 1 on a filter
+      // change without disturbing the other tabs.
+      pager: { costumes: { page: 1, pageSize: 25 }, props: { page: 1, pageSize: 25 },
+               lenses: { page: 1, pageSize: 25 }, makers: { page: 1, pageSize: 25 },
+               wishlist: { page: 1, pageSize: 25 } },
+      // The server-reported envelope for each tab's last response, so the pager
+      // renders from the SAME numbers the grid was drawn from. Derived from the
+      // rows would be a second, subtly different source of truth.
+      paging: { costumes: null, props: null, lenses: null, makers: null, wishlist: null },
+      // Debounce handle for the server-side search. The costume list filters on
+      // the server now, so every keystroke would be a request without this.
+      searchTimer: null,
+      wishlistLoaded: false,
 
       // UI
       currentTab: 'costumes',
@@ -2474,15 +2971,25 @@
       // renderer only. See REFERENCE_LISTS.
       brandQuery: '',
       fandomQuery: '',
+      // The server's page- and filter-independent money totals for the costume
+      // collection, as opposed to state.costumes, which is only the rows on
+      // screen. `null` until a load that carried them has landed, so
+      // updateMetrics() can tell an absent envelope from a genuine zero.
+      costumeTotals: null,
       loading: false,
       error: null,
 
       // Uploads / transient UI state
       imageUrlsCache: {},
       imageUploadTargetId: null,
+      // Same seam as `imageUploadTargetId`, for the prop file picker. Props have
+      // their own hidden <input> because a prop can be edited from the grid and
+      // from the modal, and the two must not fight over one pending FileList.
+      propImageUploadTargetId: null,
       editingCostumeId: null,
       editingPropId: null,
       editingLensId: null,
+      editingMakerId: null,
       toastTimer: null,
       confirmResolver: null,
       // The text-entry modal. Deliberately a SEPARATE slot from
@@ -2501,6 +3008,23 @@
       corsCurrentRequestOrigin: null,
       corsLoaded: false,
       corsLoading: false,
+      // Telegram settings. `telegramToken` is the server's DESCRIPTION of the
+      // token (configured/source/botId/secretLength/fingerprint) and NEVER the
+      // token itself — the API does not return the secret, so there is no copy
+      // of it anywhere in this page that could leak. Keeping it in `state`
+      // rather than re-fetching on every repaint is what lets the status lines
+      // be updated after a save without another round trip.
+      telegramToken: null,
+      telegramChatId: null,
+      telegramThresholdDays: null,
+      telegramMaxThresholdDays: 400,
+      telegramLoaded: false,
+      telegramLoading: false,
+      // In-flight guards. Without these, a double-click on "Send test message"
+      // fires two real API calls and burns two of the ten test sends the server
+      // allows an hour.
+      telegramSaving: false,
+      telegramTesting: false,
       // The open lightbox. `index` is a position in `urls`, and `urls` is a
       // SNAPSHOT taken when the lightbox opened — paging must not re-read
       // state.costumes, or a background reload could swap the list out from
@@ -2541,6 +3065,33 @@
       if (/^https?:\/\//i.test(raw)) return raw;
       if (raw.charAt(0) === '/' && raw.charAt(1) !== '/') return raw;
       return null;
+    }
+
+    /**
+     * The dialable digits of a stored WhatsApp number, for a wa.me link.
+     *
+     * WHY THE DIGITS ARE PARSED HERE AND NOWHERE ELSE
+     * src/routes/makers.js deliberately STORES the number exactly as typed —
+     * '+62 (812) 3456-7890' is saved with its brackets and spaces intact — and
+     * says in its own comment that turning that text into a dialled number is
+     * the client's job, and that this function is the single place it happens.
+     * That contract is what keeps the server free of formatting policy it would
+     * then have to be right about (Indonesian mobile numbers start 0 and are
+     * dialled as 62; landlines and some other countries do not follow that rule,
+     * so no server-side 'strip the leading zero' logic is correct in general).
+     *
+     * THE STRIP IS TOTAL, NOT A LIST OF PUNCTUATION.
+     * Everything that is not [0-9] is removed rather than removing a known set of
+     * separators. A number is stored under a whitelist that already rejects
+     * letters, so there is no legitimate character this could eat — and a total
+     * strip has no way to be defeated by a separator nobody thought of.
+     *
+     * @param {*} value the stored `whatsapp` column
+     * @returns {string|null} the digits, or null when there is nothing to dial
+     */
+    function waLinkDigits(value) {
+      const digits = clean(value).replace(/[^0-9]/g, '');
+      return digits ? digits : null;
     }
 
     // SQLite INTEGER columns arrive as the STRING '0' / '1' over the CLI pipe and
@@ -3098,67 +3649,120 @@
     // dispatched by these listeners, so a grid that rendered before they
     // existed would have dead buttons on it.
     // ==========================================================================
+    /**
+     * Turn one `data-action` attribute into its handler.
+     *
+     * Split out of bindGridEvents() because the prop photo BLOCKS in the two
+     * prop dialogs emit the same data-action contract as the prop cards
+     * (upload-prop / remove-prop-image / open-gallery), but live inside a
+     * <dialog> rather than inside #props-grid. A listener bound only to the
+     * grid would leave every one of those modal controls dead, so the two
+     * containers are bound by the SAME function and share this dispatcher
+     * rather than keeping two lists of branches in step by hand.
+     *
+     * @param {string} action  the value of the clicked element's data-action.
+     * @param {HTMLElement} trigger  that element (its dataset carries the args).
+     * @param {string} gridId  which container it came from; 'edit-prop' /
+     *   'add-prop' select the prop modals' photo controls.
+     */
+    function dispatchDataAction(action, trigger, gridId) {
+      const id = trigger.dataset.id;
+
+      // THE SINGLE CLIENT-SIDE CHOKE POINT FOR EVERY CARD ACTION.
+      // Every renderer in this file emits `data-action`, and this dispatcher is
+      // the only thing that turns that attribute into a mutation. Gating HERE is
+      // what makes the write check complete: a control a renderer failed to hide
+      // still cannot reach its handler. Hiding (applyRoleVisibility) is the UX
+      // half; this is the half that refuses.
+      //
+      // DEAD AS WRITTEN, DELIBERATELY. canWrite() is now constant-true, so this
+      // never refuses and the toast below is unreachable — that is the point of
+      // keeping the check rather than deleting it: it is the one place every
+      // card mutation passes through, so reinstating roles is a change to
+      // canWrite() alone and no renderer has to be touched.
+      //
+      // 'open-gallery' is deliberately absent from WRITE_ACTIONS: viewing photos
+      // is a read, and browsing the gallery is always allowed.
+      if (WRITE_ACTIONS.indexOf(action) !== -1 && !canWrite()) {
+        showToast('This action is not available.', 'error');
+        return;
+      }
+
+      if (action === 'open-gallery') openGallery(id, parseInt(trigger.dataset.index, 10) || 0);
+      else if (action === 'upload') openImagePicker(id);
+      else if (action === 'upload-prop') openPropImagePicker(id || NEW_PROP_IMAGES_KEY, trigger.dataset.input);
+      else if (action === 'remove-prop-image') removePropImage(id, trigger.dataset.url);
+      else if (action === 'edit') {
+        // `edit` is one action name shared by four grids, exactly like `delete`
+        // below, because all the card renderers follow the same data-action
+        // contract. Dispatching on the GRID rather than on the resource is what
+        // stops the prop modal opening for a lens card.
+        //
+        // 'wishlist-grid' IS a costumes grid — it renders the same costume cards
+        // — and it needs its own branch precisely because the last one falls
+        // through to the lens modal. Omitting it here would make every Edit
+        // button on the Wishlist tab open a contact-lens dialog. That fall-
+        // through is the reason this list is a list of grids rather than a
+        // lookup keyed by resource type: the safe default is the WRONG default.
+        if (gridId === 'costumes-grid') openEditCostume(id);
+        else if (gridId === 'wishlist-grid') openEditCostume(id);
+        else if (gridId === 'props-grid') openEditProp(id);
+        else if (gridId === 'makers-grid') openEditMaker(id);
+        else openEditLens(id);
+      } else if (action === 'delete') {
+        if (gridId === 'costumes-grid') deleteCostume(id);
+        else if (gridId === 'wishlist-grid') deleteCostume(id);
+        else if (gridId === 'props-grid') deleteProp(id);
+        else if (gridId === 'makers-grid') deleteMaker(id);
+        else if (gridId === 'brands-grid') deleteBrand(id);
+        else if (gridId === 'fandoms-grid') deleteFandom(id);
+        else deleteLens(id);
+      } else if (action === 'open-lens') markLensOpened(id);
+      else if (action === 'rename-brand') renameReference('brands', id, trigger.dataset.name);
+      else if (action === 'link-brand') editBrandStoreUrl(id, trigger.dataset.name, trigger.dataset.url);
+      else if (action === 'rename-fandom') renameReference('fandoms', id, trigger.dataset.name);
+      // The brand/fandom grids render their Delete button with its own action
+      // name, so they need their own branch here. Without these two lines the
+      // Delete button on those cards did nothing at all.
+      else if (action === 'delete-brand') deleteBrand(id);
+      else if (action === 'delete-fandom') deleteFandom(id);
+    }
+
     function bindGridEvents() {
-      ['costumes-grid', 'props-grid', 'lenses-grid', 'brands-grid', 'fandoms-grid'].forEach(gridId => {
+      ['costumes-grid', 'wishlist-grid', 'props-grid', 'lenses-grid', 'makers-grid', 'brands-grid', 'fandoms-grid'].forEach(gridId => {
         const grid = document.getElementById(gridId);
         if (!grid) return;
 
         grid.addEventListener('click', event => {
           const trigger = event.target.closest('[data-action]');
           if (!trigger || !grid.contains(trigger)) return;
-          const action = trigger.dataset.action;
-          const id = trigger.dataset.id;
-
-          // THE SINGLE CLIENT-SIDE CHOKE POINT FOR EVERY CARD ACTION.
-          // Every renderer in this file emits `data-action`, and this one
-          // delegated listener is the only thing that turns that attribute into
-          // a mutation. Gating HERE is what makes the write check complete: a
-          // control a renderer failed to hide still cannot reach its handler.
-          // Hiding (applyRoleVisibility) is the UX half; this is the half that
-          // refuses.
-          //
-          // DEAD AS WRITTEN, DELIBERATELY. canWrite() is now constant-true, so
-          // this never refuses and the toast below is unreachable — that is the
-          // point of keeping the check rather than deleting it: it is the one
-          // place every card mutation passes through, so reinstating roles is a
-          // change to canWrite() alone and no renderer has to be touched.
-          //
-          // 'open-gallery' is deliberately absent from WRITE_ACTIONS: viewing
-          // photos is a read, and browsing the gallery is always allowed.
-          if (WRITE_ACTIONS.indexOf(action) !== -1 && !canWrite()) {
-            showToast('This action is not available.', 'error');
-            return;
-          }
-
-          if (action === 'open-gallery') openGallery(id, parseInt(trigger.dataset.index, 10) || 0);
-          else if (action === 'upload') openImagePicker(id);
-          else if (action === 'edit') {
-            // `edit` is one action name shared by three grids, exactly like
-            // `delete` below, because all the card renderers follow the same
-            // data-action contract. Dispatching on the GRID rather than on the
-            // resource is what stops the prop modal opening for a lens card.
-            if (gridId === 'costumes-grid') openEditCostume(id);
-            else if (gridId === 'props-grid') openEditProp(id);
-            else openEditLens(id);
-          } else if (action === 'delete') {
-            if (gridId === 'costumes-grid') deleteCostume(id);
-            else if (gridId === 'props-grid') deleteProp(id);
-            else if (gridId === 'brands-grid') deleteBrand(id);
-            else if (gridId === 'fandoms-grid') deleteFandom(id);
-            else deleteLens(id);
-          } else if (action === 'open-lens') markLensOpened(id);
-          else if (action === 'rename-brand') renameReference('brands', id, trigger.dataset.name);
-          else if (action === 'link-brand') editBrandStoreUrl(id, trigger.dataset.name, trigger.dataset.url);
-          else if (action === 'rename-fandom') renameReference('fandoms', id, trigger.dataset.name);
-          // The brand/fandom grids render their Delete button with its own
-          // action name, so they need their own branch here. Without these two
-          // lines the Delete button on those cards did nothing at all.
-          else if (action === 'delete-brand') deleteBrand(id);
-          else if (action === 'delete-fandom') deleteFandom(id);
+          dispatchDataAction(trigger.dataset.action, trigger, gridId);
         });
 
         // Broken thumbnail -> graceful placeholder (capture phase, non-bubbling).
         grid.addEventListener('error', event => {
+          const img = event.target;
+          if (!img || img.tagName !== 'IMG') return;
+          const holder = img.parentElement;
+          if (holder) holder.innerHTML = MEDIA_PLACEHOLDER_HTML;
+        }, true);
+      });
+
+      // The two prop dialogs' photo blocks. Their `error` listener is needed
+      // too: renderPropImages() paints a cover <img> and strip thumbnails
+      // directly, and those carry the same data-image-src as the cards, so a
+      // failed fetch would otherwise leave a broken-image icon in the modal
+      // with nothing to replace it.
+      [['modal-edit-prop', 'edit-prop'], ['modal-add-prop', 'add-prop']].forEach(pair => {
+        const dialog = document.getElementById(pair[0]);
+        const scope = pair[1];
+        if (!dialog) return;
+        dialog.addEventListener('click', event => {
+          const trigger = event.target.closest('[data-action]');
+          if (!trigger || !dialog.contains(trigger)) return;
+          dispatchDataAction(trigger.dataset.action, trigger, scope);
+        });
+        dialog.addEventListener('error', event => {
           const img = event.target;
           if (!img || img.tagName !== 'IMG') return;
           const holder = img.parentElement;
@@ -3184,6 +3788,15 @@
 
       const fileInput = document.getElementById('costume-image-input');
       if (fileInput) fileInput.addEventListener('change', onImagePicked);
+
+      // One listener per prop <input>, both routed to the same handler. Which
+      // slot the result lands in is decided by state.propImageUploadTargetId,
+      // not by which input fired — so the handler must not infer it from
+      // event.target.
+      const propFileInput = document.getElementById('prop-image-input');
+      if (propFileInput) propFileInput.addEventListener('change', onPropImagePicked);
+      const addPropFileInput = document.getElementById('add-prop-image-input');
+      if (addPropFileInput) addPropFileInput.addEventListener('change', onPropImagePicked);
 
       // ---- Lightbox wiring -------------------------------------------------
       // A <dialog> closes on Esc by itself, but the `cancel` event is prevented
@@ -3261,18 +3874,268 @@
     // ==========================================================================
     // DATA LOADERS
     // ==========================================================================
+    /**
+     * The pagination bar for one tab.
+     *
+     * BUILT WITH DOM APIS THROUGHOUT. Every number here is server-supplied
+     * (totalCount, page, totalPages) and every string is written with
+     * textContent. A pager is exactly the kind of control that tempts a
+     * template string, and a template string is how a totalCount becomes
+     * markup. innerHTML is only ever assigned the empty string, which carries
+     * no data.
+     *
+     * IT RENDERS NOTHING WHEN EVERYTHING FITS. A pager on a one-page list is
+     * a control that cannot do anything, which is the same rule as the
+     * Wishlist's absent status dropdown. The one exception is a list that has
+     * MORE rows than the page size can hold and no paging wired up for it —
+     * see the `truncated` warning below.
+     */
+    function renderPager(tab) {
+      const host = document.getElementById('pager-' + tab);
+      if (!host) return;
+      const meta = state.paging[tab];
+      const pager = state.pager[tab];
+      host.innerHTML = '';
+      if (!meta) return;
+
+      const totalCount = Number(meta.totalCount) || 0;
+      const totalPages = Math.max(1, Number(meta.totalPages) || 1);
+      // A page number past the end means a filter or a delete emptied the list
+      // under the user's feet. Clamped rather than left showing "page 4 of 3",
+      // and the corrected page is what the grid is actually showing.
+      if (pager.page > totalPages) pager.page = totalPages;
+      if (pager.page < 1) pager.page = 1;
+      if (totalCount === 0) return;
+
+      const bar = document.createElement('div');
+      bar.className = 'pager';
+
+      const mkBtn = (label, disabled, onClick) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn btn-secondary';
+        b.textContent = label;
+        b.disabled = !!disabled;
+        if (!disabled) b.addEventListener('click', onClick);
+        return b;
+      };
+
+      bar.appendChild(mkBtn('← Previous', pager.page <= 1, () => goToPage(tab, pager.page - 1)));
+
+      // "Showing 26–50 of 86" rather than "page 2 of 4": it tells the user how
+      // many records they are actually looking at, which is the question behind
+      // "where did my data go", and it still reads correctly on a single page.
+      //
+      // "All" IS A FIRST-CLASS PAGE SIZE, not a bigger number. On this
+      // collection (86 costumes) the default 25-row page hid 61 of them with
+      // no indication that anything was missing beyond the status line — so the
+      // option to simply see everything is the answer to that, and the status
+      // line always states the real total so the count is never a surprise.
+      const showAll = pager.pageSize === 'all';
+      const first = showAll ? 1 : (pager.page - 1) * pager.pageSize + 1;
+      const last = showAll ? totalCount : Math.min(pager.page * pager.pageSize, totalCount);
+      const status = document.createElement('span');
+      status.className = 'pager-status';
+      status.textContent = (showAll || totalPages === 1)
+        ? 'All ' + totalCount + (totalCount === 1 ? ' record' : ' records')
+        : 'Showing ' + first + '–' + last + ' of ' + totalCount;
+      bar.appendChild(status);
+
+      bar.appendChild(mkBtn('Next →', pager.page >= totalPages, () => goToPage(tab, pager.page + 1)));
+
+      // Page size. The three values are the ones the API accepts; sending
+      // anything else makes it silently fall back to 25, so the <select> offers
+      // exactly those and nothing more.
+      const sizeLabel = document.createElement('label');
+      sizeLabel.className = 'pager-status';
+      sizeLabel.textContent = 'Per page';
+      const size = document.createElement('select');
+      size.className = 'pager-size';
+      // 'all' is listed FIRST: it is the choice that makes the whole
+      // collection visible, and for a personal collection of a few hundred rows
+      // it is usually the right one. The three numbers after it are the
+      // bounded options, and those three are the only numeric sizes the API
+      // accepts — offering anything else would be silently ignored.
+      [ 'all', 10, 25, 50 ].forEach(n => {
+        const opt = document.createElement('option');
+        opt.value = String(n);
+        opt.textContent = n === 'all' ? 'All' : String(n);
+        if (n === pager.pageSize) opt.selected = true;
+        size.appendChild(opt);
+      });
+      // Changing the page size resets to page 1 rather than keeping the number:
+      // on page 4 of 25 switching to 50 would land the user somewhere they did
+      // not ask for, and the new size usually fits everything on one page.
+      size.addEventListener('change', () => {
+        pager.pageSize = size.value === 'all' ? 'all' : (parseInt(size.value, 10) || 25);
+        // Always back to page 1. The old page number is meaningless against a
+        // different page size, and under 'all' there is only one page, so
+        // keeping it would put the grid on a page the API no longer has.
+        pager.page = 1;
+        reloadTab(tab);
+      });
+      sizeLabel.appendChild(size);
+      bar.appendChild(sizeLabel);
+
+      // THE TRUNCATION WARNING. On a list that filters in the browser, a page
+      // size smaller than the collection means the rows that did not fit are
+      // neither shown nor reachable — the search box cannot find them either,
+      // because it only ever sees the loaded page. That is a silent data loss
+      // in everything but name, so it is stated rather than left to be
+      // discovered. The costume and wishlist lists filter on the server and so
+      // never reach this branch.
+      if (tab === 'props' || tab === 'lenses' || tab === 'makers') {
+        if (!showAll && totalCount > pager.pageSize) {
+          const warn = document.createElement('div');
+          warn.className = 'pager-warning';
+          warn.textContent = '⚠ Only the first ' + pager.pageSize + ' of ' + totalCount
+            + ' are loaded on this tab, and its search box cannot see the rest.';
+          bar.appendChild(warn);
+        }
+      }
+
+      host.appendChild(bar);
+    }
+
+    /** Which loader owns a tab. One table so the pager and the filter bar can
+     *  never disagree about it. */
+    const TAB_LOADERS = {
+      costumes: loadCostumes, props: loadProps, lenses: loadLenses,
+      makers: loadMakers, wishlist: loadWishlist
+    };
+
+    function reloadTab(tab) {
+      const loader = TAB_LOADERS[tab];
+      if (loader) loader();
+    }
+
+    /**
+     * The `?page=&limit=` string for a tab, ready to concatenate onto a path.
+     *
+     * Used by every loader except loadCostumes(), which builds its own because
+     * it also carries the four filters. One helper rather than four copies of
+     * the same two lines, so a change to how paging is requested cannot land on
+     * three tabs and miss the fourth.
+     */
+    function pagingQuery(tab) {
+      const pager = state.pager[tab];
+      const query = new URLSearchParams();
+      query.set('page', String(pager.page));
+      query.set('limit', String(pager.pageSize));
+      return query.toString();
+    }
+
+    /**
+     * Record a loader's response envelope, and adopt the page size the server
+     * actually used.
+     *
+     * THE ADOPTION IS THE POINT. A page size the API does not recognise is
+     * silently replaced with its own default, so without this the <select> would
+     * keep showing a choice that is not in effect and the status line would
+     * describe a page the grid is not showing. The pager is drawn from the
+     * response, never from what was asked for.
+     */
+    function adoptPaging(tab, data) {
+      const pager = state.pager[tab];
+      state.paging[tab] = {
+        totalCount: data.totalCount, page: data.page,
+        limit: data.limit, totalPages: data.totalPages
+      };
+      if (!pager) return;
+      if (data.limit === 'all') {
+        pager.pageSize = 'all';
+        pager.page = 1;
+      } else if ([10, 25, 50].indexOf(Number(data.limit)) !== -1) {
+        pager.pageSize = Number(data.limit);
+        pager.page = Number(data.page) || 1;
+      }
+    }
+
+    function goToPage(tab, page) {
+      const pager = state.pager[tab];
+      if (!pager || page < 1) return;
+      pager.page = page;
+      reloadTab(tab);
+    }
+
     async function loadCostumes() {
       renderSkeletons('costumes-grid');
+      // The four filters AND the page go to the server together. They cannot be
+      // separated: filtering the returned page in the browser would only ever
+      // search 25 of 86 rows, which is the bug this function exists to fix.
+      const pager = state.pager.costumes;
+      // THIS FUNCTION DOES NOT RESET THE PAGE. It also runs after every
+      // create, edit and delete, and resetting here would throw the user back
+      // to page 1 every time they saved a costume they had scrolled to. The
+      // reset belongs to the filter path — see filterItems(), which is the only
+      // thing that can actually invalidate a page number.
+      const query = new URLSearchParams();
+      // Under 'all' the server takes no page at all; the page is still sent as
+      // 1 because that is what the response will report back, and the client
+      // adopts whatever the server says rather than what it asked for.
+      query.set('page', String(pager.page));
+      query.set('limit', String(pager.pageSize));
+      if (state.filterQuery) query.set('search', state.filterQuery);
+      if (state.filterStatus) query.set('status', state.filterStatus);
+      if (state.filterFandom) query.set('fandom', state.filterFandom);
+      if (state.filterBrand) query.set('brand', state.filterBrand);
       try {
-        const data = await api('/api/costumes');
+        const data = await api('/api/costumes?' + query.toString());
         state.costumes = Array.isArray(data.costumes) ? data.costumes : [];
         state.costumes.forEach(seedImageCache);
+        // The envelope the grid and the pager are both drawn from.
+        state.paging.costumes = {
+          totalCount: data.totalCount, page: data.page,
+          limit: data.limit, totalPages: data.totalPages
+        };
+        // Adopt what the server actually did, not what was requested. The API
+        // answers with the word 'all' when it dropped the LIMIT clause, and
+        // with the number it settled on when a size was refused — so the <select>
+        // can never show a choice that is not in effect.
+        if (data.limit === 'all') {
+          pager.pageSize = 'all';
+          pager.page = 1;
+        } else if ([10, 25, 50].indexOf(Number(data.limit)) !== -1) {
+          pager.pageSize = Number(data.limit);
+          pager.page = Number(data.page) || 1;
+        }
+        if (data.filterOptions && typeof data.filterOptions === 'object') {
+          state.costumeFilterOptions = data.filterOptions;
+        }
+        // The server's own, page- and filter-independent totals (see the
+        // Collection Worth card). Kept SEPARATE from state.costumes rather than
+        // summed from it, because the two answer different questions: the
+        // rows are what is on screen, the totals are what the whole collection
+        // is worth. `null` rather than `{}` when absent, so updateMetrics() can
+        // tell "server did not send totals" from "server sent zero".
+        state.costumeTotals = (data.totals && typeof data.totals === 'object') ? data.totals : null;
+
+        // The whole-collection counts, for the metric cards and the Wishlist
+        // badge. These ride along with EVERY list response rather than being
+        // their own endpoint, because both have to stay correct after every
+        // write and the costume list is already being refetched by all of them.
+        // `null` when absent (a response from a server older than these fields)
+        // so the readers can tell "not sent" from a genuine zero.
+        state.costumeStatusCounts = (data.statusCounts && typeof data.statusCounts === 'object')
+          ? data.statusCounts
+          : null;
+        state.costumeCollectionStats = (data.collectionStats && typeof data.collectionStats === 'object')
+          ? data.collectionStats
+          : null;
+
+        // A write on the Wishlist tab can change which rows belong on it — a
+        // status edit to WISHLIST adds one, editing it away removes one — so the
+        // tab's own list is refetched here rather than being patched. Guarded on
+        // `wishlistLoaded` so a boot where the tab was never opened does not
+        // pay for a request nobody will see the answer to.
+        if (state.wishlistLoaded) await loadWishlist();
         // The Fandom/Brand dropdowns are DERIVED from these rows, so they are
         // recomputed on every load -- and a selection the new data no longer
         // contains is pruned back to 'All' here, BEFORE the render below, so
         // the grid is never painted in a filtered state the user cannot undo.
         syncFilterDimensionSelects();
         renderCostumes(getFilteredCostumes());
+        renderPager('costumes');
       } catch (err) {
         if (err.status === 401) return;   // a proxy refusal: leave the grid as it was
         renderEmptyState('costumes-grid', {
@@ -3285,12 +4148,143 @@
       }
     }
 
+    /**
+     * The Wishlist tab's own list.
+     *
+     * A SEPARATE FETCH, not a filter over state.costumes, and the reason is
+     * paging. `state.costumes` is one page of an unfiltered list: once the
+     * pagination controls ship, a wishlist entry on page 3 is simply not in
+     * memory, and filtering the loaded rows would show an empty tab beside a
+     * badge reading "4". Asking the server for `status=WISHLIST` makes the tab
+     * correct at any page size, and it is also what makes the badge and the list
+     * agree — both come from the same query, so they cannot disagree about how
+     * many entries there are.
+     *
+     * `limit=50` is the widest of the three allowed page sizes: a wishlist is a
+     * to-buy list, not an archive, and the alternative — a paged wishlist with
+     * no paging controls until task 15 lands — would hide entries behind a
+     * control that does not exist yet. When the pagination UI arrives this
+     * becomes the same page/limit pair the other tabs use.
+     */
+    async function loadWishlist() {
+      state.wishlistLoaded = true;
+      // Skeletons only while the tab is the one being looked at. A background
+      // refetch after a write would otherwise paint a loading shimmer over a
+      // list the user is reading, and the answer lands a moment later anyway.
+      if (state.currentTab === 'wishlist') renderSkeletons('wishlist-grid');
+      try {
+        const query = new URLSearchParams();
+        query.set('status', 'WISHLIST');
+        query.set('page', String(state.pager.wishlist.page));
+        query.set('limit', String(state.pager.wishlist.pageSize));
+        if (state.filterQuery) query.set('search', state.filterQuery);
+        const data = await api('/api/costumes?' + query.toString());
+        adoptPaging('wishlist', data);
+        state.wishlist = Array.isArray(data.costumes) ? data.costumes : [];
+        state.wishlist.forEach(seedImageCache);
+        // The counts arrive on this response too, and are authoritative in the
+        // same way as the ones on the unfiltered response — both come from one
+        // GROUP BY, so reading them here keeps the badge right even if the
+        // costume list was loaded from a cached response that predates the
+        // field.
+        if (data.statusCounts && typeof data.statusCounts === 'object') {
+          state.costumeStatusCounts = data.statusCounts;
+        }
+        updateWishlistCount();
+        if (state.currentTab === 'wishlist') renderWishlist();
+        renderPager('wishlist');
+      } catch (err) {
+        if (err.status === 401) return;   // a proxy refusal, not a data failure
+        if (state.currentTab === 'wishlist') {
+          renderEmptyState('wishlist-grid', {
+            icon: '⚠️',
+            title: 'Could not load the wishlist',
+            text: err.message,
+            ctaLabel: 'Retry',
+            ctaAction: loadWishlist
+          });
+        }
+      }
+    }
+
+    /**
+     * The number on the Wishlist tab, and the only place it is written.
+     *
+     * Read from the server's `statusCounts` and NEVER from `state.costumes`,
+     * which is a filtered, paged slice. Counting loaded rows would make the
+     * badge mean "wishlist entries that happen to be in the current result
+     * set" — a number that changes as you type in the search box, on a badge
+     * whose entire purpose is to tell you whether anything is waiting there.
+     *
+     * `null` when the server has not sent counts (an older server, or a request
+     * that has not completed) leaves the badge hidden rather than guessing
+     * zero. A badge that shows "0" when the truth is "not known yet" is worse
+     * than no badge: it invites the user to conclude the wishlist is empty.
+     */
+    function updateWishlistCount() {
+      const badge = document.getElementById('wishlist-tab-count');
+      if (!badge) return;
+      const counts = state.costumeStatusCounts;
+      if (!counts || typeof counts !== 'object') return;   // unknown, not zero
+      const count = Number(counts.WISHLIST);
+      if (!Number.isFinite(count) || count <= 0) {
+        badge.textContent = '';
+        badge.classList.add('is-empty');
+        return;
+      }
+      badge.textContent = String(count);
+      badge.classList.remove('is-empty');
+    }
+
+    /**
+     * Draw the Wishlist tab.
+     *
+     * The search box is applied ON TOP of the server's own status filter rather
+     * than sent as a query parameter. That is deliberate and it is the one
+     * place this tab differs from the search-on-the-server plan: the rows are
+     * already a closed set of at most 50 that exists only to be filtered, so
+     * the round-trip per keystroke would buy nothing. The `state.costumes`
+     * search sends a request on every character; this one does not, and both
+     * are correct for their own data.
+     */
+    function getFilteredWishlist() {
+      // Pass-through for the same reason as getFilteredCostumes(): the search
+      // term is sent to the server with `status=WISHLIST`, and re-applying it
+      // here would filter a page the server had already filtered.
+      return state.wishlist;
+    }
+
+    function renderWishlist() {
+      const items = getFilteredWishlist();
+      if (!items.length) {
+        // TWO different empty states, and the distinction matters. An empty
+        // wishlist is a normal, healthy state; an empty SEARCH RESULT is a
+        // filter the user has to undo. Rendering the same copy for both would
+        // tell someone with four wishlist entries that they have none.
+        renderEmptyState('wishlist-grid', state.filterQuery
+          ? {
+            icon: '⭐',
+            title: 'Nothing on the wishlist matches',
+            text: 'Clear the search box to see all ' + state.wishlist.length + ' entries.'
+          }
+          : {
+            icon: '⭐',
+            title: 'The wishlist is empty',
+            text: 'Add a costume and set its status to Wishlist, and it will appear here.'
+          });
+        return;
+      }
+      renderCostumes(items, 'wishlist-grid');
+    }
+
     async function loadProps() {
       renderSkeletons('props-grid');
       try {
-        const data = await api('/api/props');
+        const data = await api('/api/props?' + pagingQuery('props'));
         state.props = Array.isArray(data.props) ? data.props : [];
+        adoptPaging('props', data);
         renderProps(getFilteredProps());
+        renderPager('props');
       } catch (err) {
         if (err.status === 401) return;   // a proxy refusal, not a data failure
         renderEmptyState('props-grid', {
@@ -3306,9 +4300,11 @@
     async function loadLenses() {
       renderSkeletons('lenses-grid');
       try {
-        const data = await api('/api/lenses');
+        const data = await api('/api/lenses?' + pagingQuery('lenses'));
+        adoptPaging('lenses', data);
         state.lenses = Array.isArray(data.lenses) ? data.lenses : [];
         renderLenses(getFilteredLenses());
+        renderPager('lenses');
       } catch (err) {
         if (err.status === 401) return;   // a proxy refusal, not a data failure
         renderEmptyState('lenses-grid', {
@@ -3317,6 +4313,52 @@
           text: err.message,
           ctaLabel: 'Retry',
           ctaAction: loadLenses
+        });
+      }
+    }
+
+    /**
+     * The Maker Corner loader.
+     *
+     * WHY IT POPULATES THE TYPE FILTER ITSELF, unlike every other loader:
+     * the list endpoint returns `makerTypes` and `makerTypeLabels` on every
+     * response, because a closed set that lives in src/routes/makers.js must
+     * have exactly one definition. If the filter dropdown were hand-written
+     * here it would be a second list that could silently drift from the one the
+     * API enforces — a fourth type shown in the dropdown that the server then
+     * refuses with a 400. The server is the source; this reads it.
+     *
+     * `fallbackTypes` only covers the window before this first request
+     * returns, so a maker is never unfilterable because the tab was opened
+     * during a slow load.
+     */
+    async function loadMakers() {
+      renderSkeletons('makers-grid');
+      try {
+        const data = await api('/api/makers?' + pagingQuery('makers'));
+        adoptPaging('makers', data);
+        state.makers = Array.isArray(data.makers) ? data.makers : [];
+        state.makersLoaded = true;
+        // Adopt the server's closed set. Both are validated as arrays of
+        // strings before use, so a malformed envelope leaves the previous
+        // values in place instead of emptying the dropdown.
+        if (Array.isArray(data.makerTypes) && data.makerTypes.length) {
+          state.makerTypes = data.makerTypes.slice();
+          if (data.makerTypeLabels && typeof data.makerTypeLabels === 'object') {
+            state.makerTypeLabels = Object.assign({}, data.makerTypeLabels);
+          }
+        }
+        syncFilterControls();
+        renderMakers(getFilteredMakers());
+        renderPager('makers');
+      } catch (err) {
+        if (err.status === 401) return;   // a proxy refusal, not a data failure
+        renderEmptyState('makers-grid', {
+          icon: '⚠️',
+          title: 'Could not load makers',
+          text: err.message,
+          ctaLabel: 'Retry',
+          ctaAction: loadMakers
         });
       }
     }
@@ -3688,12 +4730,83 @@
     }
 
     function updateMetrics() {
-      document.getElementById('metric-total-costumes').textContent = state.costumes.length;
+      // THE METRIC CARDS COUNT THE COLLECTION, NOT THE PAGE.
+      //
+      // These three numbers used to be derived from `state.costumes`:
+      //   total costumes  = state.costumes.length
+      //   fullsets        = state.costumes.filter(isFullset).length
+      //   on loan         = state.costumes.filter(status === 'ON_RENT').length
+      // All three were correct only while the whole collection was in memory.
+      // With paging they silently became "…among the 25 rows on this page" and
+      // would change as the user paged through a card labelled Total Costumes —
+      // which is how a wardrobe of 86 came to display as 25.
+      //
+      // They now come from the server's `collectionStats` and `statusCounts`,
+      // which are computed from the whole table. The fallbacks below only run
+      // against a response that predates those fields, and the fallback for the
+      // total says so in a comment rather than pretending.
+      const stats = (state.costumeCollectionStats && typeof state.costumeCollectionStats === 'object')
+        ? state.costumeCollectionStats
+        : null;
+      const counts = (state.costumeStatusCounts && typeof state.costumeStatusCounts === 'object')
+        ? state.costumeStatusCounts
+        : null;
 
-      const fullsets = state.costumes.filter(c => toBool(c.isFullset)).length;
+      const total = stats && Number.isFinite(Number(stats.totalCostumes))
+        ? Number(stats.totalCostumes)
+        : state.costumes.length;   // last resort: the loaded page
+      document.getElementById('metric-total-costumes').textContent = total;
+      // The badge is a metric: it is a count of the collection, so it is written
+      // from the same place every other count is, rather than from whichever
+      // loader happened to run last. Reading it off `state.costumes` here would
+      // reintroduce exactly the filtered-paged-slice problem the server-side
+      // GROUP BY and the dedicated wishlist fetch were built to avoid.
+      updateWishlistCount();
+
+      const fullsets = stats && Number.isFinite(Number(stats.fullsetCount))
+        ? Number(stats.fullsetCount)
+        : state.costumes.filter(c => toBool(c.isFullset)).length;
       document.getElementById('metric-fullset-count').textContent = fullsets + ' fullset ready';
 
-      const onRent = state.costumes.filter(c => c.status === 'ON_RENT').length;
+      // COLLECTION WORTH — see the card in the markup for what is and is not
+      // counted.
+      //
+      // `state.costumes` is whatever the last successful load put there, which
+      // with server-side paging is only the CURRENT PAGE. Summing it would make
+      // the total silently mean "worth of page 1" and change as the user pages
+      // through, so the two page-aware totals below are read off the response
+      // envelope instead whenever the server has provided them, and only fall
+      // back to summing the loaded rows when it has not (a cached list from
+      // before paging existed, or a server too old to send them).
+      const pageTotals = (state.costumeTotals && typeof state.costumeTotals === 'object')
+        ? state.costumeTotals
+        : null;
+      if (pageTotals && Number.isFinite(pageTotals.totalBuyPrice)) {
+        document.getElementById('metric-collection-worth').textContent =
+          formatMoney(pageTotals.totalBuyPrice);
+        document.getElementById('metric-collection-worth-note').textContent =
+          'Buy prices of ' + pageTotals.countedCostumes +
+          ' owned costume' + (pageTotals.countedCostumes === 1 ? '' : 's');
+      } else {
+        let sum = 0;
+        let counted = 0;
+        state.costumes.forEach(c => {
+          if (c.status !== 'IN_POSSESSION') return;
+          const price = toNumber(c.buyPrice);
+          if (price === null) return;
+          sum += price;
+          counted++;
+        });
+        document.getElementById('metric-collection-worth').textContent = formatMoney(sum);
+        document.getElementById('metric-collection-worth-note').textContent =
+          counted > 0
+            ? 'Buy prices of ' + counted + ' owned costume' + (counted === 1 ? '' : 's')
+            : 'No owned costumes have a buy price yet';
+      }
+
+      const onRent = counts && Number.isFinite(Number(counts.ON_RENT))
+        ? Number(counts.ON_RENT)
+        : state.costumes.filter(c => c.status === 'ON_RENT').length;
       document.getElementById('metric-rent-costumes').textContent = onRent;
 
       const activeLenses = state.lenses.filter(l => toBool(l.isOpened) && lensDisplayStatus(l) === 'ACTIVE').length;
@@ -3733,20 +4846,44 @@
       return stored.concat(cached.filter(url => stored.indexOf(url) === -1));
     }
 
+    /**
+     * The same server-first / cache-second union as costumeImages(), for props.
+     *
+     * A prop holds at most MAX_PROP_IMAGES photos (the cap src/routes/props.js
+     * enforces), but the client still slices at the cap when it RENDERS so a
+     * batch that raced a delete cannot paint a fourth photo into the strip.
+     */
+    function propImages(prop) {
+      const cached = state.imageUrlsCache[prop.id] || [];
+      const stored = parseImageUrls(prop.imageUrls);
+      const merged = stored.concat(cached.filter(url => stored.indexOf(url) === -1));
+      return merged.slice(0, MAX_PROP_IMAGES);
+    }
+
     function milestoneChip(label, rawValue) {
       const active = toBool(rawValue);
       return '<span class="tag-chip' + (active ? ' active' : '') + '">' + (active ? '✅ ' : '') + label + '</span>';
     }
 
-    function renderCostumes(items) {
-      const grid = document.getElementById('costumes-grid');
+    /**
+     * Render costume cards.
+     *
+     * @param {Array} items      the costume rows to draw
+     * @param {string} [gridId='costumes-grid']  which grid to draw into
+     * @param {object} [empty]   overrides for the empty state, so the Wishlist
+     *   tab can say something true about ITS emptiness rather than repeating
+     *   the "no costumes at all" copy the Costumes tab needs.
+     */
+    function renderCostumes(items, gridId, empty) {
+      const target = gridId || 'costumes-grid';
+      const grid = document.getElementById(target);
       if (!grid) return;
       if (!items || !items.length) {
-        renderEmptyState('costumes-grid', {
+        renderEmptyState(target, Object.assign({
           icon: '👘',
           title: 'No costumes found',
           text: 'Nothing matches the current search and filters.'
-        });
+        }, empty || {}));
         return;
       }
 
@@ -3886,8 +5023,46 @@
       grid.innerHTML = items.map(p => {
         const notes = clean(p.notes);
         const costumeName = clean(p.costumeName);
+        const allImages = propImages(p);
+        const thumb = allImages.length
+          ? '<img src="' + IMAGE_LOADING_PIXEL + '" data-image-src="' + escapeHtml(allImages[0]) + '" alt="' + escapeHtml(clean(p.name) || 'Prop') + '" loading="lazy">'
+          : MEDIA_PLACEHOLDER_HTML;
+        // The count is stated against the cap, not just as a number: a prop holds
+        // at most MAX_PROP_IMAGES, so "2 / 3 photos" tells the user both what they
+        // have and whether there is room left, which "2 images" does not.
+        const extraImages = allImages.length
+          ? '<span class="media-count">' + allImages.length + ' / ' + MAX_PROP_IMAGES + ' photos</span>'
+          : '';
+        const expand = allImages.length
+          ? '<button type="button" class="media-expand-btn" data-action="open-gallery" data-id="' + idAttr(p.id) + '" data-index="0"'
+            + ' title="Open the photo gallery">🖼️ View ' + (allImages.length > 1 ? allImages.length + ' photos' : 'photo') + '</button>'
+          : '';
+        // A prop is capped at 3 photos, below MAX_CARD_THUMBS, so every one of
+        // them always fits the strip. No "+N" overflow tile can be reached here.
+        let strip = '';
+        if (allImages.length > 1) {
+          strip = [
+            '<div class="media-strip">',
+            allImages.map((url, i) =>
+              '<button type="button" class="media-thumb" data-action="open-gallery" data-id="' + idAttr(p.id) + '"'
+              + ' data-index="' + i + '" title="Photo ' + (i + 1) + '">'
+              + '<img src="' + IMAGE_LOADING_PIXEL + '" data-image-src="' + escapeHtml(url) + '" alt="Photo ' + (i + 1) + '"></button>'
+            ).join(''),
+            '</div>'
+          ].join('');
+        }
+
         return [
           '<div class="item-card">',
+          '  <div class="item-media">',
+          thumb,
+          expand,
+          writable
+            ? '    <button type="button" class="media-upload-btn" data-action="upload-prop" data-id="' + idAttr(p.id) + '" title="Upload photos of this prop">📷</button>'
+            : '',
+          extraImages,
+          '  </div>',
+          strip,
           '  <div>',
           '    <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:8px;">',
           '      <h3 style="font-size:1.15rem; font-weight:700;">' + escapeHtml(clean(p.name) || 'Unnamed') + '</h3>',
@@ -3909,6 +5084,102 @@
             ? '    <div style="display:flex; gap:8px;">'
               + '<button type="button" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 12px;" data-action="edit" data-id="' + idAttr(p.id) + '">Edit</button>'
               + '<button type="button" class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" data-action="delete" data-id="' + idAttr(p.id) + '">Delete</button>'
+              + '</div>'
+            : '    <div></div>',
+          '  </div>',
+          '</div>'
+        ].join('');
+      }).join('');
+
+      // Hydrate authenticated images for props
+      hydrateAuthenticatedImages(grid);
+    }
+
+    /**
+     * The Maker Corner grid.
+     *
+     * A maker card is a name, a type, two ways to reach them and a note. There
+     * is no media, no progress bar and no detail view, so — unlike the costume
+     * and prop cards — this one skips .item-media entirely rather than padding
+     * the card with an empty grey box.
+     *
+     * THE TWO CONTACT CONTROLS ARE REAL LINKS, not buttons that copy a number
+     * to the clipboard. That is the whole feature: you open this tab while
+     * holding the prop you want made, and the next thing you do is message
+     * someone. A copy-to-clipboard button would add a step and a confirmation
+     * for the one action the card exists to enable. A `wa.me` link opens
+     * WhatsApp in the browser and hands off to the app if one is installed,
+     * which is why waLinkDigits() parses the digits and the raw stored text is
+     * never used in the href.
+     *
+     * The stored number itself is still shown, verbatim, beside the link — the
+     * link is for acting on it and the text is for reading it back, so nobody
+     * has to trust that a link was built from the number they typed.
+     */
+    function renderMakers(items) {
+      const grid = document.getElementById('makers-grid');
+      if (!grid) return;
+      if (!items || !items.length) {
+        renderEmptyState('makers-grid', {
+          icon: '🛠️',
+          title: 'No makers recorded',
+          text: 'Add the people you commission, so their contacts are one click away.'
+        });
+        return;
+      }
+
+      const writable = canWrite();
+      grid.innerHTML = items.map(m => {
+        const name = clean(m.name);
+        const makerType = clean(m.makerType);
+        const typeLabel = clean(state.makerTypeLabels[makerType]) || makerType || 'Maker';
+        const notes = clean(m.notes);
+
+        // safeUrl() gates the stored link to http(s) or a rooted path. It is
+        // belt-and-braces rather than load-bearing: the server already refuses
+        // anything else with a 400, so a value that reached here is already
+        // safe. Kept anyway because a href built from a stored string is
+        // exactly the place a future direct-write import would slip past.
+        const sosmed = safeUrl(m.sosmed);
+        const digits = waLinkDigits(m.whatsapp);
+        // Displayed as typed, never as the parsed digits — the stored text is
+        // what the maker wrote and is what the user recognises.
+        const whatsappText = clean(m.whatsapp);
+
+        return [
+          '<div class="item-card">',
+          '  <div>',
+          '    <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:8px;">',
+          '      <h3 style="font-size:1.15rem; font-weight:700;">' + escapeHtml(name || 'Unnamed') + '</h3>',
+          '      <span class="badge" style="background:rgba(34,197,94,0.15); color:#4ade80;">' + escapeHtml(typeLabel) + '</span>',
+          '    </div>',
+          '    <div class="tags-group">',
+          sosmed
+            ? '      <a class="tag-chip" href="' + escapeHtml(sosmed) + '" target="_blank" rel="noopener noreferrer">🔗 Social media</a>'
+            : '',
+          // The link branch carries rel="noopener noreferrer" as everywhere
+          // else: it opens a third-party site, and without them that site
+          // gets a handle on window.opener.
+          //
+          // The guard is `digits`, never `whatsappText`. A stored value that
+          // is all punctuation passes the server's whitelist but yields no
+          // digits, and waLinkDigits returns null for exactly that case —
+          // wa.me/nothing would be a link that opens a chat with no number in
+          // it, so the fallback branch degrades to plain text instead.
+          digits
+            ? '      <a class="tag-chip active" href="https://wa.me/' + escapeHtml(digits) + '" target="_blank" rel="noopener noreferrer">💬 WhatsApp ' + escapeHtml(whatsappText) + '</a>'
+            : (whatsappText ? '      <span class="tag-chip">💬 ' + escapeHtml(whatsappText) + '</span>' : ''),
+          '    </div>',
+          notes ? '<p style="font-size:0.85rem; color:var(--text-muted); margin-top:8px;">' + escapeHtml(notes) + '</p>' : '',
+          '  </div>',
+          // Empty right-hand div rather than removed, so the `space-between`
+          // card-actions row keeps its shape. Same rule as renderProps().
+          '  <div class="card-actions">',
+          '    <span></span>',
+          writable
+            ? '    <div style="display:flex; gap:8px;">'
+              + '<button type="button" class="btn btn-secondary" style="font-size:0.8rem; padding:6px 12px;" data-action="edit" data-id="' + idAttr(m.id) + '">Edit</button>'
+              + '<button type="button" class="btn btn-secondary" style="color:var(--danger); font-size:0.8rem; padding:6px 12px;" data-action="delete" data-id="' + idAttr(m.id) + '">Delete</button>'
               + '</div>'
             : '    <div></div>',
           '  </div>',
@@ -4293,6 +5564,15 @@
     // ==========================================================================
     // FILTERING
     // ==========================================================================
+    // FALLBACK ONLY. src/routes/makers.js owns the closed set (MAKER_TYPES) and
+    // every list response ships it as `makerTypes`, which loadMakers() adopts
+    // into state.makerTypes. These three literals exist so the filter dropdown
+    // is populated on the very first paint of the tab, before that request has
+    // returned. They carry NO labels on purpose: duplicating the label strings
+    // here would create a second copy of a table the server already sends, and
+    // the response overwrites this list anyway the moment it lands.
+    const MAKER_TYPE_FALLBACK = ['PROP', 'WEAPON', 'ACCESSORY'];
+
     const FILTER_OPTIONS = {
       costumes: {
         status: [['', 'All Statuses'], ['IN_POSSESSION', 'In Possession'], ['ON_RENT', 'On Rent'], ['TO_BE_SOLD', 'To Be Sold'], ['WISHLIST', 'Wishlist']],
@@ -4307,6 +5587,28 @@
       lenses: {
         status: [['', 'All Statuses'], ['UNOPENED', 'Unopened'], ['ACTIVE', 'Active'], ['EXPIRING_SOON', 'Expiring Soon'], ['EXPIRED', 'Expired'], ['DISPOSED', 'Disposed']],
         placeholder: 'Search lenses by character or color...',
+        showLocation: false
+      },
+      // THE WISHLIST TAB HAS A SEARCH BOX AND NOTHING ELSE. `status: null` is a
+      // real instruction, not a missing value: the server already applied
+      // `status=WISHLIST` to this list, so every row in it has the same status
+      // and the only value the dropdown could offer is one the list already
+      // satisfies. A status filter on a list that is filtered by status is a
+      // control that cannot do anything, so it is hidden rather than shown
+      // inert. syncFilterControls() treats null as "hide" for exactly this case.
+      wishlist: {
+        status: null,
+        placeholder: 'Search the wishlist...',
+        showLocation: false
+      },
+      // The type list is NOT written out here. It comes from the list endpoint
+      // as `makerTypes` / `makerTypeLabels` (see loadMakers) because the server
+      // owns the closed set; `makerTypes` on state is the fallback used before
+      // that first response lands, and the same list the dropdown is then
+      // rebuilt from.
+      makers: {
+        status: makerFilterOptions(),
+        placeholder: 'Search makers by name...',
         showLocation: false
       },
       security: null
@@ -4337,13 +5639,22 @@
 
       // Built with DOM APIs (never innerHTML) so nothing can be injected.
       statusSelect.innerHTML = '';
-      config.status.forEach(pair => {
-        const option = document.createElement('option');
-        option.value = pair[0];
-        option.textContent = pair[1];
-        statusSelect.appendChild(option);
-      });
-      statusSelect.style.display = 'inline-block';
+      // `config.status` is null on tabs that have no status dimension at all —
+      // the Wishlist, whose list is already filtered to one status server-side.
+      // A null here means HIDE, and the control is also emptied so a value
+      // chosen on a previous tab cannot survive underneath a hidden select and
+      // be applied by the next filterItems() run.
+      if (config.status) {
+        config.status.forEach(pair => {
+          const option = document.createElement('option');
+          option.value = pair[0];
+          option.textContent = pair[1];
+          statusSelect.appendChild(option);
+        });
+        statusSelect.style.display = 'inline-block';
+      } else {
+        statusSelect.style.display = 'none';
+      }
       searchInput.style.display = 'block';
       searchInput.placeholder = config.placeholder;
       searchInput.value = '';
@@ -4443,13 +5754,28 @@
      * 'All' rather than stranding a stale selection.
      */
     function syncFilterDimensionSelects() {
+      // THE SERVER'S LIST, NOT THE LOADED ROWS. This function used to call
+      // distinctCostumeValues(field) over state.costumes. With paging that
+      // would offer only the fandoms present in the current 25-row page, so a
+      // filter for any other fandom would be missing from the very control that
+      // exists to provide it — a silent, data-dependent omission. The server
+      // sends the whole collection's distinct values as `filterOptions`, and
+      // this only falls back to the old behaviour when that field is absent
+      // (a response from a server older than the field).
+      const fromServer = state.costumeFilterOptions
+        && typeof state.costumeFilterOptions === 'object'
+        ? state.costumeFilterOptions
+        : null;
       [
-        { id: 'fandom-filter', stateKey: 'filterFandom', all: 'All Fandoms', field: 'fandom' },
-        { id: 'brand-filter', stateKey: 'filterBrand', all: 'All Brands', field: 'brand' }
+        { id: 'fandom-filter', stateKey: 'filterFandom', all: 'All Fandoms', field: 'fandom', key: 'fandoms' },
+        { id: 'brand-filter', stateKey: 'filterBrand', all: 'All Brands', field: 'brand', key: 'brands' }
       ].forEach(spec => {
         const select = document.getElementById(spec.id);
         if (!select) return;
-        const values = distinctCostumeValues(spec.field);
+        const serverList = fromServer && Array.isArray(fromServer[spec.key]) ? fromServer[spec.key] : null;
+        const values = serverList
+          ? serverList.map(label => ({ key: label.toLowerCase(), label: label }))
+          : distinctCostumeValues(spec.field);
         const wanted = foldFilterValue(state[spec.stateKey]);
         // Same folded comparison the row test uses, so 'present in the
         // dropdown' and 'matches in getFilteredCostumes()' cannot disagree.
@@ -4500,13 +5826,33 @@
         const control = document.getElementById(id);
         if (control) control.value = '';
       });
-      // filterItems() re-reads all four controls into state, re-renders, and
+      // filterItems(true) re-reads all four controls into state, re-renders, and
       // hides the button -- the same path a user takes clearing the search box
-      // by hand, so there is exactly one way the filters are applied.
-      filterItems();
+      // by hand, so there is exactly one way the filters are applied. The
+      // `true` marks it as a user action: the costume list is filtered on the
+      // server now, so clearing the filters has to ask for a fresh page rather
+      // than repaint the current one.
+      filterItems(true);
     }
 
-    function filterItems() {
+    /**
+     * The [value, label] pairs for the Maker type filter, in display order.
+     * Values are the raw enum members; labels come from the server's
+     * MAKER_TYPE_LABELS. An unknown value (a row written by a newer server
+     * than this page) falls back to the value itself rather than vanishing —
+     * an option that silently disappears is a filter the user cannot undo.
+     */
+    function makerFilterOptions() {
+      const types = (Array.isArray(state.makerTypes) && state.makerTypes.length)
+        ? state.makerTypes
+        : MAKER_TYPE_FALLBACK;
+      return [['', 'All Types']].concat(types.map(type => [
+        type,
+        clean(state.makerTypeLabels[type]) || type
+      ]));
+    }
+
+    function filterItems(fromUser) {
       // collapseSpaces() before toLowerCase() so the inventory search obeys the
       // same rule as the Reference Lists search and as the server's `nameLower`
       // derivation: "blue  archive" finds "Blue Archive" in either place, and the
@@ -4525,32 +5871,71 @@
       // Last, so it sees the filter values that were just read in.
       updateClearFiltersButton();
 
-      if (state.currentTab === 'costumes') renderCostumes(getFilteredCostumes());
-      else if (state.currentTab === 'props') renderProps(getFilteredProps());
+      // COSTUMES AND WISHLIST FILTER ON THE SERVER. Both are paged lists, so
+      // filtering the returned page in the browser would only ever search the
+      // rows on that page — a costume on page 4 would be unfindable by name.
+      // The request is DEBOUNCED: this runs on every keystroke of the search
+      // box, and an undebounced request per character is a request storm
+      // against a server that authenticates nobody.
+      if (state.currentTab === 'costumes' || state.currentTab === 'wishlist') {
+        // `fromUser` is FALSE when switchTab() calls this to repaint after
+        // switching. A tab flip is not a filter change: the controls were just
+        // cleared by syncFilterControls(), the tab's own loader has already
+        // been kicked off, and resetting the page here would silently throw
+        // the user back to page 1 every time they looked at another tab and
+        // came back. Only a real edit to a control may move the page.
+        if (!fromUser) {
+          if (state.searchTimer) { clearTimeout(state.searchTimer); state.searchTimer = null; }
+          return;
+        }
+        // A filter change invalidates the page number. Page 4 of the previous
+        // result set is meaningless against the new one, and the server would
+        // cheerfully return an empty page 4 for it.
+        state.pager[state.currentTab].page = 1;
+        if (state.searchTimer) clearTimeout(state.searchTimer);
+        state.searchTimer = setTimeout(() => {
+          state.searchTimer = null;
+          reloadTab(state.currentTab);
+        }, 250);
+        return;
+      }
+
+      // The remaining tabs still filter in the browser. That is correct for
+      // them ONLY because their whole collection is loaded: they request the
+      // same page size the pager shows, and renderPager() states plainly when
+      // a list is too big for that. When one of them outgrows the page size the
+      // right fix is server-side search for that route, exactly as was done for
+      // costumes — not a wider page size, which would only move the cliff.
+      if (state.currentTab === 'props') renderProps(getFilteredProps());
       else if (state.currentTab === 'lenses') renderLenses(getFilteredLenses());
+      else if (state.currentTab === 'makers') renderMakers(getFilteredMakers());
     }
 
+    /**
+     * The rows to draw for the Costumes tab.
+     *
+     * THIS IS NOW A PASS-THROUGH, AND THE COMMENT ABOVE THIS FUNCTION IS THE
+     * HISTORY OF WHY. It used to filter state.costumes in the browser on all
+     * four controls. That stopped being correct the moment the list was paged:
+     * state.costumes is ONE PAGE, so filtering it would search 25 of 86 rows
+     * and a costume on page 4 would be unfindable. All four filters now go to
+     * the server (see loadCostumes) and the rows that come back already
+     * satisfy them.
+     *
+     * It is kept as a function rather than deleted so the render call sites do
+     * not each have to know which tabs filter where — that knowledge is the
+     * thing most likely to drift, and getFilteredProps/Lenses/Makers are
+     * still real client-side filters over a fully-loaded list.
+     *
+     * RE-APPLYING THE FILTERS HERE WOULD BE AN ACTIVE BUG, not a harmless
+     * belt-and-braces: the server matches fandom and brand with LIKE '%x%',
+     * so a request for 'Genshin' can legitimately return a row whose fandom is
+     * 'Genshin Impact'. An exact-match pass over the result would then DELETE
+     * that row from the page the server just paged correctly, and the user
+     * would see fewer results than the pager's own totalCount promises.
+     */
     function getFilteredCostumes() {
-      const q = state.filterQuery;
-      const status = state.filterStatus;
-      // EXACT matches on the folded value, not substring matches: these are
-      // dropdowns, so the user has already chosen one specific entry, and a
-      // substring would quietly widen that choice. An empty selection folds to
-      // '' and the `!fandom` guard makes it a no-op, so 'All Fandoms' costs
-      // nothing. Deliberately NOT applied to the props or lens filters, which
-      // have no such dimension.
-      const fandom = foldFilterValue(state.filterFandom);
-      const brand = foldFilterValue(state.filterBrand);
-      return state.costumes.filter(c => {
-        const matchQuery = !q
-          || clean(c.character).toLowerCase().indexOf(q) !== -1
-          || clean(c.fandom).toLowerCase().indexOf(q) !== -1
-          || clean(c.brand).toLowerCase().indexOf(q) !== -1;
-        const matchStatus = !status || c.status === status;
-        const matchFandom = !fandom || foldFilterValue(c.fandom) === fandom;
-        const matchBrand = !brand || foldFilterValue(c.brand) === brand;
-        return matchQuery && matchStatus && matchFandom && matchBrand;
-      });
+      return state.costumes;
     }
 
     function getFilteredProps() {
@@ -4581,6 +5966,35 @@
       });
     }
 
+    /**
+     * The Maker Corner list, filtered client-side exactly like the other three.
+     *
+     * The server can also filter and page this route (`?makerType=`, `?search=`,
+     * `?limit=`), and those are wired up in task 15 with the pagination
+     * controls. Until then the client filters, for the same reason the costume
+     * search does: the whole list is already in memory and a round-trip per
+     * keystroke would make the search box slower, not faster.
+     *
+     * The query covers name, type and notes — a maker is most often found by
+     * remembering one of those, and none of them is privileged over the
+     * others the way `character` is on a costume.
+     */
+    function getFilteredMakers() {
+      const q = state.filterQuery;
+      const status = state.filterStatus;   // the makerType filter
+      return state.makers.filter(m => {
+        const matchQuery = !q
+          || clean(m.name).toLowerCase().indexOf(q) !== -1
+          || clean(m.makerType).toLowerCase().indexOf(q) !== -1
+          || clean(m.notes).toLowerCase().indexOf(q) !== -1;
+        // EXACT on the type, not substring: a dropdown picks one specific
+        // member of a closed set, so a partial match would quietly widen the
+        // choice. Same rule as the costume fandom/brand filters.
+        const matchType = !status || clean(m.makerType) === status;
+        return matchQuery && matchType;
+      });
+    }
+
     function switchTab(tab) {
       state.currentTab = tab;
       document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -4590,6 +6004,8 @@
       document.getElementById('tab-costumes').style.display = tab === 'costumes' ? 'block' : 'none';
       document.getElementById('tab-props').style.display = tab === 'props' ? 'block' : 'none';
       document.getElementById('tab-lenses').style.display = tab === 'lenses' ? 'block' : 'none';
+      document.getElementById('tab-makers').style.display = tab === 'makers' ? 'block' : 'none';
+      document.getElementById('tab-wishlist').style.display = tab === 'wishlist' ? 'block' : 'none';
       document.getElementById('tab-lists').style.display = tab === 'lists' ? 'block' : 'none';
       document.getElementById('tab-settings').style.display = tab === 'settings' ? 'block' : 'none';
       // The filter bar only describes costumes/props/lenses, so it is hidden on
@@ -4604,6 +6020,27 @@
       // `state` are the guard the existing loader already keeps.
       if (tab === 'settings' && !state.corsLoaded && !state.corsLoading) {
         loadCorsSettings();
+      }
+      // Same lazy-load rule for the Telegram panel, for the same reason: a
+      // request nothing else on the page needs should not be paid for by an
+      // operator who never visits the tab.
+      if (tab === 'settings' && !state.telegramLoaded && !state.telegramLoading) {
+        loadTelegramSettings();
+      }
+      // The Maker Corner loads on first visit rather than on boot, for the same
+      // reason: it is a request the Costumes, Props and Lenses tabs do not
+      // need, and a maker list is the least-visited list in the app. The
+      // `makersLoaded` flag keeps a tab flip away and back from refetching.
+      if (tab === 'makers' && !state.makersLoaded) {
+        loadMakers();
+      }
+      // Same lazy-load rule for the Wishlist, for the same reason. Unlike the
+      // Makers list, this one is NOT refetched on every visit: its contents
+      // change through writes, and loadCostumes() already refetches it whenever
+      // the tab has been opened at least once. So a tab flip back is served
+      // from what is already in memory.
+      if (tab === 'wishlist' && !state.wishlistLoaded) {
+        loadWishlist();
       }
 
       // The new costumes-only controls (#fandom-filter, #brand-filter and the
@@ -4868,6 +6305,389 @@
       });
     }
 
+    // ==========================================================================
+    // TELEGRAM NOTIFICATIONS
+    // ==========================================================================
+    //
+    // THE FLOW: this server checks which lenses are expiring once a day, on its
+    // own timer, and sends the answer to Telegram. This panel configures the
+    // two halves of that the server owns — the bot token and the alert window —
+    // plus a way to prove the whole chain works without waiting until tomorrow.
+    //
+    // WHY THERE IS NO LOCAL VALIDATION OF THE TOKEN
+    // The client checks that a box is non-empty and stops. It does not try to
+    // judge whether a token is real, because the only authority on that is
+    // Telegram (the "Check token" button asks it), and a second opinion written
+    // here would be a different, weaker rule producing confidently wrong
+    // verdicts. Anything this lets through is caught by the server's 400 and
+    // shown verbatim — same reasoning as addCorsOrigin().
+
+    /** Write into one of the panel's message slots, in the panel's own colours. */
+    function telegramSetMessage(slot, message, kind) {
+      const el = document.getElementById(slot);
+      if (!el) return;
+      el.textContent = message || '';
+      el.style.color = !message ? ''
+        : (kind === 'ok' ? 'var(--success)'
+          : (kind === 'warn' ? 'var(--warning)'
+            : (kind === 'error' ? 'var(--danger)' : 'var(--text-muted)')));
+    }
+
+    /** The inline field error under one of the inputs. */
+    function telegramSetError(slot, message) {
+      const el = document.getElementById(slot);
+      if (el) el.textContent = message || '';
+    }
+
+    // The four inline `.field-error` holders in the Telegram card, named once so
+    // the clear cannot drift from the markup.
+    const TELEGRAM_ERROR_SLOTS = [
+      'telegram-token-error',
+      'telegram-chat-error',
+      'telegram-threshold-error',
+      'telegram-test-error'
+    ];
+
+    function telegramClearErrors() {
+      TELEGRAM_ERROR_SLOTS.forEach(id => telegramSetError(id, ''));
+    }
+
+    /**
+     * Paint the whole panel from `state`.
+     *
+     * The token input is deliberately NOT given the token's value. The server
+     * does not return it, and the only thing that could fill this box is a
+     * secret this page has no business holding — so it stays blank and the
+     * status line above it is what tells the operator a token IS saved.
+     *
+     * `source` is the part that actually prevents confusion. With no such line,
+     // an operator who saves a token, edits .env, and comes back has no way to
+     * tell which one is live; here it is stated outright, and the override
+     * deliberately wins over .env (see telegramService.getResolvedToken).
+     */
+    function renderTelegramSettings() {
+      const token = state.telegramToken;
+      const tokenEl = document.getElementById('telegram-token-status');
+      if (tokenEl) {
+        if (!token) {
+          tokenEl.textContent = 'not loaded';
+        } else if (!token.configured) {
+          tokenEl.textContent = 'not set — alerts will not be sent';
+        } else {
+          const where = token.source === 'database'
+            ? 'saved here'
+            : (token.source === 'env' ? 'from TELEGRAM_BOT_TOKEN in .env' : 'configured');
+          tokenEl.textContent = 'set — ' + where
+            + (token.botId ? ' (bot ' + token.botId + ')' : '')
+            + (token.fingerprint ? ', ending ••••' + token.fingerprint : '');
+        }
+      }
+
+      const chatEl = document.getElementById('telegram-chat-status');
+      if (chatEl) {
+        chatEl.textContent = state.telegramChatId
+          ? state.telegramChatId
+          : 'not set — there is nowhere to send alerts';
+      }
+
+      const input = document.getElementById('telegram-threshold-input');
+      if (input && document.activeElement !== input) {
+        // Never overwrite a box the operator is mid-edit in. Redrawing a
+        // half-typed number out from under the cursor is the kind of small
+        // rudeness that makes a settings panel feel broken.
+        input.value = state.telegramThresholdDays === null ? '' : String(state.telegramThresholdDays);
+      }
+      // The controls that are meaningless until both halves are set. Disabled
+      // rather than hidden, so the panel's shape does not change as it fills in.
+      //
+      // Only the textarea is disabled. `telegram-test-error` is a <p>, which has
+      // no `disabled` property — writing one to it would be a silent no-op that
+      // hides the mistake instead of fixing it, and the failure would only show
+      // up as a message appearing on a control that looks live.
+      const hasAll = !!(token && token.configured) && !!state.telegramChatId;
+      const testInput = document.getElementById('telegram-test-input');
+      if (testInput) testInput.disabled = !hasAll;
+    }
+
+    function loadTelegramSettings() {
+      if (state.telegramLoading) return Promise.resolve();
+      state.telegramLoading = true;
+      return api('/api/settings/telegram')
+        .then(data => {
+          state.telegramToken = data.token || null;
+          state.telegramChatId = data.chatId || null;
+          state.telegramThresholdDays = (data.thresholdDays === null || data.thresholdDays === undefined)
+            ? null : Number(data.thresholdDays);
+          if (data.limits && data.limits.maxThresholdDays) {
+            state.telegramMaxThresholdDays = Number(data.limits.maxThresholdDays);
+          }
+          state.telegramLoaded = true;
+          renderTelegramSettings();
+        })
+        .catch(err => {
+          telegramSetMessage('telegram-token-message',
+            (err && err.message) ? err.message : 'Could not load the Telegram settings.', 'error');
+        })
+        .then(() => { state.telegramLoading = false; });
+    }
+
+    /**
+     * Apply a config object returned by any of the writes below.
+     *
+     * A 400 on these endpoints carries the CURRENT config alongside the error,
+     * so a rejected save can repaint from it. Without that, a validation failure
+     * would leave the panel showing the state before the attempt while the
+     * server had moved on — and the operator would have no way to tell.
+     */
+    function applyTelegramConfig(config) {
+      if (!config) return;
+      if (config.token) state.telegramToken = config.token;
+      if (Object.prototype.hasOwnProperty.call(config, 'chatId')) {
+        state.telegramChatId = config.chatId || null;
+      }
+      renderTelegramSettings();
+    }
+
+    function saveTelegramToken() {
+      const input = document.getElementById('telegram-token-input');
+      if (!input) return;
+      const value = input.value.trim();
+      telegramClearErrors();
+
+      // An empty box here is NOT "clear it" — that is what the separate button
+      // is for. Silently treating it as a clear would mean a stray backspace and
+      // a click on Save discards a working token with no confirmation, which is
+      // the worst possible reading of an unlabelled empty field.
+      if (!value) {
+        telegramSetError('telegram-token-error', 'Paste a token, or use "Use the .env token" to discard the saved one.');
+        return;
+      }
+      if (state.telegramSaving) return;
+      state.telegramSaving = true;
+
+      return api('/api/settings/telegram/token', { method: 'PUT', body: JSON.stringify({ token: value }) })
+        .then(data => {
+          // Blanked only on SUCCESS. On failure the value is left in place so a
+          // rejected token can be corrected in place instead of re-pasted.
+          input.value = '';
+          applyTelegramConfig(data);
+          telegramSetMessage('telegram-token-message',
+            'Token saved. It is in use now — no restart needed.', 'ok');
+        })
+        .catch(err => {
+          telegramSetError('telegram-token-error', (err && err.message) ? err.message : 'Could not save the token.');
+          telegramSetMessage('telegram-token-message', '');
+          // The server sends the live config with a 400 so the status lines do
+          // not go stale just because the save was rejected.
+          if (err && err.payload && err.payload.config) applyTelegramConfig(err.payload.config);
+        })
+        .then(() => {
+          state.telegramSaving = false;
+          renderTelegramSettings();
+        });
+    }
+
+    function clearTelegramToken() {
+      if (state.telegramSaving) return;
+      // Confirmed even though the saved token is not shown and the .env one is
+      // unknown to this page: the outcome is not obvious from here, and losing a
+      // working token to an unlabelled button is worth one dialog.
+      confirmAction({
+        title: 'Discard the saved token?',
+        message: 'The token saved here will be deleted and TELEGRAM_BOT_TOKEN from .env will be used ' +
+                 'instead. If there is no .env token, alerts will stop being sent entirely.',
+        confirmLabel: 'Discard it'
+      }).then(ok => {
+        if (!ok) return;
+        state.telegramSaving = true;
+        api('/api/settings/telegram/token/clear', { method: 'POST' })
+          .then(data => {
+            applyTelegramConfig(data);
+            telegramSetMessage('telegram-token-message', 'Discarded. Using the .env token.', 'ok');
+          })
+          .catch(err => {
+            telegramSetMessage('telegram-token-message',
+              (err && err.message) ? err.message : 'Could not discard the token.', 'error');
+          })
+          .then(() => {
+            state.telegramSaving = false;
+            renderTelegramSettings();
+          });
+      });
+    }
+
+    function saveTelegramChatId() {
+      const input = document.getElementById('telegram-chat-input');
+      if (!input) return;
+      const value = input.value.trim();
+      telegramClearErrors();
+
+      if (!value) {
+        // Here an empty box IS meaningful: the database helper treats a blank as
+        // "clear the address", and there is no separate Clear button for this
+        // one. That asymmetry with the token is deliberate — a chat id is not a
+        // secret, so wiping one costs nothing but a re-type.
+        if (!state.telegramChatId) {
+          telegramSetError('telegram-chat-error', 'Enter a chat id first.');
+          return;
+        }
+      }
+      if (state.telegramSaving) return;
+      state.telegramSaving = true;
+
+      return api('/api/settings/telegram/chat', { method: 'PUT', body: JSON.stringify({ chatId: value }) })
+        .then(data => {
+          input.value = '';
+          applyTelegramConfig(data);
+          telegramSetMessage('telegram-chat-message',
+            value ? 'Chat id saved.' : 'Chat id cleared.', 'ok');
+        })
+        .catch(err => {
+          telegramSetError('telegram-chat-error', (err && err.message) ? err.message : 'Could not save the chat id.');
+          telegramSetMessage('telegram-chat-message', '');
+          if (err && err.payload && err.payload.config) applyTelegramConfig(err.payload.config);
+        })
+        .then(() => {
+          state.telegramSaving = false;
+          renderTelegramSettings();
+        });
+    }
+
+    /**
+     * Save the alert window — the setting the daily expiry check reads.
+     *
+     * An empty box means "go back to the default", not "warn about nothing".
+     * Those are very different: 0 would make every lens with a future expiry
+     * irrelevant and could only ever surface lenses expiring today, whereas an
+     * empty box restores the built-in 14. The distinction is stated on the
+     * field, and the server treats a blank as an absent override for the same
+     * reason the token does.
+     */
+    function saveTelegramThreshold() {
+      const input = document.getElementById('telegram-threshold-input');
+      if (!input) return;
+      const value = input.value.trim();
+      telegramClearErrors();
+
+      if (value !== '' && !/^\d+$/.test(value)) {
+        telegramSetError('telegram-threshold-error', 'Enter a whole number of days, or leave it empty for the default.');
+        return;
+      }
+      if (value !== '' && Number(value) > state.telegramMaxThresholdDays) {
+        telegramSetError('telegram-threshold-error',
+          'That is more than ' + state.telegramMaxThresholdDays + ' days — you would be warned about every lens you own, every day.');
+        return;
+      }
+      if (state.telegramSaving) return;
+      state.telegramSaving = true;
+
+      return api('/api/settings/telegram/threshold', { method: 'PUT', body: JSON.stringify({ days: value }) })
+        .then(data => {
+          applyTelegramConfig(data);
+          state.telegramThresholdDays = Number(data.thresholdDays);
+          renderTelegramSettings();
+          telegramSetMessage('telegram-threshold-message',
+            data.isDefault
+              ? 'Reset to the default of ' + data.thresholdDays + ' days.'
+              : 'Saved. The next daily check will use a ' + data.thresholdDays + '-day window.', 'ok');
+        })
+        .catch(err => {
+          telegramSetError('telegram-threshold-error', (err && err.message) ? err.message : 'Could not save the window.');
+          telegramSetMessage('telegram-threshold-message', '');
+          if (err && err.payload && err.payload.config) applyTelegramConfig(err.payload.config);
+        })
+        .then(() => {
+          state.telegramSaving = false;
+          renderTelegramSettings();
+        });
+    }
+
+    /**
+     * Ask Telegram whether the token is real, WITHOUT sending anything.
+     *
+     * Uses the strict sender on the server, which never reports a delivery it
+     * did not observe — so a green result here genuinely means Telegram
+     * recognised the bot, and a red one names the reason. This is the button to
+     * press first: a send test has two independent failure modes and Telegram
+     * reports both as a flat 400, so only this one can tell you which half is
+     * wrong.
+     */
+    function testTelegramToken() {
+      telegramClearErrors();
+      if (state.telegramTesting) return;
+      state.telegramTesting = true;
+      telegramSetMessage('telegram-test-message', 'Checking…', 'info');
+
+      return api('/api/settings/telegram/verify-token', { method: 'POST' })
+        .then(data => {
+          // A rejected token is a 200 with ok:false, not an HTTP error — it is
+          // the expected outcome of pressing this button, and it must not land
+          // in the catch branch below as if the request had failed.
+          if (data && data.ok) {
+            const bot = data.bot || {};
+            telegramSetMessage('telegram-test-message',
+              'Telegram recognised this bot' + (bot.username ? ' (@' + bot.username + ')' : '') +
+              '. The token is valid.', 'ok');
+            return;
+          }
+          // The server already words every one of these (a rejected token, an
+          // unreachable network, a missing token) as a sentence meant for a
+          // human, so it is shown verbatim rather than mapped through a second,
+          // thinner set of messages here.
+          telegramSetMessage('telegram-test-message',
+            (data && data.error) ? data.error : 'Telegram did not accept the token.', 'error');
+        })
+        .catch(err => {
+          telegramSetMessage('telegram-test-message',
+            (err && err.message) ? err.message : 'Could not check the token.', 'error');
+        })
+        .then(() => { state.telegramTesting = false; });
+    }
+
+    /**
+     * Send a real message to the configured chat.
+     *
+     * Also uses the strict sender, and the reason matters: the ordinary
+     * notification path reports SUCCESS when the token is missing, the network
+     * is down, or the request times out — correct for the 2FA flow, and exactly
+     * wrong for a button a person is reading to decide whether their alerts
+     * work. This one can only say what actually happened.
+     */
+    function sendTelegramTestMessage() {
+      const box = document.getElementById('telegram-test-input');
+      const text = box ? box.value.trim() : '';
+      telegramClearErrors();
+      if (state.telegramTesting) return;
+      state.telegramTesting = true;
+      telegramSetMessage('telegram-test-message', 'Sending…', 'info');
+
+      return api('/api/settings/telegram/test-message', {
+        method: 'POST',
+        body: JSON.stringify({ text: text })
+      })
+        .then(data => {
+          if (data && data.ok) {
+            telegramSetMessage('telegram-test-message',
+              data.simulated
+                ? 'Recorded by the test harness instead of being sent — this server is not talking to Telegram.'
+                : 'Sent. Check your Telegram — if it arrived, the daily expiry alerts will too.', 'ok');
+            return;
+          }
+          // The reason is the point. "chat not found" means the bot has not been
+          // added to that chat; "Unauthorized" means the token is wrong. Both come
+          // back as ok:false, and neither is a failure of the other.
+          telegramSetMessage('telegram-test-message',
+            'Telegram refused it: ' + ((data && data.error) ? data.error : 'no reason given'), 'error');
+        })
+        .catch(err => {
+          // A 400 here is the server refusing a request it could not even send —
+          // most often "no chat id configured yet" — so the message is about the
+          // request, not about Telegram.
+          telegramSetError('telegram-test-error', (err && err.message) ? err.message : 'Could not send the test message.');
+          telegramSetMessage('telegram-test-message', '');
+        })
+        .then(() => { state.telegramTesting = false; });
+    }
 
     function populateCostumeSelects() {
       // The add-prop form and the edit-prop form each get their own <select>,
@@ -5197,11 +7017,26 @@
       }
 
       const data = Object.fromEntries(new FormData(form));
+
+      // Photos picked in this modal were stashed under NEW_PROP_IMAGES_KEY, not
+      // under the linked costume's id: they belong to the prop being created, and
+      // reading them from data.costumeId would attach a new prop's photos to
+      // whatever costume the select happened to hold.
+      const cachedImages = state.imageUrlsCache[NEW_PROP_IMAGES_KEY] || [];
+      if (cachedImages.length) data.imageUrls = JSON.stringify(cachedImages.slice(0, MAX_PROP_IMAGES));
+
       try {
         await api('/api/props', { method: 'POST', body: JSON.stringify(data) });
         showToast('Prop added successfully!', 'success');
         closeModal('modal-add-prop');
         form.reset();
+        // The stash is the only per-modal prop state, so it is cleared here
+        // rather than in closeModal() — a cancelled dialog must NOT clear it, or
+        // reopening the modal would silently drop already-uploaded photos.
+        delete state.imageUrlsCache[NEW_PROP_IMAGES_KEY];
+        document.getElementById('add-prop-media').innerHTML = MEDIA_PLACEHOLDER_HTML;
+        document.getElementById('add-prop-strip').innerHTML = '';
+        document.getElementById('add-prop-photo-count').textContent = '0';
         populateCostumeSelects();
         await loadProps();
       } catch (err) {
@@ -5244,6 +7079,166 @@
         updateMetrics();
       } catch (err) {
         showToast('Could not register lens: ' + err.message, 'error');
+      }
+    }
+
+    // ==========================================================================
+    // CREATE / EDIT MAKER
+    // ==========================================================================
+    // The three maker fields are validated by the SAME rules the server applies
+    // in normalizeSosmedUrl() and normalizeWhatsapp(), restated here. That is
+    // duplication, and it is deliberate: a round-trip that 400s costs the user
+    // their typing, while an inline message costs them nothing. The rules are
+    // quoted from src/routes/makers.js so the two can be compared, and any
+    // change to the server side must be made here too — the server stays the
+    // authority either way, and this layer only ever rejects things the server
+    // would have rejected anyway.
+    function validateSosmed(value) {
+      if (!value) return '';                       // empty = no link, allowed
+      // No '|' and no line break: those cannot survive the pipe transport this
+      // project reads rows through, so a value containing them would come back
+      // misaligned. The server refuses them for exactly this reason.
+      if (/[|\r\n]/.test(value)) return 'A link cannot contain the character | or a line break.';
+      // Absolute http(s) only. The leading-char class rejects '//evil.tld',
+      // which is protocol-relative and would otherwise satisfy a loose test.
+      if (!/^https?:\/\/[^\s/$.?#][^\s]*$/i.test(value)) {
+        return 'Enter a full URL starting with http:// or https://';
+      }
+      return '';
+    }
+
+    function validateWhatsapp(value) {
+      if (!value) return '';                       // empty = no number, allowed
+      if (/[|\r\n]/.test(value)) return 'A number cannot contain the character | or a line break.';
+      if (!/^\+?[\d\s().-]+$/.test(value)) {
+        return 'Use digits only — spacing, dashes, dots and brackets are fine.';
+      }
+      if (!/\d/.test(value)) return 'Enter at least one digit.';
+      return '';
+    }
+
+    async function handleCreateMaker(e) {
+      e.preventDefault();
+      const form = e.target;
+
+      const valid = validateForm(form, [
+        { name: 'name', required: true, maxLength: 120 },
+        { name: 'makerType', required: true },
+        { name: 'sosmed', maxLength: 2048, custom: validateSosmed },
+        { name: 'whatsapp', maxLength: 32, custom: validateWhatsapp },
+        { name: 'notes', maxLength: 2000 }
+      ]);
+      if (!valid) {
+        showToast('Please fix the highlighted fields.', 'error');
+        return;
+      }
+
+      const data = Object.fromEntries(new FormData(form));
+      // Blank optional boxes are DROPPED rather than sent as ''. The route
+      // stores NULL for an absent key and NULL for an empty string alike, but
+      // omitting them keeps one representation of "not filled in" instead of
+      // two depending on which dialog the row was created from.
+      ['sosmed', 'whatsapp', 'notes'].forEach(key => {
+        if (!data[key]) delete data[key];
+      });
+
+      try {
+        await api('/api/makers', { method: 'POST', body: JSON.stringify(data) });
+        showToast('Maker added successfully!', 'success');
+        closeModal('modal-add-maker');
+        form.reset();
+        await loadMakers();
+      } catch (err) {
+        showToast('Could not add maker: ' + err.message, 'error');
+      }
+    }
+
+    function openEditMaker(id) {
+      const maker = state.makers.find(m => clean(m.id) === clean(id));
+      if (!maker) {
+        showToast('That maker is no longer loaded — refresh and try again.', 'error');
+        return;
+      }
+
+      state.editingMakerId = clean(maker.id);
+      const dialog = document.getElementById('modal-edit-maker');
+      const form = dialog.querySelector('form');
+      clearFormErrors(form);
+
+      form.querySelector('[name="name"]').value = clean(maker.name);
+      form.querySelector('[name="sosmed"]').value = clean(maker.sosmed);
+      form.querySelector('[name="whatsapp"]').value = clean(maker.whatsapp);
+      form.querySelector('[name="notes"]').value = clean(maker.notes);
+
+      // A type outside the closed set cannot be selected, so assigning it would
+      // leave the <select> on its first option and the next save would
+      // silently change the maker's type. Falling back to PROP is the same
+      // rule openEditCostume() uses for an unknown status — and it is a
+      // VISIBLE change (the select shows it) rather than a silent one, so the
+      // user can correct it before saving.
+      const select = form.querySelector('[name="makerType"]');
+      const makerType = clean(maker.makerType);
+      // Tested against BOTH lists, not just state.makerTypes: on the very first
+      // visit the tab renders before /api/makers has answered, so state.makerTypes
+      // is still empty and every stored type would look unknown. The fallback
+      // list is what the <select> actually offers in that window, so it is the
+      // list that decides what "selectable" means.
+      const selectable = state.makerTypes.length ? state.makerTypes : MAKER_TYPE_FALLBACK;
+      select.value = selectable.indexOf(makerType) !== -1
+        ? makerType
+        : (select.options[0] ? select.options[0].value : makerType);
+
+      dialog.showModal();
+    }
+
+    async function handleEditMaker(e) {
+      e.preventDefault();
+      const form = e.target;
+      const id = state.editingMakerId;
+      if (!id) {
+        closeModal('modal-edit-maker');
+        return;
+      }
+
+      const valid = validateForm(form, [
+        { name: 'name', required: true, maxLength: 120 },
+        { name: 'makerType', required: true },
+        { name: 'sosmed', maxLength: 2048, custom: validateSosmed },
+        { name: 'whatsapp', maxLength: 32, custom: validateWhatsapp },
+        { name: 'notes', maxLength: 2000 }
+      ]);
+      if (!valid) {
+        showToast('Please fix the highlighted fields.', 'error');
+        return;
+      }
+
+      // ALL FIVE KEYS ARE ALWAYS SENT, including the ones left blank. This is
+      // the opposite of the create path on purpose: PUT reads the PRESENCE of a
+      // key as "set this column", so a key omitted here would leave the stored
+      // link untouched. Omitting them would make it impossible to REMOVE a
+      // social link or a number once entered — clearing the box and saving would
+      // silently do nothing. The route turns the empty string into a real
+      // SQL NULL, so the row ends up in the same state a maker created without
+      // that contact would be in.
+      const payload = {
+        name: form.querySelector('[name="name"]').value.trim(),
+        makerType: form.querySelector('[name="makerType"]').value,
+        sosmed: form.querySelector('[name="sosmed"]').value.trim(),
+        whatsapp: form.querySelector('[name="whatsapp"]').value.trim(),
+        notes: form.querySelector('[name="notes"]').value.trim()
+      };
+
+      try {
+        await api('/api/makers/' + encodeURIComponent(id), {
+          method: 'PUT',
+          body: JSON.stringify(payload)
+        });
+        state.editingMakerId = null;
+        showToast('Maker updated.', 'success');
+        closeModal('modal-edit-maker');
+        await loadMakers();
+      } catch (err) {
+        showToast('Could not update maker: ' + err.message, 'error');
       }
     }
 
@@ -5445,6 +7440,19 @@
         conditionBox.style.display = 'block';
       }
 
+      // The upload button is the ONE place a photo's destination is decided, and
+      // it needs the prop's id because the button inside a dialog carries no id
+      // of its own — a card button is stamped by renderProps() at render time.
+      const uploadBtn = dialog.querySelector('[data-action="upload-prop"]');
+      if (uploadBtn) uploadBtn.dataset.id = clean(prop.id);
+
+      // Photos are drawn into THIS modal only, and the cache is re-seeded from
+      // the server first. Without the re-seed, a photo removed earlier in the
+      // session would still be in the cache and would reappear here — the same
+      // trap seedImageCache() exists to avoid on the costume side.
+      state.imageUrlsCache[clean(prop.id)] = parseImageUrls(prop.imageUrls);
+      renderPropImages(prop, 'modal-edit-prop');
+
       dialog.showModal();
     }
 
@@ -5497,6 +7505,16 @@
       const condition = form.querySelector('[name="condition"]').value;
       if (condition === CUSTOM_PROP_VALUE) payload.condition = form.querySelector('[name="conditionOther"]').value.trim();
       else if (condition !== '') payload.condition = condition;
+
+      // Photos are ALWAYS sent, including when the list is empty. PUT
+      // /api/props/:id replaces imageUrls wholesale, so the common case here is
+      // the one that would silently break: a user who removes the last photo and
+      // then saves an unrelated field edit must get a cleared column, not a PUT
+      // with the key omitted (which the server reads as "leave it alone") that
+      // quietly resurrects the photo they just deleted.
+      payload.imageUrls = JSON.stringify(
+        (state.imageUrlsCache[id] || []).filter(url => url.length <= MAX_IMAGE_URL_LENGTH)
+      );
 
       try {
         await api('/api/props/' + encodeURIComponent(id), {
@@ -5663,6 +7681,24 @@
         await loadProps();
       } catch (err) {
         showToast('Could not delete prop: ' + err.message, 'error');
+      }
+    }
+
+    async function deleteMaker(id) {
+      const maker = state.makers.find(m => clean(m.id) === clean(id));
+      const name = maker ? clean(maker.name) : id;
+      const ok = await confirmAction({
+        title: 'Delete "' + name + '"?',
+        message: 'This maker and their contact details will be removed. This cannot be undone.',
+        confirmLabel: 'Delete maker'
+      });
+      if (!ok) return;
+      try {
+        await api('/api/makers/' + encodeURIComponent(id), { method: 'DELETE' });
+        showToast('Maker deleted.', 'success');
+        await loadMakers();
+      } catch (err) {
+        showToast('Could not delete maker: ' + err.message, 'error');
       }
     }
 
@@ -5998,25 +8034,37 @@
       next.disabled = g.index >= total - 1;
 
       // The delete control is a WRITE. applyRoleVisibility() can hide it, and
-      // deleteLightboxImage() re-checks for itself independently.
+      // deleteLightboxImage() re-checks for itself independently. It is ALSO
+      // hidden for a prop gallery: the DELETE /api/costumes/:id/images route
+      // unlinks a photo from a COSTUME, and pointing it at a prop id would
+      // either 404 or — worse — hit some other row. Prop photos are removed by
+      // re-uploading a shorter set, so offering the button would be a lie.
       const del = document.getElementById('lightbox-delete');
-      if (del) del.classList.toggle('is-hidden', !canWrite());
+      if (del) del.classList.toggle('is-hidden', !canWrite() || g.kind !== 'costume');
     }
 
     /**
-     * Open the gallery for one costume, optionally at a given position.
+     * Open the gallery for one COSTUME or one PROP, optionally at a given
+     * position.
+     *
+     * Both cards render an `open-gallery` control, so this resolves the id
+     * against the costume list first and the prop list second. `kind` is
+     * carried into state.gallery because the two lists are NOT interchangeable:
+     * only a costume has the DELETE .../images route, so renderGallery() has to
+     * know which list the id came from before it offers that button.
      *
      * `urls` is SNAPSHOT into state.gallery rather than re-read on every page,
-     * so a background reload of the costume list cannot reorder the photos under
+     * so a background reload of either list cannot reorder the photos under
      * the user while they are looking at one.
      */
     function openGallery(costumeId, index) {
       const costume = state.costumes.find(c => clean(c.id) === clean(costumeId));
-      if (!costume) {
-        showToast('That costume is no longer loaded — refresh and try again.', 'error');
+      const prop = costume ? null : state.props.find(p => clean(p.id) === clean(costumeId));
+      if (!costume && !prop) {
+        showToast('That item is no longer loaded — refresh and try again.', 'error');
         return;
       }
-      const urls = costumeImages(costume);
+      const urls = costume ? costumeImages(costume) : propImages(prop);
       if (!urls.length) return;
 
       const dialog = document.getElementById('modal-lightbox');
@@ -6024,8 +8072,9 @@
 
       const position = Math.max(0, Math.min(index || 0, urls.length - 1));
       state.gallery = {
-        costumeId: clean(costume.id),
-        character: clean(costume.character),
+        costumeId: clean(costume ? costume.id : prop.id),
+        character: clean(costume ? costume.character : (prop.name || 'Prop')),
+        kind: costume ? 'costume' : 'prop',
         urls: urls,
         index: position
       };
@@ -6142,6 +8191,13 @@
       }
       const form = dialog.querySelector('form');
       if (form) clearFormErrors(form);
+      // Redraw the unsaved prop's photo stash on every open. A user who uploads,
+      // closes without saving, and reopens must SEE what they already attached
+      // — otherwise the thumbnails vanish while the files are still stashed and
+      // handleCreateProp() would silently send them to the new prop anyway.
+      if (id === 'modal-add-prop') {
+        renderPropImages({ id: NEW_PROP_IMAGES_KEY, name: '', imageUrls: '[]' }, 'modal-add-prop');
+      }
       dialog.showModal();
     }
 
@@ -6211,6 +8267,348 @@
     function closeModal(id) {
       const dialog = document.getElementById(id);
       if (dialog && dialog.open) dialog.close();
+    }
+
+    // ==========================================================================
+    // PROP IMAGE UPLOAD
+    // ==========================================================================
+    // WHY PROPS GET THEIR OWN UPLOAD PATH INSTEAD OF REUSING THE COSTUME ONE.
+    //
+    // The costume flow (openImagePicker -> onImagePicked) is hard-wired to
+    // #costume-image-input, to state.costumes, and to PUT /api/costumes/:id —
+    // a prop shares none of those. Rather than parameterise all three and risk
+    // the costume path, props get a parallel implementation over the same
+    // upload endpoint and the same authenticated-image delivery.
+    //
+    // The cap is 3 (MAX_PROP_IMAGES), mirroring MAX_IMAGES_PER_COSTUME's role
+    // on the costume side and src/routes/props.js's own server-side limit. The
+    // two are separate constants on purpose: this one shapes the UI, that one is
+    // the trust boundary, and they are checked against each other in the note on
+    // validatePropImageSelection().
+    const MAX_PROP_IMAGES = 3;
+
+    // The prop the picker is currently uploading FOR, or the literal
+    // NEW_PROP_IMAGES_KEY while the Add Prop modal is still unsaved. A real id
+    // means "merge into this prop and PUT it"; the sentinel means "just stash
+    // them — handleCreateProp() will send them with the rest of the form".
+    // Only one upload can be in flight, so a scalar is enough; this is the same
+    // single-slot shape as state.imageUploadTargetId.
+    const NEW_PROP_IMAGES_KEY = '__new_prop__';
+
+    /**
+     * Open the file picker for one prop's photos.
+     *
+     * @param {string} propId   the prop's id, or NEW_PROP_IMAGES_KEY.
+     * @param {string} inputId  which hidden <input> to click. Passed explicitly
+     *   by the button rather than guessed: both modals are in the document at all
+     *   times, and an input inside a closed <dialog> still accepts .click(), so a
+     *   "first one in the DOM" rule would silently route an Edit-Prop upload
+     *   through the Add-Prop input and then read the wrong cache slot.
+     */
+    function openPropImagePicker(propId, inputId) {
+      if (!canWrite()) {
+        showToast('Photos cannot be uploaded.', 'error');
+        return;
+      }
+      const input = document.getElementById(inputId || 'prop-image-input');
+      if (!input) return;
+      state.propImageUploadTargetId = propId || NEW_PROP_IMAGES_KEY;
+      // Clear first: without this, re-picking the same file fires no change
+      // event and the second click looks like it did nothing.
+      input.value = '';
+      input.click();
+    }
+
+    function validatePropImageSelection(files, existingCount) {
+      if (!files.length) return { ok: false, message: 'No images were selected.' };
+
+      if (files.length > MAX_FILES_PER_REQUEST) {
+        return {
+          ok: false,
+          message: 'You selected ' + files.length + ' images, but one upload accepts at most '
+            + MAX_FILES_PER_REQUEST + '. Select fewer and send the rest in a second batch.'
+        };
+      }
+
+      // The room check comes FIRST, before type and size, because "there is no
+      // room" is the answer that cannot be worked around by choosing smaller or
+      // different files — and it is the one a user is most likely to hit, since
+      // the cap is only 3.
+      const room = MAX_PROP_IMAGES - existingCount;
+      if (room < files.length) {
+        return {
+          ok: false,
+          message: existingCount + ' of the maximum ' + MAX_PROP_IMAGES
+            + ' photos are already on this prop, so only ' + Math.max(room, 0)
+            + ' more can be added. Remove a photo first.'
+        };
+      }
+
+      const tooBig = files.filter(f => f.size > MAX_UPLOAD_BYTES);
+      if (tooBig.length) {
+        const largest = Math.max.apply(null, tooBig.map(f => f.size));
+        return {
+          ok: false,
+          message: (tooBig.length === 1 ? 'That image is' : tooBig.length + ' of the selected images are')
+            + ' too large (largest ' + (largest / 1048576).toFixed(1) + ' MB). The limit is '
+            + (MAX_UPLOAD_BYTES / 1048576) + ' MB. Nothing was uploaded.'
+        };
+      }
+
+      const badType = files.filter(f => ALLOWED_UPLOAD_TYPES.indexOf(f.type) === -1);
+      if (badType.length) {
+        const names = badType.slice(0, 3).map(f => f.name || 'unnamed').join(', ');
+        return {
+          ok: false,
+          message: 'Only JPEG, PNG, WebP or GIF images are accepted. Rejected: ' + names
+            + (badType.length > 3 ? ' (+' + (badType.length - 3) + ' more)' : '')
+            + '. Nothing was uploaded.'
+        };
+      }
+
+      return { ok: true, message: '' };
+    }
+
+    async function uploadPropImageBatch(files) {
+      const form = new FormData();
+      const plural = files.length + ' photo' + (files.length === 1 ? '' : 's');
+
+      const onProgress = fraction => {
+        if (fraction === null) updateUploadProgress(0, 'uploading', 'sending...');
+        else updateUploadProgress(fraction, 'uploading', plural);
+      };
+      const onProcessing = () => updateUploadProgress(1, 'processing', plural + ' uploaded - resizing');
+
+      try {
+        if (files.length === 1) {
+          form.append('image', files[0]);
+          onProgress(0);
+          const sending = apiUpload('/api/images/upload', form, onProgress);
+          onProcessing();
+          const result = await sending;
+          const url = safeUrl(result.url || result.processedUrl);
+          if (!url) throw new ApiError('The server did not return a usable image URL.', 500, 'BAD_UPLOAD_RESPONSE');
+          return [url];
+        }
+
+        files.forEach(file => form.append('images', file));
+        onProgress(0);
+        const sending = apiUpload('/api/images/upload-multiple', form, onProgress);
+        onProcessing();
+        const result = await sending;
+        const images = Array.isArray(result.images) ? result.images : [];
+        const urls = images
+          .map(entry => safeUrl(entry && (entry.url || entry.processedUrl)))
+          .filter(Boolean);
+        if (!urls.length) {
+          throw new ApiError('The server did not return any usable image URLs.', 500, 'BAD_UPLOAD_RESPONSE');
+        }
+        return urls;
+      } finally {
+        hideUploadProgress();
+      }
+    }
+
+    /**
+     * Upload the files chosen in one of the prop <input>s and persist them.
+     *
+     * Two shapes, decided by the sentinel in state.propImageUploadTargetId:
+     * NEW_PROP_IMAGES_KEY (the Add Prop modal) only stashes the URLs — the prop
+     * has no id yet, so there is nothing to PUT. A real id merges into that
+     * prop's cache and writes the whole set back in ONE PUT, because
+     * PUT /api/props/:id replaces imageUrls rather than appending to it.
+     */
+    async function onPropImagePicked(event) {
+      const input = event.target;
+      const targetId = state.propImageUploadTargetId;
+      state.propImageUploadTargetId = null;
+
+      const files = input.files ? Array.prototype.slice.call(input.files) : [];
+      if (!targetId || !files.length) { input.value = ''; return; }
+
+      // Which slot the existing photos live in. For an unsaved prop that is the
+      // sentinel slot, not a row in state.props.
+      const isNewProp = targetId === NEW_PROP_IMAGES_KEY;
+      const prop = isNewProp
+        ? { id: NEW_PROP_IMAGES_KEY, imageUrls: '[]' }
+        : (state.props.find(p => clean(p.id) === clean(targetId)) || { id: targetId, imageUrls: '[]' });
+      const existing = propImages(prop);
+
+      const check = validatePropImageSelection(files, existing.length);
+      if (!check.ok) {
+        showToast(check.message, 'error');
+        input.value = '';
+        return;
+      }
+
+      const button = document.querySelector('[data-action="upload-prop"][data-input="' + input.id + '"]');
+      if (button) {
+        button.disabled = true;
+        button.textContent = '…';
+      }
+
+      try {
+        const urls = await uploadPropImageBatch(files);
+
+        // The cache is the session's view; the strip and card read it through
+        // propImages(), so writing it here is what makes a new photo appear
+        // before the server has confirmed anything.
+        const mergedCache = existing.slice();
+        urls.forEach(url => { if (mergedCache.indexOf(url) === -1) mergedCache.push(url); });
+        state.imageUrlsCache[targetId] = mergedCache.slice(0, MAX_PROP_IMAGES);
+
+        if (isNewProp) {
+          renderPropImages({ id: NEW_PROP_IMAGES_KEY, name: '', imageUrls: '[]' });
+          showToast(urls.length === 1 ? 'Photo attached. Save the prop to keep it.' : urls.length + ' photos attached. Save the prop to keep them.', 'success');
+          return;
+        }
+
+        renderPropImages(prop);
+        await loadProps();
+
+        // One PUT carrying the WHOLE set — the route replaces imageUrls, so a
+        // partial body would drop the photos already on the prop. The
+        // MAX_IMAGE_URL_LENGTH filter mirrors the costume upload's: an
+        // over-long URL is dropped rather than rejected outright, and the
+        // verification below then reports it honestly instead of claiming a
+        // save that silently dropped photos.
+        const acceptable = state.imageUrlsCache[targetId].filter(url => url.length <= MAX_IMAGE_URL_LENGTH);
+        try {
+          await api('/api/props/' + encodeURIComponent(targetId), {
+            method: 'PUT',
+            body: JSON.stringify({ imageUrls: JSON.stringify(acceptable) })
+          });
+          await loadProps();
+
+          const refreshed = state.props.find(p => clean(p.id) === clean(targetId)) || {};
+          const persisted = propImages(refreshed);
+          const stuck = urls.filter(url => persisted.indexOf(url) === -1);
+
+          if (stuck.length === urls.length) {
+            showToast('Photos were uploaded, but the server did not store them — they will only show for this session.', 'warning');
+          } else if (stuck.length) {
+            showToast('Added ' + (urls.length - stuck.length) + ' of ' + urls.length
+              + ' photos; ' + stuck.length + ' did not stick and will only show for this session.', 'warning');
+          } else {
+            showToast(urls.length === 1 ? 'Photo added.' : urls.length + ' photos added.', 'success');
+          }
+        } catch (persistErr) {
+          showToast('Uploaded, but saving to the prop failed ('
+            + persistErr.message + '). The photos will only show for this session.', 'warning');
+        }
+      } catch (err) {
+        showToast('Upload failed: ' + err.message, 'error');
+      } finally {
+        if (button) {
+          button.disabled = false;
+          button.textContent = '📷 Upload Photos';
+        }
+        input.value = '';
+      }
+    }
+
+    /**
+     * Remove one photo from a prop.
+     *
+     * The lightbox Delete button is hidden for props (see renderGallery — the
+     * DELETE /api/costumes/:id/images route has no prop equivalent), so this
+     * per-thumbnail × is the ONLY way a prop photo comes off. The file on disk
+     * is deliberately left alone: there is no prop-side cross-reference count to
+     * report, and a shared upload may still belong to a costume.
+     */
+    async function removePropImage(propId, url) {
+      if (!canWrite()) {
+        showToast('Photos cannot be removed.', 'error');
+        return;
+      }
+
+      const isNewProp = propId === NEW_PROP_IMAGES_KEY;
+      const prop = isNewProp
+        ? { id: NEW_PROP_IMAGES_KEY, imageUrls: '[]' }
+        : (state.props.find(p => clean(p.id) === clean(propId)) || null);
+      if (!prop && !isNewProp) {
+        showToast('That prop is no longer loaded — refresh and try again.', 'error');
+        return;
+      }
+
+      const ok = await confirmAction({
+        title: 'Remove this photo?',
+        message: isNewProp
+          ? 'It will be detached from this prop before it is saved.'
+          : 'It will be removed from ' + (clean(prop.name) || 'this prop') + '.',
+        confirmLabel: 'Remove photo'
+      });
+      if (!ok) return;
+
+      const remaining = propImages(prop).filter(existing => existing !== url);
+      state.imageUrlsCache[propId] = remaining.slice();
+
+      if (isNewProp) {
+        renderPropImages(prop);
+        showToast('Photo removed.', 'success');
+        return;
+      }
+
+      try {
+        await api('/api/props/' + encodeURIComponent(propId), {
+          method: 'PUT',
+          body: JSON.stringify({ imageUrls: JSON.stringify(remaining) })
+        });
+        await loadProps();
+        renderPropImages(state.props.find(p => clean(p.id) === clean(propId)) || prop);
+        showToast('Photo removed.', 'success');
+      } catch (err) {
+        // Roll the cache back so the strip does not show a removal the server
+        // never accepted.
+        state.imageUrlsCache[propId] = propImages(prop);
+        renderPropImages(prop);
+        showToast('Could not remove the photo: ' + err.message, 'error');
+      }
+    }
+
+    /**
+     * Draw one prop's photos into ONE modal's photo block.
+     *
+     * Scoped by `modalId` on purpose. The previous version reached for the
+     * first matching element in the document, which meant the Add Prop modal
+     * rendered the Edit Prop modal's photos whenever both existed — and both
+     * always do, because a closed <dialog> stays in the DOM.
+     *
+     * @param {object} prop  any object with { id, imageUrls, name? }.
+     * @param {string} modalId  'modal-edit-prop' or 'modal-add-prop'.
+     */
+    function renderPropImages(prop, modalId) {
+      const mediaEl = document.getElementById(modalId === 'modal-add-prop' ? 'add-prop-media' : 'edit-prop-media');
+      const stripEl = document.getElementById(modalId === 'modal-add-prop' ? 'add-prop-strip' : 'edit-prop-strip');
+      const countEl = document.getElementById(modalId === 'modal-add-prop' ? 'add-prop-photo-count' : 'edit-prop-photo-count');
+      if (!mediaEl || !stripEl) return;
+
+      const urls = propImages(prop);
+
+      if (countEl) countEl.textContent = urls.length;
+
+      if (urls.length) {
+        mediaEl.innerHTML = '<img src="' + IMAGE_LOADING_PIXEL + '" data-image-src="' + escapeHtml(urls[0]) + '"'
+          + ' alt="' + escapeHtml(clean(prop.name) || 'Prop') + '" loading="lazy">';
+      } else {
+        mediaEl.innerHTML = MEDIA_PLACEHOLDER_HTML;
+      }
+
+      // Every thumbnail is a <span> holding TWO buttons rather than one button
+      // with two children: nesting the × inside the open-gallery button would
+      // make it fire both handlers on one click.
+      stripEl.innerHTML = urls.map((url, i) =>
+        '<span class="media-thumb-group">'
+        + '<button type="button" class="media-thumb" data-action="open-gallery" data-id="' + idAttr(prop.id) + '"'
+        + ' data-index="' + i + '" title="Photo ' + (i + 1) + '">'
+        + '<img src="' + IMAGE_LOADING_PIXEL + '" data-image-src="' + escapeHtml(url) + '" alt="Photo ' + (i + 1) + '"></button>'
+        + '<button type="button" class="media-thumb-remove" data-action="remove-prop-image" data-id="' + idAttr(prop.id) + '"'
+        + ' data-url="' + escapeHtml(url) + '" title="Remove photo ' + (i + 1) + '" aria-label="Remove photo ' + (i + 1) + '">×</button>'
+        + '</span>'
+      ).join('');
+
+      hydrateAuthenticatedImages(mediaEl);
+      hydrateAuthenticatedImages(stripEl);
     }
 
     // ==========================================================================
