@@ -14,6 +14,10 @@
       var on = tab.dataset.mode === mode;
       tab.classList.toggle('active', on);
       tab.setAttribute('aria-selected', String(on));
+      // Roving tabindex: only the selected tab is reachable with Tab, so the
+      // group is one stop rather than two. Without this the markup's initial
+      // state would be the only correct one and a click would desync it.
+      tab.setAttribute('tabindex', on ? '0' : '-1');
     });
     blocks.forEach(function (block) {
       block.hidden = block.dataset.mode !== mode;

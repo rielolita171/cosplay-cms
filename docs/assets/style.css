@@ -145,6 +145,10 @@ code {
   gap: 46px; margin: 56px 0 0; padding: 0; flex-wrap: wrap;
 }
 .hero-stats b { display: block; font-size: 1.9rem; font-weight: 800; letter-spacing: -0.02em; }
+/* These are figures, not prose: tabular figures stop the row shifting as the
+   glyphs change width, and lining them up makes the four values comparable at a
+   glance. */
+.hero-stats b { font-variant-numeric: tabular-nums; }
 .hero-stats span { font-size: 0.82rem; color: var(--text-muted); }
 
 /* ---------------------------- SCREENSHOT FRAMES ---------------------------- */
@@ -291,3 +295,14 @@ code {
   html { scroll-behavior: auto; }
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* ---------------------------- TYPOGRAPHY REFINEMENTS ---------------------------- */
+/* `balance` evens out the rag on short display headings so a two-line h1 does
+   not come out 11 words / 1 word. `pretty` does the cheaper job on body copy by
+   only fixing the last line, which is where orphans actually read badly. */
+h1, h2, h3, .grad { text-wrap: balance; }
+p, li { text-wrap: pretty; }
+
+/* Long unbroken tokens (a URL, a long identifier pasted into a code block) must
+   not push a card wider than its grid track. */
+code, pre { overflow-wrap: anywhere; }

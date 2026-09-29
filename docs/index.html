@@ -10,6 +10,10 @@
 <meta property="og:type" content="website">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/style.css">
+<!-- Tells the UA this page is dark, so form controls, scrollbars and the
+     default canvas follow the theme instead of rendering light-on-white. -->
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f1117">
 </head>
 <body>
 
@@ -63,10 +67,13 @@
   <div class="container">
     <figure class="shot-frame">
       <div class="shot-bar">
-        <span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span>
+        <span class="dot dot-r" aria-hidden="true"></span><span class="dot dot-y" aria-hidden="true"></span><span class="dot dot-g" aria-hidden="true"></span>
         <span class="shot-url">localhost:4001 — dashboard</span>
       </div>
-      <img src="assets/screenshots/dashboard.png" width="1440" height="900"
+      <!-- Intrinsic size is declared so the browser reserves the box before the
+           1.6 MB PNG decodes. fetchpriority because this is the LCP element:
+           it is above the fold, so it should not queue behind the CSS. -->
+      <img src="assets/screenshots/dashboard.png" width="2880" height="1800" fetchpriority="high" decoding="async"
            alt="The Cosplay CMS dashboard: five metric cards showing total costumes, collection worth, active loans, active contact lenses and lenses expiring soon, above the tab navigation.">
     </figure>
     <figcaption class="shot-cap">
@@ -157,15 +164,15 @@
 
     <div class="shots">
       <figure class="shot-card">
-        <img src="assets/screenshots/costumes.png" loading="lazy" alt="The Costumes tab: a responsive card grid of costume entries with thumbnails, fandom, character, brand, size, status badges and prices.">
+        <img src="assets/screenshots/costumes.png" width="2880" height="1800" loading="lazy" decoding="async" alt="The Costumes tab: a responsive card grid of costume entries with thumbnails, fandom, character, brand, size, status badges and prices."]*">
         <figcaption><b>Costumes</b> — card grid with status badges, prices and photo strips.</figcaption>
       </figure>
       <figure class="shot-card">
-        <img src="assets/screenshots/props.png" loading="lazy" alt="The Props &amp; Accessories tab listing weapons such as the Aquila Favonia, Clow Wand and Hysilens Dual Sword, with category and condition.">
+        <img src="assets/screenshots/props.png" width="2880" height="1800" loading="lazy" decoding="async" alt="The Props &amp; Accessories tab listing weapons such as the Aquila Favonia, Clow Wand and Hysilens Dual Sword, with category and condition."]*">
         <figcaption><b>Props &amp; Accessories</b> — weapons and accessories, linked back to their costume.</figcaption>
       </figure>
       <figure class="shot-card">
-        <img src="assets/screenshots/reference-lists.png" loading="lazy" alt="The Reference Lists tab with side-by-side Brands &amp; Makers and Fandoms panels, each with its own create form and search box.">
+        <img src="assets/screenshots/reference-lists.png" width="2880" height="1800" loading="lazy" decoding="async" alt="The Reference Lists tab with side-by-side Brands &amp; Makers and Fandoms panels, each with its own create form and search box."]*">
         <figcaption><b>Reference Lists</b> — brands and fandoms, each with an independent search.</figcaption>
       </figure>
     </div>
@@ -210,13 +217,16 @@
     <p class="eyebrow">Quick start</p>
     <h2>Running in two commands</h2>
 
+    <!-- Each tab names the panel it controls via aria-controls, and only the
+         selected tab is in the tab sequence (roving tabindex) so Tab moves past
+         the group instead of through it; Left/Right arrows move within it. -->
     <div class="code-tabs" role="tablist" aria-label="Install method">
-      <button class="code-tab active" role="tab" aria-selected="true" data-mode="npm">Node</button>
-      <button class="code-tab" role="tab" aria-selected="false" data-mode="docker">Docker</button>
+      <button class="code-tab active" role="tab" id="tab-npm" aria-selected="true" aria-controls="panel-npm" tabindex="0" data-mode="npm">Node</button>
+      <button class="code-tab" role="tab" id="tab-docker" aria-selected="false" aria-controls="panel-docker" tabindex="-1" data-mode="docker">Docker</button>
     </div>
 
-    <div class="code-block" data-mode="npm">
-<pre><code><span class="c-p"># clone and install</span>
+    <div class="code-block" role="tabpanel" id="panel-npm" aria-labelledby="tab-npm" tabindex="0" data-mode="npm">
+<pre translate="no"><code><span class="c-p"># clone and install</span>
 git clone https://github.com/rielolita171/cosplay-cms.git
 cd cosplay-cms
 npm install
@@ -227,8 +237,8 @@ npm start
 <span class="c-p"># open http://localhost:4001</span></code></pre>
     </div>
 
-    <div class="code-block" data-mode="docker" hidden>
-<pre><code><span class="c-p"># build and start the stack</span>
+    <div class="code-block" role="tabpanel" id="panel-docker" aria-labelledby="tab-docker" tabindex="0" data-mode="docker" hidden>
+<pre translate="no"><code><span class="c-p"># build and start the stack</span>
 docker compose up -d --build
 
 <span class="c-p"># compose binds the port to loopback:</span>
@@ -242,7 +252,7 @@ docker compose up -d --build
     <div class="note">
       <b>Configuration</b> is read from <code>.env</code> at the repository root.
       The names that matter are <code>PORT</code>, <code>NODE_ENV</code>,
-      <code>DATABASE_PATH</code>, <code>API_KEY</code>, <code>CORS_ORIGIN</code>
+      <code translate="no">DATABASE_PATH</code>, <code>API_KEY</code>, <code>CORS_ORIGIN</code>
       and <code>TELEGRAM_BOT_TOKEN</code>. Keep their values in <code>.env</code> —
       never in a commit.
     </div>
