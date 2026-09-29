@@ -85,6 +85,13 @@ docker-compose.yml
 docker-compose.*.yml
 
 # --- Backups and local scratch ---------------------------------------------
+# backups/ holds offline copies of cms.db and data/uploads. It must be excluded
+# for the same reason `data` is: it is a copy of the collection, so shipping it
+# into the build context would put the live database into an image layer. It is
+# also ~8MB of pure transfer cost on every build, and the Dockerfile only
+# COPYs src/, public/, package.json, init_db.sql and the entrypoint — so nothing
+# legitimate is lost by excluding it.
+backups
 *.bak
 *.sql.gz
 tmp_newscript.js

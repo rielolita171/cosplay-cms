@@ -83,10 +83,34 @@ services:
     # 1000:1000 ownership from its own mount point. Note the consequence: a
     # half-restored pair is the failure mode described above.
     #
-    # SINGLE VOLUME AT /app/data — the database and uploads ship together, always
-    # consistent, backed up and restored as one unit.
+    # SINGLE BIND MOUNT AT ./data — the database and uploads ship together,
+    # always consistent, backed up and restored as one unit.
+    #
+    # THIS WAS A NAMED VOLUME (`cms-data:/app/data`) AND THAT WAS A BUG.
+    # A named volume is a SEPARATE store that Docker creates empty and seeds
+    # from the image; it does not contain this repository's ./data. The
+    # container therefore ran against a stale seed database — 2 test costumes,
+    # 0 uploads — while the real data (86 costumes, 90 images) sat in ./data
+    # on the host, invisible to the app. A bind mount is what makes the
+    # container and a local `node src/server.js` read the SAME files, which is
+    # the entire point of a single-service stack: one dataset, two ways to run
+    # it, and no way for the Docker path to quietly diverge from the host.
+    #
+    # It also removes a real data-loss footgun. With a named volume the data
+    # lives inside Docker's storage, so `docker compose down -v` deletes the
+    # collection with no other copy, and it is invisible to the host's backup
+    # tooling. With a bind mount, ./data is ordinary files in the project
+    # directory, so `cp`, rsync, Time Machine and a git-adjacent backup all
+    # just work, and it is still covered by the `data/` .gitignore rule.
+    #
+    # OWNERSHIP: ./data is 1000:1000, which is the same uid:gid the container
+    # runs as (`user: "1000:1000"` above), so the app can read and WRITE both
+    # the database and the uploads without a permission error. If you ever see
+    # "attempt to write a readonly database", the host directory has changed
+    # hands — chown it back to 1000:1000 rather than loosening the container's
+    # user, which is the defence-in-depth the `user:` line exists to provide.
     volumes:
-      - cms-data:/app/data
+      - ./data:/app/data
 
     # src/server.js:539 — SIGTERM/SIGINT closes the listener and exits 0 in
     # milliseconds; a 9s failsafe exits hard if that hangs. 15s gives that
@@ -115,6 +139,9 @@ services:
     #   No privileged mode, no host networking, no host PID/IPC namespace: the
     #   service needs none of them and each one would widen its blast radius.
 
-volumes:
-  cms-data:
-    name: cosplay-cms-data
+# No top-level `volumes:` block any more. It declared the `cms-data` named
+# volume that the bind mount above replaced; leaving it behind would have
+# compose create an unused network-scoped volume on the next `up`. The
+# cosplay-cms-data volume still exists on disk holding the old test-seed
+# database, and is deliberately left there as a rollback path — remove it with
+# `docker volume rm cosplay-cms-data` once this stack has proven itself.

@@ -3,3 +3,8 @@ data/
 .env
 *.xlsx
 data/uploads/*
+
+# Offline database snapshots (cms.db + uploaded images). These are real copies
+# of the collection, not source, and must never be committed — a DB in git is
+# a permanent, world-readable history of every costume ever entered.
+backups/
