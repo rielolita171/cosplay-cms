@@ -1,0 +1,69 @@
+[Unit]
+# Host-side unit for running the CMS directly on a machine (not in Docker).
+# Docker deployments should keep using docker-compose.yml instead — this file
+# is for a bare `npm start` install.
+Description=Cosplay CMS
+Documentation=https://github.com/rielolita171/cosplay-cms#running-it
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# WorkingDirectory is load-bearing, not cosmetic. The app resolves its upload
+# directory from __dirname, so that is stable regardless of cwd — but a wrong
+# WorkingDirectory still makes `npm` and the .env lookup resolve somewhere
+# unexpected, and this is the documented fix for the "no process supervisor"
+# item. Point it at your checkout.
+WorkingDirectory=/home/natanieldt/scripts/cms-cosplay
+# Node 22+ is required (see "engines" in package.json). Use the ABSOLUTE path
+# from `which node`. Do not rely on a bare `node` here: systemd does not read
+# your shell profile, so an nvm-installed Node — the usual case on a developer
+# box — will not be on PATH for the service, and the unit will fail to start
+# with an unhelpful "status=203/EXEC".
+#
+# This is also why ProtectHome=read-only below is set to "no" by default: an
+# nvm Node lives under $HOME, and ProtectHome=read-only would make it
+# unexecutable. If you install Node system-wide (e.g. /usr/local/bin/node) you
+# can tighten it back to read-only.
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/natanieldt/.nvm/versions/node/v22.23.3/bin
+ExecStart=/home/natanieldt/.nvm/versions/node/v22.23.3/bin/node src/server.js
+
+# Stop with SIGTERM and give the app's own 9s drain failsafe room to run.
+# src/server.js closes the server and exits 0 on SIGTERM; it only force-exits
+# if a client is still holding a keep-alive socket open at 9s. Setting
+# TimeoutStopSec above that window means systemd sends SIGKILL only if the app
+# has genuinely wedged, rather than interrupting a clean shutdown.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+
+# The sqlite3 CLI spawns a short-lived child per query, so the process tree is
+# small and bounded; these are the defaults systemd would apply anyway, stated
+# so the intent is visible.
+KillMode=mixed
+TimeoutStartSec=60
+
+# Hardening. The app needs to write ONLY to its own data directory and read its
+# own checkout; everything else is read-only. NoNewPrivileges is compatible with
+# the sqlite3 child processes.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+# Left permissive deliberately: the Node runtime on a typical developer machine
+# is installed by nvm under $HOME, and ProtectHome=read-only would make that
+# binary unexecutable. The process already has no write access outside
+# ReadWritePaths below. If your Node lives outside $HOME, change this to
+# ProtectHome=read-only.
+ProtectHome=no
+# The one writable path, since ProtectSystem=strict makes the whole filesystem
+# read-only. This must be the same directory the app resolves for uploads, and
+# must exist before start.
+ReadWritePaths=/home/natanieldt/scripts/cms-cosplay/data
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cosplay-cms
+
+[Install]
+WantedBy=multi-user.target

@@ -734,12 +734,20 @@
       text-align: center;
     }
 
-    .loading-overlay.boot .boot-retry {
+    /* The retry affordance is shown ONLY in the transient-failure state.
+     * It used to be keyed off `.boot` alone, which is present during every
+     * boot, so a clickable Retry button was painted over the splash on a
+     * completely normal successful load. `.is-retrying` is added by
+     * showBootRetry() and removed by showBootSplash(). */
+    .loading-overlay.boot.is-retrying .boot-retry {
       display: flex;
     }
 
-    /* While the boot outcome is unknown the spinner is the only thing on screen. */
-    .loading-overlay.boot.is-retrying .spinner {
+    /* While retrying, the retry block is the only thing that should be on
+     * screen: hide the spinner AND the "Loading..." label that follows it,
+     * not just the spinner. */
+    .loading-overlay.boot.is-retrying .spinner,
+    .loading-overlay.boot.is-retrying .loading-label {
       display: none;
     }
 
@@ -8622,15 +8630,27 @@
      * would be silently dead on a grid that rendered before they existed.
      */
     async function init() {
-      bindGridEvents();
-      // Before anything can open: the × buttons are injected into the markup
-      // rather than authored into each dialog, so they exist by the time the
-      // first modal is shown.
-      installModalCloseButtons();
-      // The Add Lens modal's swatch row holds no state, so it is built once here
-      // rather than on every open. The Edit Lens row is rebuilt by
-      // openEditLens() because what is "selected" depends on the row being opened.
-      renderColorSwatches('add-lens-swatches', 'add-lens-color', 'add-lens-color-native', '', '', 'add');
+      // These three run before the splash, outside the data-loading try/catch.
+      // A throw here used to abort init() entirely, leaving the opaque boot
+      // splash up over an empty dashboard with no way back. The splash is the
+      // one thing that must always come down, so bootstrap failures are
+      // contained here and boot continues.
+      try {
+        bindGridEvents();
+        // Before anything can open: the × buttons are injected into the markup
+        // rather than authored into each dialog, so they exist by the time the
+        // first modal is shown.
+        installModalCloseButtons();
+        // The Add Lens modal's swatch row holds no state, so it is built once here
+        // rather than on every open. The Edit Lens row is rebuilt by
+        // openEditLens() because what is "selected" depends on the row being opened.
+        renderColorSwatches('add-lens-swatches', 'add-lens-color', 'add-lens-color-native', '', '', 'add');
+      } catch (err) {
+        // Non-fatal on purpose: these wire up interaction and fill one swatch
+        // row. A failure means some affordance is inert, which the user can see
+        // and report, rather than a page that never loads at all.
+        console.error('Bootstrap step failed; continuing to load data:', err && err.message);
+      }
 
       // The opaque splash is what covers the dashboard during boot. Without it
       // the user would watch five list requests land on an empty grid, one card
@@ -8667,7 +8687,7 @@
        the Retry button appears only for a transient network failure. -->
   <div class="loading-overlay" id="loading-overlay">
     <div class="spinner"></div>
-    <span style="color: var(--text-muted);">Loading...</span>
+    <span class="loading-label" style="color: var(--text-muted);">Loading...</span>
     <div class="boot-retry" id="boot-retry">
       <span class="boot-retry-message" id="boot-retry-message">
         Could not reach the server. Your session has been kept.

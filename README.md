@@ -1,4 +1,4 @@
-<div align="center">
+]633;E;sed -n '1,240p' README.md;7f8706c2-c4bb-40f7-8967-efa194394b4d]633;C]633;E;sed -n '1,161p' README.md;3550221f-99d8-4dc6-97ec-b3703000c526]633;C<div align="center">
 
 # 🧥 Cosplay CMS
 
@@ -46,7 +46,22 @@ lenses. Express and the `sqlite3` CLI on the back end, a single self-contained
 npm install
 npm start          # node src/server.js, listens on PORT (default 4001)
 npm run dev        # node --watch src/server.js
+npm test           # makers, wishlist and lens-expiry suites
 ```
+
+To keep it running across crashes and reboots, use the systemd unit rather
+than a bare `npm start`:
+
+```bash
+sudo cp docker/cosplay-cms.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now cosplay-cms
+```
+
+Edit `WorkingDirectory`, `ReadWritePaths` and `ExecStart` in the unit first —
+the shipped values point at this checkout and an absolute `node` path, and
+systemd does not read your shell profile, so an nvm-installed Node will not
+resolve without one. Container deployments should use
+[`docker-compose.yml`](docker-compose.yml) instead.
 
 Configuration is read from `.env` at the repository root. The names that
 matter are `PORT`, `NODE_ENV`, `DATABASE_PATH`, `API_KEY`, `CORS_ORIGIN` and
@@ -161,115 +176,10 @@ See "What happens to your Telegram chat id on upgrade" in
 
 ## Known issues and deferred fixes
 
-Engineer-facing notes. These are **real, unfixed defects**, not a roadmap and
-not a wishlist. Each one is either a bug that is present in the tree right now
-or an operational hazard that has already caused a mistake. Severities are the
-honest ones, not the flattering ones: `[high]` means it can point a process at
-production data by accident, `[medium]` means a user sees something wrong, and
-`[open]` means a known gap with no code behind it at all.
-
-The `verify-*.sh` harnesses that used to accompany these items are not in this
-repository and are not part of the deployment: they need their own scratch
-database, and nothing checked in here should be able to run one by accident.
-
-### `[medium]` The Retry button is visible from the first frame of every boot
-
-- **Symptom.** On a completely normal, successful boot the user sees a clickable
-  "Retry" button and a "Your session has been kept" message painted over the
-  splash for the entire duration of the profile call plus `loadAllData()`.
-- **Mechanism.** [`public/index.html:737`](public/index.html:737) is
-  `.loading-overlay.boot .boot-retry { display: flex; }`, which keys off the
-  `.boot` class alone. But [`public/index.html:3527`](public/index.html:3527)
-  `showBootSplash()` adds `boot` at the top of *every* boot, not only when a
-  failure occurs. The retry block is therefore visible whenever `.boot` is
-  present, and `.boot` is present during every boot.
-- **Second half of the same bug.** On a genuine transient failure the static
-  "Loading..." label still renders next to the retry block, because
-  [`public/index.html:742`](public/index.html:742) only hides the *spinner*
-  (`.boot.is-retrying .spinner`), not the text label that follows it.
-- **Fix.** Gate the retry block on an actual transient state — e.g.
-  `.boot.is-retrying .boot-retry { display: flex; }` — and hide the loading
-  label in that state as well.
-- **Ref.** [`public/index.html`](public/index.html)
-
-### `[medium]` A throw during boot leaves a permanently blank page
-
-- **Symptom.** If anything throws in the pre-restore bootstrap, the page renders
-  as nothing at all: no dashboard, no error, and no way in. The boot splash is
-  painted over the top and never dismissed.
-- **Mechanism.** In [`public/index.html:8624`](public/index.html:8624) `init()`,
-  the calls to `bindGridEvents()` (`:8625`), `installModalCloseButtons()`
-  (`:8629`) and `renderColorSwatches()` (`:8636`) sit **outside every
-  try/catch** — the first `try` begins at `:8641`, around `loadAllData()` alone
-  — and there is no `window.onerror` / `unhandledrejection` handler anywhere in
-  the inline script. If any of the three throws, `init()` aborts before
-  `showDashboard()` and `showLoading(false)`, so the `#loading-overlay` that
-  `showBootSplash()` raised is never taken down and the user is left staring at
-  an opaque splash over a dashboard whose data never loaded.
-- **Note on severity.** `.screen` no longer sets `display: none`
-  ([`public/index.html:639`](public/index.html:639)), so the markup underneath
-  is technically visible; the boot splash is what actually hides it. There is
-  only one `.screen` now (`#screen-dashboard`,
-  [`public/index.html:1376`](public/index.html:1376)) — the login screen and
-  `showLogin()` were removed with the auth work, so "falls back to
-  `showLogin()`" is no longer available as a remedy.
-- **Realistic trigger.** `renderColorSwatches()` is null-guarded, so
-  `bindGridEvents()` is the likely culprit — it is the largest of the three and
-  the one
-  [`public/index.html:8621`](public/index.html:8621) calls out as attaching the
-  delegated card-action listeners, and the comment at
-  [`public/index.html:3655`](public/index.html:3655) records work done in and
-  around it.
-- **Fix.** Wrap the three pre-splash bootstrap calls in `try`/`catch` that still
-  calls `showDashboard()` and `showLoading(false)`, and/or install a boot-scoped
-  `error` + `unhandledrejection` safety net that removes itself once boot
-  resolves. There is no login form to fall back to, so the splash must always
-  come down.
-- **Ref.** [`public/index.html`](public/index.html)
-
-### `[high]` `DATABASE_URL` is dead config that silently points at production
-
-- **Symptom.** Anyone who "fixes" the database by exporting `DATABASE_URL` is
-  still talking to the production database, with no error and no warning.
-- **Mechanism.** [`src/services/db.js:33`](src/services/db.js:33) resolves
-  `DB_FILE` from
-  `process.env.DATABASE_PATH`, not `DATABASE_URL`. `.env` line 2 sets
-  `DATABASE_URL="file:/data/db/cms.db"`, dotenv loads it, and the code ignores
-  it entirely — so `DB_FILE` falls back to the **cwd-relative**
-  `data/db/cms.db`. The dead name is also set in [`.env.example`](.env.example)
-  and is named in the Docker deployment docs, which makes it look authoritative
-  everywhere it is read.
-- **Consequence.** This trap has already fired once in this project's history: a
-  process configured to point somewhere safe kept writing to production.
-- **Fix.** Either rename/remove the dead `DATABASE_URL` everywhere it appears,
-  or make [`src/services/db.js:33`](src/services/db.js:33) accept it. Do not
-  leave a name that is documented in five places and honoured in none.
-
-### `[medium]` Related: `DB_FILE` is still cwd-relative
-
-- **Symptom.** A server started from the wrong working directory writes to
-  production regardless of `DATABASE_PATH`.
-- **Mechanism.** [`src/services/db.js:33`](src/services/db.js:33) resolves
-  `DB_FILE` as `process.env.DATABASE_PATH || 'data/db/cms.db'` — the fallback is
-  a **cwd-relative literal**, not `__dirname`-anchored. The `queryDb()` helper is
-  still duplicated per route file, but each copy now imports the single
-  `DB_FILE` binding rather than hardcoding its own literal, so there is one place
-  to fix: the fallback.
-- **Already improved.** This item used to be worse and was written when each of
-  six route files hardcoded the string `'data/db/cms.db'` independently, ignoring
-  `DB_FILE` entirely. Those copies now share the binding
-  ([`src/routes/costumes.js:6`](src/routes/costumes.js:6),
-  [`src/routes/lenses.js:6`](src/routes/lenses.js:6),
-  [`src/routes/brands.js:18`](src/routes/brands.js:18),
-  [`src/routes/fandoms.js:15`](src/routes/fandoms.js:15),
-  [`src/routes/props.js:6`](src/routes/props.js:6),
-  [`src/routes/notifications.js:6`](src/routes/notifications.js:6),
-  [`src/routes/makers.js:31`](src/routes/makers.js:31)), which is why the count is seven
-  now and the risk is one edit away rather than seven. The cwd sensitivity
-  itself is **unfixed** — this is how the dev server on `:4139` was once found
-  writing into the production database.
-- **Fix.** Anchor the fallback to `__dirname` (or the container's `/app`) so a
-  wrong working directory cannot silently redirect writes.
+Engineer-facing notes. These are **real, unfixed defects** in the tree right now.
+Severities are the honest ones, not the flattering ones: `[low]` means a comment
+or a cosmetic value is wrong, and `[open]` means a known gap with no code behind
+it at all.
 
 ### `[low]` The z-index comment on the boot splash is wrong
 
@@ -291,21 +201,22 @@ database, and nothing checked in here should be able to run one by accident.
   the base overlay's 9998, and nothing sits between the two values.
 - **Fix.** Collapse to a single value; the distinction was never load-bearing.
 
-### `[open]` Uploads are not isolated between instances
+### `[open]` Uploads are not isolated between instances, and are never collected
 
 - **Symptom.** A dev instance and production share one uploads directory, so
-  development writes production's user data (and vice versa).
+  development writes production's user data (and vice versa). Separately, nothing
+  ever deletes an image that is no longer referenced.
 - **Mechanism.** Uploads always resolve to `data/uploads`; there is no
   `public/uploads/` directory at all. `UPLOAD_DIR` is **dead config** —
   `grep -rn UPLOAD_DIR src/` returns no matches — yet it is still set in
-  [`.env`](.env) and named in [`.env.example`](.env.example), and the dev server
-  on `:4139` is nevertheless *launched with it set*, which is the worst of both
-  worlds. The hardcoded
+  [`.env`](.env) and named in [`.env.example`](.env.example). The hardcoded
   call sites are [`src/middleware/imageUpload.js:7`](src/middleware/imageUpload.js:7),
   [`src/middleware/imageProcessor.js:94`](src/middleware/imageProcessor.js:94),
   [`src/routes/images.js:120`](src/routes/images.js:120),
   [`src/routes/costumes.js:911`](src/routes/costumes.js:911) and the static
-  mount at [`src/server.js:136`](src/server.js:136).
+  mount at [`src/server.js:136`](src/server.js:136). Because `/uploads` is a
+  bare `express.static` mount, an image URL is a permanent bearer reference with
+  no expiry, and there is no GC pass anywhere.
 - **Also unverified.** Two files in `data/uploads` (mtimes 16:35:04 and 16:43:24)
   are of **unconfirmed reference status**. An earlier session quarantined two
   *confirmed* orphans, but whether these two are still referenced by any
@@ -314,92 +225,65 @@ database, and nothing checked in here should be able to run one by accident.
 - **Fix.** Give each instance its own upload root, make `UPLOAD_DIR` real or
   delete it from the docs, and GC unreferenced files on a schedule.
 
-### `[open]` No process supervisor
-
-- **Symptom.** Production does not come back on its own after a crash or a
-  reboot.
-- **Mechanism.** It runs as a bare `npm start`. There is no systemd unit, no
-  `pm2`, no restart policy.
-- **Operational hazard.** A restart must be a manual
-  `kill -TERM <explicit PID>`. **Never** run `pkill -f "src/server.js"` — that
-  pattern matches the dev server on `:4139` as well as production on `:4001`,
-  and will take both down. Read `/proc/<pid>/cwd` to confirm which process you
-  are about to signal.
-- **Fix.** A systemd unit with `Restart=on-failure` and an explicit `WorkingDirectory`.
-
 ### `[open]` No regression test covers the boot splash
 
-- **Symptom.** The flash-on-refresh fix has no automated proof and can silently
+- **Symptom.** The boot-splash behaviour has no automated proof and can silently
   regress.
 - **Mechanism.** No test script asserts on the splash. There is also no headless
-  browser available on
-  the remote host — `node_modules/@puppeteer/` is present but empty — so nothing in
-  the toolchain can assert on first-paint behaviour. The only automated check
-  that does exist is a static parse of the single inline `<script>` block, which
-  proves the script is syntactically valid but says nothing about what it paints.
-- **Fix.** Either add a jsdom-level test that asserts the splash is `display:
-  none` at parse time, or install a real headless browser. Until then, treat the
-  boot splash as manually-verified-only and say so in release notes.
+  browser available on this host — `node_modules/@puppeteer/` is present but
+  empty — so nothing in the toolchain can assert on first-paint behaviour. The
+  only automated check that exists is a static parse of the single inline
+  `<script>` block, which proves the script is syntactically valid but says
+  nothing about what it paints.
+- **Fix.** Install a real headless browser, or add a jsdom-level test that
+  asserts the splash is `display: none` after load and that the retry block is
+  hidden on a successful boot. Until then, treat the boot splash as
+  manually-verified-only and say so in release notes.
 
-> The three items that previously sat here — the login rate-limiter ordering in
-> the external `verify-*.sh` harnesses, the client-side admin gate on the
-> Security tab, and the queued admin user CRUD — are **withdrawn as resolved by
-> the auth removal**, not by a fix. The login limiter and `verify-reset.sh` no
-> longer exist; the Settings routes lost their `verifyToken, authorize('admin')`
-> guard along with every other admin capability, because there are no longer any
-> non-admins; and there is no user CRUD left to build.
+### `[open]` The Docker image has never been built by automation
 
-> **One artefact of that removal is still in the tree.**
-> [`scripts/test_phase5.js`](scripts/test_phase5.js) is **obsolete**: it holds 44
-> references to `/api/auth/*` endpoints that no longer exist anywhere in `src/`,
-> and asserts on `RefreshToken` rows that are no longer in the schema. It cannot
-> be producing a meaningful pass count. It is retained for now only because
-> `package.json` still exposes it as `npm run test:phase5`; that script entry
-> should be dropped or the suite rewritten against the current API.
-> `scripts/test_makers.js`, `test_wishlist.js` and `test_phase4.js` reference
-> only live endpoints and are unaffected.
-
----
+- **Symptom.** None today, because nothing builds it.
+- **Mechanism.** The repository's only workflow publishes the static site in
+  [`docs/`](docs) to GitHub Pages; **nothing in CI builds or tests the image**.
+  [`Dockerfile`](Dockerfile) and [`docker-compose.yml`](docker-compose.yml) were
+  authored without access to a Docker daemon, so the build itself is unverified.
+  [`docker/entrypoint.sh`](docker/entrypoint.sh) is also POSIX `sh` and has never
+  been executed by `docker run`.
+- **Fix.** Build the image in CI, or run it once by hand and record the result in
+  DOCKER.md. Expect the first build to need a small adjustment — most likely apt
+  package availability on the pinned Debian base, not the design.
 
 ## Next
 
-The items above are defects, not a schedule. This is the order I would take them
-in, bundled by what each one unblocks rather than by severity. Nothing here is
-committed work — it is the shape of the next pass, so a reader can judge how
-finished this is.
+The order I would take the items above in, bundled by what each group unblocks
+rather than by severity. None of it is committed work.
 
-**1. Stop the data hazards, because they are the ones that can lose records.**
-Anchor `DB_FILE` to `__dirname` so a wrong working directory cannot redirect
-writes, then delete the `DATABASE_URL` name from `.env`, `.env.example` and the
-Docker docs. These two are one change: the trap is the name, and the fix is to
-stop honouring it in one place. Then give each instance its own upload root and
-add a scheduled pass that deletes unreferenced files — today an image URL is a
-permanent bearer reference with no expiry, and there is no GC at all.
+**1. Isolate uploads, then garbage-collect them.** This is the only remaining
+item that can lose or corrupt someone's data, so it goes first. `imageUpload.js`,
+`imageProcessor.js` and `images.js` each hardcode
+`path.join(__dirname, '../../data/uploads')`, so every instance on the box shares
+one image store. Give each instance its own root, make `UPLOAD_DIR` real or
+delete it, then add a scheduled pass that deletes unreferenced files. Both halves
+belong together: an isolated store with no GC just relocates the unbounded growth.
 
-**2. Make the boot path impossible to get wrong.** Gate the retry block on
-`is-retrying` instead of `boot`, and wrap the three pre-splash calls in
-`init()` so a throw can never leave the opaque splash up. These are one change
-too — both are the same missing state machine. Then install a headless browser
-so the splash has a regression test; without one, that fix is unverifiable and
-will silently rot.
+**2. Prove the boot path.** Install a headless browser and assert that the splash
+is `display: none` after load and that the retry block is hidden on a successful
+boot. Until that exists the boot behaviour is manually verified only, and the
+retry state machine in particular has no automated protection against a future
+edit reverting it.
 
-**3. Retire the obsolete test suite.** `scripts/test_phase5.js` still asserts
-against `/api/auth/*` and cannot pass. Rewrite it against the current API, or
-drop the `test:phase5` entry in `package.json` and stop advertising a suite
-that does not run. Do not leave a green-looking script that is red.
-
-**4. Operational, once the above is stable.** A systemd unit with
-`Restart=on-failure` and an explicit `WorkingDirectory`. This is the one item
-that pays off only when nothing else is on fire, which is exactly why it goes
-last.
+**3. Build the image once and record the result.** Nothing in CI builds it, so
+`Dockerfile` and `docker-compose.yml` are reasoned rather than demonstrated.
+Building it once, fixing whatever breaks, and writing the outcome into DOCKER.md
+is the cheapest way to turn a document full of unverified claims into one with a
+verified spine. Do this last: it is the item that pays off most when the code
+behind it has stopped moving.
 
 **Deliberately not planned.** No authentication, no roles, no multi-user. The
 boundary is the network or a reverse proxy, and the cheapest correct answer to
 "who can reach this" is still an authenticating proxy in front. Adding auth
 back into an app that works on a private LAN would be solving a problem this
 deployment does not have.
-
----
 
 ## Further reading
 

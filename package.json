@@ -6,9 +6,12 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node scripts/test_api.js",
-    "test:phase4": "node scripts/test_phase4.js",
-    "test:phase5": "node scripts/test_phase5.js"
+    "test": "npm run test:makers && npm run test:wishlist && npm run test:lenses",
+    "test:makers": "node scripts/test_makers.js",
+    "test:wishlist": "node scripts/test_wishlist.js",
+    "test:lenses": "node scripts/test_lens_expiry_checker.js",
+    "test:api": "node scripts/test_api.js",
+    "test:phase4": "node scripts/test_phase4.js"
   },
   "keywords": [],
   "author": "",

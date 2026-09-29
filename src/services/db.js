@@ -20,17 +20,26 @@
  * directly, so setting DATABASE_PATH moved the settings surface onto one
  * database while the data routes silently kept reading another.
  *
- * It stays relative on purpose — 'data/db/cms.db', resolved against
- * process.cwd() — so a bare `node src/server.js` from the repo root keeps
- * working exactly as before, and the test suites can still isolate a run by
- * changing the cwd (scripts/test_phase5.js copies the DB into a temp dir and
- * spawns the server from there).
+ * The default is __dirname-anchored, NOT cwd-relative. A bare
+ * `node src/server.js` from the wrong directory used to resolve
+ * 'data/db/cms.db' against process.cwd() and therefore open a different
+ * database — or, worse, silently write to production from what was meant to
+ * be a scratch copy. Anchoring to __dirname makes the path a property of
+ * the checkout rather than of the shell that happened to start it.
+ *
+ * DATABASE_PATH still wins when set, and must be absolute to be useful: a
+ * relative value is resolved against cwd, exactly as before. The test suites
+ * set it explicitly (scripts/test_makers.js, test_wishlist.js,
+ * test_lens_expiry_checker.js), so they are unaffected by this change.
  */
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const DB_FILE = process.env.DATABASE_PATH || 'data/db/cms.db';
+const DEFAULT_DB_FILE = path.resolve(__dirname, '../../data/db/cms.db');
+const DB_FILE = process.env.DATABASE_PATH
+  ? path.resolve(process.env.DATABASE_PATH)
+  : DEFAULT_DB_FILE;
 
 // The sqlite3 CLI will not create the file's parent directory, so a container
 // starting against a mounted-but-empty volume would fail on the very first

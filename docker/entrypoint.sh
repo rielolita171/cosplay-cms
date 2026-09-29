@@ -22,11 +22,10 @@ set -e
 APP_DIR="/app"
 INIT_SQL="${APP_DIR}/init_db.sql"
 
-# Absolute path, resolved from DATABASE_PATH. The app's own default is the
-# RELATIVE 'data/db/cms.db' (deliberately cwd-sensitive so the test suites can
-# isolate a run by changing cwd). Because WORKDIR is /app, the relative form
-# resolves to exactly this absolute path — so using it here can never disagree
-# with what the app is about to open.
+# Absolute path, resolved from DATABASE_PATH, defaulting to the same location
+# the app itself resolves: src/services/db.js anchors its default to __dirname,
+# which for /app/src/services/db.js is exactly ${APP_DIR}/data/db/cms.db. The two
+# therefore agree by construction — if you change one, change both.
 DB_FILE="${DATABASE_PATH:-${APP_DIR}/data/db/cms.db}"
 
 # NOT configurable: src/middleware/imageUpload.js resolves the upload dir from
