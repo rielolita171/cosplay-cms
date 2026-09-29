@@ -36,7 +36,14 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-img { max-width: 100%; display: block; }
+/* `height: auto` is load-bearing, not cosmetic. The `width`/`height`
+   attributes on each <img> exist so the browser can reserve the box before
+   the PNG decodes — but they are also the *presentational* height. Without
+   this override, a width-constrained image keeps that attribute height and
+   renders squashed: the screenshots came out with vertically compressed,
+   unreadable text. Setting height:auto lets the intrinsic aspect ratio win,
+   which is the whole point of declaring the dimensions. */
+img { max-width: 100%; height: auto; display: block; }
 a { color: inherit; text-decoration: none; }
 
 code {
