@@ -1,16 +1,37 @@
-# Cosplay CMS
+<div align="center">
 
-A private inventory system for cosplay props, costumes and contact lenses.
+# 🧥 Cosplay CMS
 
-**This deployment has no authentication.** There is no login, no password, no
-role ladder and no session token. Anyone who can reach the published port has
-full read *and* write access to every record. That is deliberate — it is a
-single-user box on a private network, and the boundary is the network or a
-reverse proxy, not the application. See "Security model" below, and do not
-publish this port to the internet.
+### Inventory for costumes, props & contact lenses
 
-Express + the `sqlite3` CLI on the back end, a single self-contained
+[![Live site](https://img.shields.io/badge/Website-live-8b5cf6?style=flat-square&logo=github&logoColor=white)](https://rielolita171.github.io/cosplay-cms/)
+[![Pages](https://img.shields.io/badge/GitHub%20Pages-passing-2ea44f?style=flat-square&logo=github&logoColor=white)](https://rielolita171.github.io/cosplay-cms/)
+[![Node](https://img.shields.io/badge/Node-22-5fa04e?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![SQLite](https://img.shields.io/badge/SQLite-CLI-003b57?style=flat-square&logo=sqlite&logoColor=white)](https://sqlite.org/)
+[![License](https://img.shields.io/badge/License-ISC-blue?style=flat-square)](#license)
+[![No build step](https://img.shields.io/badge/build-none%20required-6f42c1?style=flat-square)](#running-it)
+
+[**Visit the project site →**](https://rielolita171.github.io/cosplay-cms/)
+
+</div>
+
+---
+
+A private, single-user inventory system for cosplay props, costumes and contact
+lenses. Express and the `sqlite3` CLI on the back end, a single self-contained
 `public/index.html` on the front end. No build step, no bundler, no CDN.
+
+<p align="center">
+  <em>Live screenshots of a running instance are on the project site, not pasted
+  here — the repository stays lean and nothing in it needs to be re-encoded.</em>
+</p>
+
+> ⚠️ **This deployment has no authentication.** There is no login, no password,
+> no role ladder and no session token. Anyone who can reach the published port
+> has full read *and* write access to every record. That is deliberate — it is a
+> single-user box on a private network, and the boundary is the network or a
+> reverse proxy, not the application. See "Security model" below, and do not
+> publish this port to the internet.
 
 > **There is no in-process SQLite binding.** Every query is a short-lived
 > `spawn('sqlite3', [DB_FILE])` child process fed SQL on stdin, so the
@@ -391,6 +412,11 @@ documented separately:
 - [`workflows/n8n_contact_lens_expiry_alert.json`](workflows/n8n_contact_lens_expiry_alert.json)
   — the inbound n8n workflow that drives the lens-expiry alerts.
 - [`docs/`](docs) — the GitHub Pages profile site, published from this repository.
+
+## License
+
+ISC, as declared in [`package.json`](package.json). The full text is in
+[`LICENSE`](LICENSE).
 
 ## Security note
 
