@@ -62,29 +62,21 @@ simply ignored; you can delete it.
 
 ## Security model
 
-There is no authentication in this build. Not "disabled by default" — removed.
-Concretely, the following are gone from the tree and return `404`:
+The warning at the top of this file is the short version. In detail: the
+authentication system was **removed**, not disabled — the entire `/api/auth/*`
+surface is gone and returns `404`, along with the `User` account columns, the
+`RefreshToken` / `ConsumedToken` / `PasswordResetToken` tables, the
+`viewer`/`user`/`curator`/`admin` ladder, the Telegram 2FA gate, the Users tab
+and the login screen. The frontend boots straight into the dashboard.
 
-| Removed | What it used to do |
-|---|---|
-| `POST /api/auth/register` | Create a `user` account |
-| `POST /api/auth/login` | Exchange credentials for a JWT |
-| `GET /api/auth/profile` | Report the signed-in user and their role |
-| `POST /api/auth/refresh` | Mint a replacement access token |
-| `GET/PATCH /api/auth/users*` | List accounts, change a role |
-| `POST /api/auth/users/:id/password-reset` | Mint a one-time reset file |
-| `POST /api/auth/password-reset*` | Redeem a reset token |
-
-Along with them: the `"User"` table's account columns, the `RefreshToken`,
-`ConsumedToken` and `PasswordResetToken` tables, the `viewer`/`user`/`curator`/
-`admin` ladder, the Telegram 2FA gate, the Users tab, and the login screen. The
-frontend boots straight into the dashboard.
-
-The machine-readable check, if you want to confirm this on a running instance:
+Confirm both facts on a running instance:
 
 ```bash
 curl -s http://localhost:4001/api/version | grep -A2 authentication
 # "required": false, "scheme": "none"
+
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:4001/api/auth/login
+# 404 — gone, not merely disabled
 ```
 
 ### What is still enforced
@@ -111,7 +103,7 @@ Being unauthenticated is not the same as undefended. What remains:
 - **`/uploads` is world-readable to anyone who can reach the port.** The
   per-image access middleware (`src/middleware/uploadAccess.js`) was deleted
   along with the role system, and `/uploads` is now a bare `express.static`
-  mount ([`src/server.js:132-140`](src/server.js:132)). In earlier versions a
+  mount ([`src/server.js:136-144`](src/server.js:136)). In earlier versions a
   viewer-tier account could not fetch an image directly. **This is a genuine
   regression in per-image access control**, accepted as part of removing auth —
   but it is the one to be aware of, because an image URL is now a bearer
@@ -144,14 +136,6 @@ migrated once at boot ([`src/services/db.js:164-200`](src/services/db.js:164)).
 See "What happens to your Telegram chat id on upgrade" in
 [`DOCKER.md`](DOCKER.md) for the verification and repair SQL.
 
-### There is no account to create
-
-If you are looking for a bootstrap step, there isn't one — and that is the point.
-The old "register, then promote yourself to admin by hand-editing the
-`"User"` table" dance existed only to work around the role ladder. There is no
-`create-admin` script because there is nothing to administer. Start the server
-and open the dashboard.
-
 
 
 ## Known issues and deferred fixes
@@ -163,27 +147,24 @@ honest ones, not the flattering ones: `[high]` means it can point a process at
 production data by accident, `[medium]` means a user sees something wrong, and
 `[open]` means a known gap with no code behind it at all.
 
-A note on the verification harnesses, since several items below reference them:
-`verify5a.sh`, `verify5b.sh`, `verify-cors.sh` and `verify-reset.sh` live
-**outside the repository**, in `/home/natanieldt/dev4139` and
-`/home/natanieldt/dev4140`. That is deliberate — they need their own scratch
-database, and nothing in this repository should be able to run them by accident
-(see item 9).
+The `verify-*.sh` harnesses that used to accompany these items are not in this
+repository and are not part of the deployment: they need their own scratch
+database, and nothing checked in here should be able to run one by accident.
 
 ### `[medium]` The Retry button is visible from the first frame of every boot
 
 - **Symptom.** On a completely normal, successful boot the user sees a clickable
   "Retry" button and a "Your session has been kept" message painted over the
   splash for the entire duration of the profile call plus `loadAllData()`.
-- **Mechanism.** [`public/index.html:548`](public/index.html:548) is
+- **Mechanism.** [`public/index.html:737`](public/index.html:737) is
   `.loading-overlay.boot .boot-retry { display: flex; }`, which keys off the
-  `.boot` class alone. But [`public/index.html:3126`](public/index.html:3126)
-  `showBootSplash()` adds `boot` at the top of *every* `restoreSession()`, not
-  only when a failure occurs. The retry block is therefore visible whenever
-  `.boot` is present, and `.boot` is present during every boot.
+  `.boot` class alone. But [`public/index.html:3527`](public/index.html:3527)
+  `showBootSplash()` adds `boot` at the top of *every* boot, not only when a
+  failure occurs. The retry block is therefore visible whenever `.boot` is
+  present, and `.boot` is present during every boot.
 - **Second half of the same bug.** On a genuine transient failure the static
   "Loading..." label still renders next to the retry block, because
-  [`public/index.html:553`](public/index.html:553) only hides the *spinner*
+  [`public/index.html:742`](public/index.html:742) only hides the *spinner*
   (`.boot.is-retrying .spinner`), not the text label that follows it.
 - **Fix.** Gate the retry block on an actual transient state — e.g.
   `.boot.is-retrying .boot-retry { display: flex; }` — and hide the loading
@@ -193,72 +174,90 @@ database, and nothing in this repository should be able to run them by accident
 ### `[medium]` A throw during boot leaves a permanently blank page
 
 - **Symptom.** If anything throws in the pre-restore bootstrap, the page renders
-  as nothing at all: no login form, no dashboard, no error. There is no way in.
-- **Mechanism.** In [`public/index.html:7073`](public/index.html:7073) `init()`,
-  the calls to `bindGridEvents()` (`:7074`) and `renderColorSwatches()`
-  (`:7078`) sit **outside every try/catch**, and there is no
-  `window.onerror` / `unhandledrejection` handler anywhere in the inline script.
-  The boot-splash change deleted the old unconditional `showLoading(false)` at
-  the end of `init()`, so if either call throws, all four `.screen` sections stay
-  at `display: none` — including [`public/index.html:1149`](public/index.html:1149)
-  `#screen-login`, which now ships hidden by default.
-- **Regression.** Before this change the same throw at least left a clickable
-  login form on screen. The blank page is new.
+  as nothing at all: no dashboard, no error, and no way in. The boot splash is
+  painted over the top and never dismissed.
+- **Mechanism.** In [`public/index.html:8624`](public/index.html:8624) `init()`,
+  the calls to `bindGridEvents()` (`:8625`), `installModalCloseButtons()`
+  (`:8629`) and `renderColorSwatches()` (`:8636`) sit **outside every
+  try/catch** — the first `try` begins at `:8641`, around `loadAllData()` alone
+  — and there is no `window.onerror` / `unhandledrejection` handler anywhere in
+  the inline script. If any of the three throws, `init()` aborts before
+  `showDashboard()` and `showLoading(false)`, so the `#loading-overlay` that
+  `showBootSplash()` raised is never taken down and the user is left staring at
+  an opaque splash over a dashboard whose data never loaded.
+- **Note on severity.** `.screen` no longer sets `display: none`
+  ([`public/index.html:639`](public/index.html:639)), so the markup underneath
+  is technically visible; the boot splash is what actually hides it. There is
+  only one `.screen` now (`#screen-dashboard`,
+  [`public/index.html:1376`](public/index.html:1376)) — the login screen and
+  `showLogin()` were removed with the auth work, so "falls back to
+  `showLogin()`" is no longer available as a remedy.
 - **Realistic trigger.** `renderColorSwatches()` is null-guarded, so
-  `bindGridEvents()` is the likely culprit — and the comment at
-  [`public/index.html:3622`](public/index.html:3622) records that
-  `bindGridEvents()` has previously thrown a `ReferenceError` on load, which
-  killed the restore branch outright.
-- **Fix.** Wrap the pre-restore bootstrap in `try`/`catch` that falls back to
-  `showLogin()`, and/or install a boot-scoped `error` + `unhandledrejection`
-  safety net that removes itself once boot resolves.
+  `bindGridEvents()` is the likely culprit — it is the largest of the three and
+  the one
+  [`public/index.html:8621`](public/index.html:8621) calls out as attaching the
+  delegated card-action listeners, and the comment at
+  [`public/index.html:3655`](public/index.html:3655) records work done in and
+  around it.
+- **Fix.** Wrap the three pre-splash bootstrap calls in `try`/`catch` that still
+  calls `showDashboard()` and `showLoading(false)`, and/or install a boot-scoped
+  `error` + `unhandledrejection` safety net that removes itself once boot
+  resolves. There is no login form to fall back to, so the splash must always
+  come down.
 - **Ref.** [`public/index.html`](public/index.html)
 
 ### `[high]` `DATABASE_URL` is dead config that silently points at production
 
 - **Symptom.** Anyone who "fixes" the database by exporting `DATABASE_URL` is
   still talking to the production database, with no error and no warning.
-- **Mechanism.** [`src/services/db.js:18`](src/services/db.js:18) reads
+- **Mechanism.** [`src/services/db.js:33`](src/services/db.js:33) resolves
+  `DB_FILE` from
   `process.env.DATABASE_PATH`, not `DATABASE_URL`. `.env` line 2 sets
   `DATABASE_URL="file:/data/db/cms.db"`, dotenv loads it, and the code ignores
   it entirely — so `DB_FILE` falls back to the **cwd-relative**
-  `data/db/cms.db`. The dead name also appears in
-  [`prisma/schema.prisma:10`](prisma/schema.prisma:10),
-  [`verify.js:38`](verify.js:38), and five `phase-1-setup/*.md` documents,
-  which makes it look authoritative everywhere it is read.
+  `data/db/cms.db`. The dead name is also set in [`.env.example`](.env.example)
+  and is named in the Docker deployment docs, which makes it look authoritative
+  everywhere it is read.
 - **Consequence.** This trap has already fired once in this project's history: a
   process configured to point somewhere safe kept writing to production.
 - **Fix.** Either rename/remove the dead `DATABASE_URL` everywhere it appears,
-  or make [`src/services/db.js:18`](src/services/db.js:18) accept it. Do not
+  or make [`src/services/db.js:33`](src/services/db.js:33) accept it. Do not
   leave a name that is documented in five places and honoured in none.
 
-### `[medium]` Related: database resolution is cwd-relative in six route files
+### `[medium]` Related: `DB_FILE` is still cwd-relative
 
 - **Symptom.** A server started from the wrong working directory writes to
   production regardless of `DATABASE_PATH`.
-- **Mechanism.** The `queryDb()` helper is duplicated per route file, and each
-  copy hardcodes the literal `'data/db/cms.db'` as a `spawn('sqlite3', [...])`
-  argument — it never consults `DB_FILE` or `process.env` at all:
-  [`src/routes/costumes.js:8`](src/routes/costumes.js:8),
-  [`src/routes/lenses.js:24`](src/routes/lenses.js:24),
-  [`src/routes/brands.js:21`](src/routes/brands.js:21),
-  [`src/routes/fandoms.js:18`](src/routes/fandoms.js:18),
-  [`src/routes/props.js:18`](src/routes/props.js:18) and
-  [`src/routes/notifications.js:8`](src/routes/notifications.js:8).
-  Only [`src/services/db.js:25`](src/services/db.js:25) uses the resolved
-  `DB_FILE`. This is exactly how the dev server on `:4139` was once found
+- **Mechanism.** [`src/services/db.js:33`](src/services/db.js:33) resolves
+  `DB_FILE` as `process.env.DATABASE_PATH || 'data/db/cms.db'` — the fallback is
+  a **cwd-relative literal**, not `__dirname`-anchored. The `queryDb()` helper is
+  still duplicated per route file, but each copy now imports the single
+  `DB_FILE` binding rather than hardcoding its own literal, so there is one place
+  to fix: the fallback.
+- **Already improved.** This item used to be worse and was written when each of
+  six route files hardcoded the string `'data/db/cms.db'` independently, ignoring
+  `DB_FILE` entirely. Those copies now share the binding
+  ([`src/routes/costumes.js:6`](src/routes/costumes.js:6),
+  [`src/routes/lenses.js:6`](src/routes/lenses.js:6),
+  [`src/routes/brands.js:18`](src/routes/brands.js:18),
+  [`src/routes/fandoms.js:15`](src/routes/fandoms.js:15),
+  [`src/routes/props.js:6`](src/routes/props.js:6),
+  [`src/routes/notifications.js:6`](src/routes/notifications.js:6),
+  [`src/routes/makers.js:31`](src/routes/makers.js:31)), which is why the count is seven
+  now and the risk is one edit away rather than seven. The cwd sensitivity
+  itself is **unfixed** — this is how the dev server on `:4139` was once found
   writing into the production database.
-- **Fix.** Resolve the database path from a single source (e.g. from `__dirname`)
-  and honour `DATABASE_PATH` in every copy.
+- **Fix.** Anchor the fallback to `__dirname` (or the container's `/app`) so a
+  wrong working directory cannot silently redirect writes.
 
 ### `[low]` The z-index comment on the boot splash is wrong
 
 - **Symptom.** None. This is a comment that misdescribes the code beneath it.
-- **Mechanism.** [`public/index.html:529`](public/index.html:529) says the boot
+- **Mechanism.** [`public/index.html:718`](public/index.html:718) says the boot
   overlay is "the SAME `#loading-overlay` element (the same z-index and
   spinner)". The z-index is not the same: it is `9997` at
-  [`public/index.html:536`](public/index.html:536) against the base overlay's
-  `9998` at [`public/index.html:571`](public/index.html:571).
+  [`public/index.html:725`](public/index.html:725) against the base overlay's
+  `9998` at [`public/index.html:760`](public/index.html:760).
 - **Blast radius.** Effectively zero. Only the toast at
   `z-index: 9999` outranks the boot splash, which is the correct ordering.
 - **Fix.** Correct the comment, or unify the two values and then the comment is
@@ -277,15 +276,15 @@ database, and nothing in this repository should be able to run them by accident
   development writes production's user data (and vice versa).
 - **Mechanism.** Uploads always resolve to `data/uploads`; there is no
   `public/uploads/` directory at all. `UPLOAD_DIR` is **dead config** —
-  `grep -rn UPLOAD_DIR src/` returns no matches — yet it is documented in
-  `phase-1-setup/03-environment-config.md:49` and
-  `phase-1-setup/README.md:116`, and the dev server on `:4139` is nevertheless
-  *launched with it set*, which is the worst of both worlds. The hardcoded
+  `grep -rn UPLOAD_DIR src/` returns no matches — yet it is still set in
+  [`.env`](.env) and named in [`.env.example`](.env.example), and the dev server
+  on `:4139` is nevertheless *launched with it set*, which is the worst of both
+  worlds. The hardcoded
   call sites are [`src/middleware/imageUpload.js:7`](src/middleware/imageUpload.js:7),
-  [`src/middleware/imageProcessor.js:57`](src/middleware/imageProcessor.js:57),
+  [`src/middleware/imageProcessor.js:94`](src/middleware/imageProcessor.js:94),
   [`src/routes/images.js:120`](src/routes/images.js:120),
-  [`src/routes/costumes.js:710`](src/routes/costumes.js:710) and the static
-  mount at [`src/server.js:146`](src/server.js:146).
+  [`src/routes/costumes.js:911`](src/routes/costumes.js:911) and the static
+  mount at [`src/server.js:136`](src/server.js:136).
 - **Also unverified.** Two files in `data/uploads` (mtimes 16:35:04 and 16:43:24)
   are of **unconfirmed reference status**. An earlier session quarantined two
   *confirmed* orphans, but whether these two are still referenced by any
@@ -307,31 +306,13 @@ database, and nothing in this repository should be able to run them by accident
   are about to signal.
 - **Fix.** A systemd unit with `Restart=on-failure` and an explicit `WorkingDirectory`.
 
-### `[open]` The phase-5 suite can write to production
-
-- **Symptom.** Running the tests can mutate the live database.
-- **Mechanism.** It is known to insert `RefreshToken` rows. It is a
-  black-box HTTP suite and has no isolation of its own.
-- **Rule.** Only run it with the working directory set to a scratch directory
-  **outside the project tree**, using `DATABASE_PATH` — never `DATABASE_URL`
-  (see item 3). The harness self-asserts a sha256 of the real database before
-  and after, so a silent write is detectable, but detecting it is not the same as
-  preventing it.
-- **Recorded result.** `npm run test:phase5` → **109 passed / 0 failed / 2
-  skipped**. The two skips are pre-existing and data-driven, not regressions:
-  the lens list field contract (the scratch database contains no lenses) and
-  `GET /api/lenses/:id` (no fixture id available). The production database
-  contains no lenses either. Any figure claiming 110/110 is wrong; 109/0/2 is
-  the true baseline.
-- **Ref.** [`scripts/test_phase5.js`](scripts/test_phase5.js)
-
 ### `[open]` No regression test covers the boot splash
 
 - **Symptom.** The flash-on-refresh fix has no automated proof and can silently
   regress.
-- **Mechanism.** [`scripts/test_phase5.js`](scripts/test_phase5.js) contains no
-  assertion on the splash. There is also no headless browser available on the
-  remote host — `node_modules/@puppeteer/` is present but empty — so nothing in
+- **Mechanism.** No test script asserts on the splash. There is also no headless
+  browser available on
+  the remote host — `node_modules/@puppeteer/` is present but empty — so nothing in
   the toolchain can assert on first-paint behaviour. The only automated check
   that does exist is a static parse of the single inline `<script>` block, which
   proves the script is syntactically valid but says nothing about what it paints.
@@ -347,24 +328,74 @@ database, and nothing in this repository should be able to run them by accident
 > guard along with every other admin capability, because there are no longer any
 > non-admins; and there is no user CRUD left to build.
 
+> **One artefact of that removal is still in the tree.**
+> [`scripts/test_phase5.js`](scripts/test_phase5.js) is **obsolete**: it holds 44
+> references to `/api/auth/*` endpoints that no longer exist anywhere in `src/`,
+> and asserts on `RefreshToken` rows that are no longer in the schema. It cannot
+> be producing a meaningful pass count. It is retained for now only because
+> `package.json` still exposes it as `npm run test:phase5`; that script entry
+> should be dropped or the suite rewritten against the current API.
+> `scripts/test_makers.js`, `test_wishlist.js` and `test_phase4.js` reference
+> only live endpoints and are unaffected.
+
+---
+
+## Next
+
+The items above are defects, not a schedule. This is the order I would take them
+in, bundled by what each one unblocks rather than by severity. Nothing here is
+committed work — it is the shape of the next pass, so a reader can judge how
+finished this is.
+
+**1. Stop the data hazards, because they are the ones that can lose records.**
+Anchor `DB_FILE` to `__dirname` so a wrong working directory cannot redirect
+writes, then delete the `DATABASE_URL` name from `.env`, `.env.example` and the
+Docker docs. These two are one change: the trap is the name, and the fix is to
+stop honouring it in one place. Then give each instance its own upload root and
+add a scheduled pass that deletes unreferenced files — today an image URL is a
+permanent bearer reference with no expiry, and there is no GC at all.
+
+**2. Make the boot path impossible to get wrong.** Gate the retry block on
+`is-retrying` instead of `boot`, and wrap the three pre-splash calls in
+`init()` so a throw can never leave the opaque splash up. These are one change
+too — both are the same missing state machine. Then install a headless browser
+so the splash has a regression test; without one, that fix is unverifiable and
+will silently rot.
+
+**3. Retire the obsolete test suite.** `scripts/test_phase5.js` still asserts
+against `/api/auth/*` and cannot pass. Rewrite it against the current API, or
+drop the `test:phase5` entry in `package.json` and stop advertising a suite
+that does not run. Do not leave a green-looking script that is red.
+
+**4. Operational, once the above is stable.** A systemd unit with
+`Restart=on-failure` and an explicit `WorkingDirectory`. This is the one item
+that pays off only when nothing else is on fire, which is exactly why it goes
+last.
+
+**Deliberately not planned.** No authentication, no roles, no multi-user. The
+boundary is the network or a reverse proxy, and the cheapest correct answer to
+"who can reach this" is still an authenticating proxy in front. Adding auth
+back into an app that works on a private LAN would be solving a problem this
+deployment does not have.
+
 ---
 
 ## Further reading
 
-This file is deliberately short. The long-form documentation already in the
-repository is not duplicated here:
+This file covers the application. Container deployment — the image, the volume
+layout, the boot sequence, the verification SQL and the failure modes — is
+documented separately:
 
-- [`cosplay_cms_phase_by_phase_implementation_server_setup_guide.md`](cosplay_cms_phase_by_phase_implementation_server_setup_guide.md)
-  — the phase-by-phase server setup guide.
-- [`HANDOFF-viewer-role-and-costume-gallery.md`](HANDOFF-viewer-role-and-costume-gallery.md)
-  — the design and verification record for the viewer tier and the costume
-  gallery, including the per-assertion test results.
-- [`phase-5-setup/README.md`](phase-5-setup/README.md) — the frontend SPA.
+- [`DOCKER.md`](DOCKER.md) — the deployment and operations reference.
+- [`docker-compose.yml`](docker-compose.yml) — the deployment of record.
+- [`workflows/n8n_contact_lens_expiry_alert.json`](workflows/n8n_contact_lens_expiry_alert.json)
+  — the inbound n8n workflow that drives the lens-expiry alerts.
+- [`docs/`](docs) — the GitHub Pages profile site, published from this repository.
 
 ## Security note
 
 Nothing in this repository should ever contain a real API key, bot token or
-Telegram chat id — not in this file, not in the phase guides, not in an example
+Telegram chat id — not in this file, not in DOCKER.md, not in an example
 that was "copied from a running system". Live values belong in `.env` (reference
 them by name) and, for the chat id, in the `TelegramChat` table. Committing a
 credential is the mistake this file exists to help avoid.

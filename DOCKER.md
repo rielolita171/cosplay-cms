@@ -338,10 +338,10 @@ be killed ([`Dockerfile:125-130`](Dockerfile:125)).
 
 The application side is already correct: `SIGTERM`/`SIGINT` handlers call
 `server.close()` and exit 0 in milliseconds
-([`src/server.js:536-559`](src/server.js:536),
-[`src/server.js:561-562`](src/server.js:561)), with a 9-second failsafe that
+([`src/server.js:487-517`](src/server.js:487),
+[`src/server.js:518-519`](src/server.js:518)), with a 9-second failsafe that
 exits hard if a keep-alive socket holds the close open
-([`src/server.js:532`](src/server.js:532)). Compose allows 15 seconds
+([`src/server.js:484`](src/server.js:484)). Compose allows 15 seconds
 ([`docker-compose.yml:92`](docker-compose.yml:92)) so the failsafe has real
 headroom and a normal stop always completes on the application's own clean exit.
 
@@ -799,14 +799,14 @@ tells you nothing about the database. Get the 200 first, then investigate.
 | **Container exits immediately, restart loop** | The `sqlite3` driver is missing or the database directory is not writable by UID 1000. | Check the logs: `sqlite3 driver not found` means the image is damaged; `unable to open database file` or `EACCES` means the volume is not owned by 1000:1000. Fix with `docker compose exec -u 0 cms chown -R 1000:1000 /app/data` then `docker compose restart`. |
 | **API key rejected with 403 even though you set it** | Placeholder rejection, or a value that got truncated. | A key containing `your_`, `here` or `$(` is refused unconditionally ([`src/middleware/apiKeyAuth.js:28-30`](src/middleware/apiKeyAuth.js:28)). Note the value is `.trim()`ed on both sides, so a trailing newline is harmless but a leading space inside quotes is not. Compare byte for byte: `docker compose exec cms sh -c 'echo -n "$API_KEY" \| wc -c'`. |
 | **Anyone on the network can edit your data** | There is no authentication. This is the deployment model, not a bug (section 8). | Constrain the exposure: bind the port to `127.0.0.1`, or put an authenticating reverse proxy in front, or keep the service on a trusted LAN. |
-| **`database is locked` / `SQLITE_BUSY` under concurrent writes** | **Expected behaviour, and it is a real limitation.** Each query is a separate `sqlite3` process, and the application sets **no global `busy_timeout`** — the only `PRAGMA busy_timeout = 5000` in the codebase is inside one specific multi-statement transaction at [`src/services/db.js:578-593`](src/services/db.js:578). Ordinary single-statement writes therefore take a lock or fail immediately. | Under normal single-user use you will not hit it. If you do, it means genuinely concurrent writes. The honest fix is a code change — a global busy timeout in [`src/services/db.js:44-60`](src/services/db.js:44), or moving to a real in-process driver — and both are out of scope for this deployment guide. Do not "fix" it with SQLite pragmas at runtime; there is no supported hook for that here. |
+| **`database is locked` / `SQLITE_BUSY` under concurrent writes** | **Expected behaviour, and it is a real limitation.** Each query is a separate `sqlite3` process, and the application sets **no `busy_timeout` at all** — the one that used to live in a multi-statement transaction in [`src/services/db.js`](src/services/db.js) was removed along with the auth work, so no `PRAGMA busy_timeout` remains anywhere in `src/`. Ordinary single-statement writes therefore take a lock or fail immediately. | Under normal single-user use you will not hit it. If you do, it means genuinely concurrent writes. The honest fix is a code change — a global busy timeout in [`src/services/db.js`](src/services/db.js), or moving to a real in-process driver — and both are out of scope for this deployment guide. Do not "fix" it with SQLite pragmas at runtime; there is no supported hook for that here. |
 | **Everything restarted when you ran `docker compose down`** | `down` stops *and removes* containers. That is what it is for. | `docker compose up -d`. The **data** is unaffected — `down` does not touch the volume unless you pass `-v`. See section 6. |
 | **Data appears to have vanished after a rebuild** | You ran `docker compose down -v`, or removed the volume by hand. | Restore from a backup (section 5.2). If you have no backup, the data is gone — the image never contained it. |
 | **Wrong port — `curl: connection refused`, or n8n cannot reach the CMS** | Host/container port confusion. The **container** port is always `4001`; only the **host** side is remapped by `CMS_PORT` ([`docker-compose.yml:32`](docker-compose.yml:32)). | Use `http://localhost:${CMS_PORT:-4001}` from the host, and `http://cms:4001` from another container. Never change `PORT` to move a host port — it silently breaks the n8n workflow. |
 | **Browser CORS errors, or the SPA loads but no data** | UI and API on different origins. | Set `CORS_ORIGIN` in `.env` to a comma-separated list of **exact** origins and recreate the container. Remember the database `ServerSetting` row **overrides** the env var ([`src/services/settings.js:13-15`](src/services/settings.js:13)) — the boot banner says which source won. |
 | **Uploads 404 but rows exist** | The database restored but the uploads did not. The `imageUrls` column holds filenames that resolve inside `data/uploads`. | Restore the **whole** volume (section 5.2), not just the database. This is the failure mode that the single-volume design exists to prevent. |
 | **Rate limited (429) when testing repeatedly** | The in-memory limiter in [`src/middleware/rateLimit.js:29-41`](src/middleware/rateLimit.js:29) is a fixed window, per process, and it does not survive a restart. | Wait out the window. The `Retry-After` and `RateLimit-*` response headers say when. |
-| **`docker compose ps` shows `Exited (137)`** | SIGKILL — graceful shutdown exceeded the 15s grace period ([`docker-compose.yml:92`](docker-compose.yml:92)). | Normally this means a client held a keep-alive socket open past the app's own 9s failsafe ([`src/server.js:532`](src/server.js:532)). Rare; check the logs for the `failsafe` message. |
+| **`docker compose ps` shows `Exited (137)`** | SIGKILL — graceful shutdown exceeded the 15s grace period ([`docker-compose.yml:92`](docker-compose.yml:92)). | Normally this means a client held a keep-alive socket open past the app's own 9s failsafe ([`src/server.js:484`](src/server.js:484)). Rare; check the logs for the `failsafe` message. |
 | **Build fails with `npm ci` errors** | `package.json` and `package-lock.json` out of sync, or the lockfile was excluded. | The lockfile must be in the build context — the `deps` stage installs strictly from it ([`Dockerfile:45-49`](Dockerfile:45)). Restore it from git and rebuild. |
 
 ---
@@ -934,9 +934,10 @@ contract [`public/index.html`](public/index.html) depends on).
 This section exists because an operator following a wrong command is worse than
 an operator missing one. Here is exactly what has **not** been proven.
 
-**The image has never been built by automation.** The repository contains no CI
-workflow at all — [`.github/`](.github) holds only
-`agents/qa-tester.agent.md`. The [`Dockerfile`](Dockerfile) and
+**The image has never been built by automation.** The repository's only workflow,
+[`.github/workflows/pages.yml`](.github/workflows/pages.yml), publishes the
+static site in [`docs/`](docs) to GitHub Pages; **nothing in CI builds or tests
+the image.** The [`Dockerfile`](Dockerfile) and
 [`docker-compose.yml`](docker-compose.yml) were authored by an agent that had no
 access to a Docker daemon, so **the build itself is unverified**: it has not been
 run end to end, and neither has any of the commands in this document. Expect to
@@ -959,10 +960,9 @@ not demonstrated**. The first real image upload is the true test. `sharp` and
 `xlsx` are the two dependencies where native/wasm resolution is most likely to
 surprise.
 
-**The docker-compose sketch in the old setup guide is wrong. Ignore it.** The
-YAML at
-[`cosplay_cms_phase_by_phase_implementation_server_setup_guide.md:408-432`](cosplay_cms_phase_by_phase_implementation_server_setup_guide.md:408)
-is **not** a valid deployment for this codebase, in four separate ways:
+**A docker-compose sketch from the project's early setup guide was wrong, and
+that guide has since been deleted.** For the record, so the mistake is not
+repeated, it was wrong in four separate ways:
 
 | What it says | Why it is wrong |
 |---|---|

@@ -47,18 +47,19 @@ yarn-error.log*
 imports
 
 # --- Documentation: none of it is a runtime input --------------------------
+# *.md covers DOCKER.md and README.md too; they are excluded twice on purpose so
+# the documentation block stays correct as files are added or removed.
 *.md
-HANDOFF-*.md
-phase-*-setup/
-.github/
-prisma
-README.md
 CHANGELOG.md
 
+# --- Non-runtime project material -----------------------------------------
+docs
+prisma
+.github
+
 # --- Inert or non-runtime code ---------------------------------------------
-# verify.js and scripts/test_*.js are local harnesses; test_phase5.js in
-# particular mutates a data/ copy and must never be part of an image.
-verify.js
+# scripts/test_*.js are local harnesses; test_phase5.js in particular mutates a
+# data/ copy and must never be part of an image.
 scripts/test_*.js
 scripts/test_*.sh
 workflows
