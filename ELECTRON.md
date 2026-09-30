@@ -421,13 +421,23 @@ Two things to know if you edit that block:
   origin → 200, and from a foreign origin → 403. `isGuarded()` is `false` and the
   CORS allowlist resolves exactly as before.
 
+**Packaging verified on the shipped artifact.** The v1.0.0 installer was rebuilt
+and re-uploaded, and the packaged `app.asar` was inspected directly to confirm
+the chain is actually present rather than merely present in the source tree:
+`electron/preload.js` and `src/services/desktopToken.js` are both inside the
+archive, the bundled `resources/sqlite3/sqlite3.exe` is the Windows build, and
+the shipped `public/index.html` carries the `window.cosplayCms.desktopToken()`
+read and the `X-CMS-Desktop-Token` header. The published download was then
+fetched back and its SHA-512 compared against `latest.yml` — identical, so the
+update feed points at the binary that is actually being served.
+
 **Not verified — treat as untested:**
 
-- **The preload bridge end-to-end.** The server side is proven above, and the
-  bridge is a single `contextBridge.exposeInMainWorld` call, but it has not been
-  exercised inside a running Electron window: confirm the desktop app still loads
-  data on your first launch of a new build. If it does not, the likely cause is
-  the preload path, not the guard.
+- **The preload bridge inside a running Electron window.** The server side is
+  proven, and the file is confirmed to ship inside the archive, but
+  `contextBridge` has not been exercised in a real window: confirm the desktop
+  app still loads data on your first launch of a new build. If it does not, the
+  likely cause is the preload path, not the guard.
 - **macOS.** Never built or run. `PRECOMPILED.mac` points at the x64 build, and
   on Apple Silicon that needs Rosetta 2.
 - **Native Windows.** The Windows checks ran under wine, which is how NSIS itself
@@ -446,8 +456,11 @@ can leave it, or delete it to avoid confusion.
 - **Docker is untouched.** The entrypoint runs `node src/server.js` explicitly,
   not `npm start`, so `main` pointing at `electron/main.js` cannot affect it.
   `npm start` still runs the bare server, unchanged.
-- **No renderer changes.** `nodeIntegration` is off, `contextIsolation` and
-  `sandbox` are on. The UI talks over HTTP exactly as it does in a browser.
+- **Minimal renderer change.** `nodeIntegration` is off, `contextIsolation` and
+  `sandbox` are on. The UI still talks over plain HTTP, but `api()` now reads one
+  value off `window.cosplayCms` and sends it as a header. On a non-desktop
+  origin `window.cosplayCms` is `undefined`, so the header is simply omitted and
+  the request is byte-identical to before.
 - **No route changes.** All eight routers, both mount paths, and the n8n
   `X-CMS-API-KEY` integration are untouched.
 - **Single-instance lock.** Two processes writing one SQLite file can corrupt it,
