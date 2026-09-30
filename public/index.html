@@ -545,6 +545,33 @@
       width: 90%;
       margin: auto;
       box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+
+      /* A DIALOG MUST NEVER BE TALLER THAN THE VIEWPORT.
+         *
+         * The costume form is genuinely taller than a laptop screen, and with no
+         * cap here it grew to its content height. That is what put it off-screen:
+         * a `margin: auto` box with no free space has its auto margins collapse
+         * to zero, so the browser pinned the dialog to the top of the viewport
+         * and then SCROLLED THE PAGE to bring the rest into view. Anything that
+         * moved the page back — including the scroll restoration in
+         * showModalPreservingScroll() — dragged the dialog's top half above the
+         * fold and left the user looking at its bottom edge.
+         *
+         * So the dialog scrolls INSIDE itself instead. Capping the height keeps
+         * it wholly visible at any scroll position, and the page never has to
+         * move for the dialog at all, which is also what makes the
+         * no-bounce-on-open behaviour reliable rather than incidental.
+         *
+         * `dvh` rather than `vh` because the mobile browser chrome changes the
+         * viewport height as it retracts; the `vh` line is the fallback for
+         * engines without `dvh` support. */
+      max-height: calc(100vh - 3rem);
+      max-height: calc(100dvh - 3rem);
+      overflow-y: auto;
+      /* Stops the scroll from chaining out to the page once the dialog's own
+         content is scrolled to the end, which would otherwise move the grid
+         behind the backdrop while the modal is open. */
+      overscroll-behavior: contain;
     }
     dialog::backdrop {
       background: rgba(0, 0, 0, 0.75);
