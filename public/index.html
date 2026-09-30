@@ -4055,6 +4055,56 @@
     // DATA LOADERS
     // ==========================================================================
     /**
+     * THE CURRENT VERTICAL SCROLL OFFSET OF THE PAGE.
+     *
+     * `window.scrollY` is the whole story in every browser this app supports.
+     * The documentElement/body fallbacks are read behind it rather than
+     * alongside it so that a future scroll container is measured instead of
+     * silently reporting 0 -- a helper that always returns 0 would make this
+     * whole mechanism a no-op that still looks like it works.
+     */
+    function currentScrollY() {
+      return window.scrollY
+        || (document.documentElement && document.documentElement.scrollTop)
+        || (document.body && document.body.scrollTop)
+        || 0;
+    }
+
+    /**
+     * Put the page back where it was.
+     *
+     * WHY IT RUNS TWICE. The first call happens in the same task as the
+     * `innerHTML` assignment that replaced the grid, so the document is often
+     * still SHORT at that moment -- the images that give the cards their height
+     * have not decoded yet. A `scrollTo` past the current maximum is silently
+     * clamped to that maximum, which is the very jump this exists to prevent.
+     * Re-applying it on the next frame measures against a document that has its
+     * real height. Two writes, no layout thrash worth avoiding, and the second
+     * one is a no-op when the height never actually changed.
+     */
+    function restoreScrollY(y) {
+      if (!y) return;   // already at the top: nothing to put back
+      window.scrollTo(0, y);
+      requestAnimationFrame(() => window.scrollTo(0, y));
+    }
+
+    /**
+     * Whether a grid already holds painted cards.
+     *
+     * The test for "should I show a loading state", and the answer is not
+     * "always". A reload triggered by a write is a refresh of a list the user
+     * is currently reading, not a first paint, and loadWishlist() had already
+     * worked this out for itself -- see its comment. Skeletons over a populated
+     * grid are a flash of grey placeholders for content that is about to be
+     * replaced by its own updated self, and the height collapse that comes with
+     * them is what snapped the scroll position in the first place.
+     */
+    function gridIsPopulated(gridId) {
+      const grid = document.getElementById(gridId);
+      return !!(grid && grid.firstElementChild);
+    }
+
+    /**
      * The pagination bar for one tab.
      *
      * BUILT WITH DOM APIS THROUGHOUT. Every number here is server-supplied
@@ -4239,7 +4289,18 @@
     }
 
     async function loadCostumes() {
-      renderSkeletons('costumes-grid');
+      // THE PAGE NUMBER AND THE SCROLL OFFSET ARE ONE POSITION. Preserving the
+      // page while dropping the reader at the top of that page is the same bug
+      // wearing a different hat, which is why this sits directly beside the
+      // "does not reset the page" note below. Captured BEFORE the grid is
+      // touched, because the whole failure being fixed here is that touching
+      // the grid loses the position.
+      const savedScrollY = currentScrollY();
+      // Skeletons only on a genuine first paint. This loader also runs after
+      // every create, edit and delete, and blanking a grid the user is reading
+      // to show grey placeholders is both a needless flash and the direct cause
+      // of the scroll snap -- see gridIsPopulated().
+      if (!gridIsPopulated('costumes-grid')) renderSkeletons('costumes-grid');
       // The four filters AND the page go to the server together. They cannot be
       // separated: filtering the returned page in the browser would only ever
       // search 25 of 86 rows, which is the bug this function exists to fix.
@@ -4325,6 +4386,12 @@
           ctaLabel: 'Retry',
           ctaAction: loadCostumes
         });
+      } finally {
+        // `finally`, so the position is put back on the error path too. A failed
+        // reload paints a short empty state where a full grid used to be, and
+        // without this the reader would be clamped against that shorter document
+        // exactly as they were before. The `return` above still runs this.
+        restoreScrollY(savedScrollY);
       }
     }
 
@@ -4348,10 +4415,16 @@
      */
     async function loadWishlist() {
       state.wishlistLoaded = true;
-      // Skeletons only while the tab is the one being looked at. A background
-      // refetch after a write would otherwise paint a loading shimmer over a
-      // list the user is reading, and the answer lands a moment later anyway.
-      if (state.currentTab === 'wishlist') renderSkeletons('wishlist-grid');
+      // This tab got the scroll rule right first -- skeletons only while the
+      // tab is the one being looked at -- and is the reason the other four were
+      // fixed: a background refetch after a write must not repaint a list the
+      // user is reading. The offset is saved for the same reason, and it has to
+      // be saved even for a BACKGROUND fetch, because a costume edit can change
+      // this tab's row count and a reflow underneath the reader moves them.
+      const savedScrollY = currentScrollY();
+      if (state.currentTab === 'wishlist' && !gridIsPopulated('wishlist-grid')) {
+        renderSkeletons('wishlist-grid');
+      }
       try {
         const query = new URLSearchParams();
         query.set('status', 'WISHLIST');
@@ -4384,6 +4457,8 @@
             ctaAction: loadWishlist
           });
         }
+      } finally {
+        restoreScrollY(savedScrollY);
       }
     }
 
@@ -4458,7 +4533,8 @@
     }
 
     async function loadProps() {
-      renderSkeletons('props-grid');
+      const savedScrollY = currentScrollY();
+      if (!gridIsPopulated('props-grid')) renderSkeletons('props-grid');
       try {
         const data = await api('/api/props?' + pagingQuery('props'));
         state.props = Array.isArray(data.props) ? data.props : [];
@@ -4474,11 +4550,14 @@
           ctaLabel: 'Retry',
           ctaAction: loadProps
         });
+      } finally {
+        restoreScrollY(savedScrollY);
       }
     }
 
     async function loadLenses() {
-      renderSkeletons('lenses-grid');
+      const savedScrollY = currentScrollY();
+      if (!gridIsPopulated('lenses-grid')) renderSkeletons('lenses-grid');
       try {
         const data = await api('/api/lenses?' + pagingQuery('lenses'));
         adoptPaging('lenses', data);
@@ -4494,6 +4573,8 @@
           ctaLabel: 'Retry',
           ctaAction: loadLenses
         });
+      } finally {
+        restoreScrollY(savedScrollY);
       }
     }
 
@@ -4513,7 +4594,8 @@
      * during a slow load.
      */
     async function loadMakers() {
-      renderSkeletons('makers-grid');
+      const savedScrollY = currentScrollY();
+      if (!gridIsPopulated('makers-grid')) renderSkeletons('makers-grid');
       try {
         const data = await api('/api/makers?' + pagingQuery('makers'));
         adoptPaging('makers', data);
@@ -4540,6 +4622,8 @@
           ctaLabel: 'Retry',
           ctaAction: loadMakers
         });
+      } finally {
+        restoreScrollY(savedScrollY);
       }
     }
 
