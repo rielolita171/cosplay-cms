@@ -223,6 +223,109 @@ code {
 .shot-card figcaption { padding: 16px 18px; font-size: 0.88rem; color: var(--text-muted); }
 .shot-card figcaption b { color: var(--text); }
 
+/* ---------------------------- DESKTOP (EARLY RELEASE) ---------------------------- */
+/* The release status is the load-bearing element on this section, so it gets a
+   distinct amber treatment that cannot be mistaken for the neutral card style —
+   a visitor must be able to tell "preview" from "finished" at a glance. */
+
+.hero-badge {
+  display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  justify-content: center; margin: 26px auto 0; max-width: 640px;
+  padding: 11px 20px; border-radius: 999px; font-size: 0.9rem;
+  color: var(--text-muted); text-align: left;
+  background: rgba(245, 158, 11, 0.07);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+}
+.hero-badge b { color: var(--text); font-weight: 700; }
+.hero-badge a { color: #fbbf24; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.hero-badge a:hover { color: #fcd34d; }
+
+/* A single pulsing dot, reused in the hero and the release bar so the two read
+   as the same signal. The pulse is driven by a CSS animation rather than JS,
+   and is disabled under prefers-reduced-motion below. */
+.badge-dot {
+  flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--warning);
+  box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.55);
+  animation: pulse 2.4s ease-out infinite;
+}
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5); }
+  70%  { box-shadow: 0 0 0 9px rgba(245, 158, 11, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+}
+
+.release-bar {
+  display: flex; gap: 16px; align-items: flex-start;
+  padding: 22px 26px; margin-bottom: 34px; border-radius: var(--radius);
+  font-size: 0.94rem; color: var(--text-muted);
+  background: rgba(245, 158, 11, 0.07);
+  border: 1px solid rgba(245, 158, 11, 0.24);
+  border-left: 3px solid var(--warning);
+}
+.release-bar .badge-dot { margin-top: 8px; }
+.release-bar b { color: #fcd34d; }
+
+/* Platform cards. The status line at the foot of each card is what carries the
+   build state, so it is styled from a data-state attribute rather than a class
+   per card — the HTML states the fact, the CSS decides how it looks. */
+.platforms {
+  /* `min()` on the track minimum, not a bare 280px: a fixed minimum is WIDER
+     than a 320px phone once the container's 24px side padding is subtracted, so
+     the grid would overflow horizontally and the page would scroll sideways. */
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+  gap: 20px; margin-bottom: 34px;
+}
+.platform {
+  background: var(--card-bg); border: 1px solid var(--card-border);
+  border-radius: var(--radius); padding: 24px;
+  display: flex; flex-direction: column;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+.platform:hover { transform: translateY(-3px); border-color: rgba(139, 92, 246, 0.4); }
+.platform-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.platform-ico { font-size: 1.7rem; line-height: 1; }
+.platform h3 { margin: 0 0 6px; font-size: 1.05rem; letter-spacing: -0.01em; }
+.platform p { margin: 0; color: var(--text-muted); font-size: 0.9rem; }
+
+.tag {
+  display: inline-block; font-size: 0.68rem; letter-spacing: 0.05em;
+  text-transform: uppercase; font-weight: 700;
+  padding: 3px 9px; border-radius: 999px;
+  border: 1px solid transparent;
+}
+.tag-ok   { color: #6ee7b7; background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.3); }
+.tag-wip  { color: #fcd34d; background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.3); }
+.tag-todo { color: #9ca3af; background: rgba(255, 255, 255, 0.05); border-color: var(--card-border); }
+
+.platform-status {
+  margin-top: auto !important; padding-top: 16px;
+  border-top: 1px solid var(--card-border);
+  font-size: 0.78rem !important; font-weight: 700;
+  letter-spacing: 0.04em; text-transform: uppercase;
+}
+.platform-status[data-state="ok"]   { color: #34d399; }
+.platform-status[data-state="wip"]  { color: #fbbf24; }
+.platform-status[data-state="todo"] { color: #6b7280; }
+
+/* Fact panel beside the known-issues list. */
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: start; margin-bottom: 30px; }
+.split .panel { padding: 10px 24px; }
+.split-h { margin: 0 0 16px; font-size: 1.05rem; letter-spacing: -0.01em; }
+
+/* Known-issues list. Deliberately NOT the green tick treatment used by .ticks:
+   these are caveats, and reusing the checkmark would misrepresent them. */
+.bugs { list-style: none; padding: 0; margin: 0; }
+.bugs li {
+  position: relative; padding: 0 0 0 30px; margin-bottom: 14px;
+  color: var(--text-muted); font-size: 0.92rem;
+}
+.bugs li::before {
+  content: "\26A0"; position: absolute; left: 0; top: 0;
+  color: var(--warning); font-size: 0.95rem;
+}
+.bugs b { color: var(--text); }
+
 /* ---------------------------- STACK ---------------------------- */
 .stack-grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 52px; align-items: start; }
 
@@ -281,13 +384,23 @@ code {
 }
 .footer a:hover { color: var(--text); }
 
+/* The pulsing dot animates forever. Under prefers-reduced-motion that is exactly
+   the kind of looping movement the preference exists to suppress, so the box-shadow
+   pulse is cancelled and the dot stays a static amber circle — it still reads as
+   a status marker, just a still one. */
+@media (prefers-reduced-motion: reduce) {
+  .badge-dot { animation: none; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2); }
+}
+
 /* ---------------------------- RESPONSIVE ---------------------------- */
 @media (max-width: 860px) {
   .nav-links a:not(.btn) { display: none; }
   .stack-grid { grid-template-columns: 1fr; gap: 36px; }
+  .split { grid-template-columns: 1fr; gap: 30px; }
   .hero { padding-bottom: 64px; }
   .section { padding: 64px 0; }
   .hero-stats { gap: 30px; }
+  .hero-badge { border-radius: var(--radius); }
 }
 
 @media (max-width: 480px) {

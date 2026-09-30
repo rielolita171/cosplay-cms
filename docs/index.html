@@ -32,6 +32,7 @@
     <div class="nav-links">
       <a href="#features">Features</a>
       <a href="#gallery">Screenshots</a>
+      <a href="#desktop">Desktop</a>
       <a href="#stack">Stack</a>
       <a href="#quickstart">Quick start</a>
       <a class="btn btn-sm" href="https://github.com/rielolita171/cosplay-cms" target="_blank" rel="noopener">GitHub ↗</a>
@@ -48,9 +49,16 @@
       server, one SQLite file, one self-contained HTML page.
     </p>
 
+    <p class="hero-badge">
+      <span class="badge-dot" aria-hidden="true"></span>
+      <b>Desktop builds are here — early release.</b>
+      The same server, packaged as a Windows installer.
+      <a href="#desktop">Expect rough edges ↓</a>
+    </p>
+
     <div class="cta-row">
       <a class="btn btn-primary" href="#quickstart">Get started</a>
-      <a class="btn btn-ghost" href="#gallery">See the interface ↓</a>
+      <a class="btn btn-ghost" href="#desktop">Desktop app ↓</a>
     </div>
 
     <ul class="hero-stats">
@@ -179,6 +187,128 @@
   </div>
 </section>
 
+<!-- ============================ DESKTOP (EARLY RELEASE) ============================ -->
+<section class="section section-alt" id="desktop">
+  <div class="container">
+    <p class="eyebrow">Desktop app</p>
+    <h2>Same server, now with a window</h2>
+    <p class="section-lede">
+      The desktop build is not a rewrite. It is the identical Express server,
+      required from an Electron main process that supplies the four things
+      Docker was providing: writable paths, the database bootstrap, a bundled
+      <code>sqlite3</code> binary, and a loopback-only port. One codebase, two
+      ways to run it.
+    </p>
+
+    <!-- The status strip is the single most important thing on this section, so
+         it comes before the feature detail. `role="status"` is polite rather
+         than assertive: it must not interrupt a screen reader mid-sentence. -->
+    <div class="release-bar" role="status">
+      <span class="badge-dot" aria-hidden="true"></span>
+      <div>
+        <b>Early release — bugs are expected.</b>
+        The Windows installer was built and smoke-tested on Linux under Wine, not
+        on native Windows. macOS is not built at all. Treat this as a preview:
+        back up your data directory before you trust it with the real one.
+      </div>
+    </div>
+
+    <div class="platforms">
+      <article class="platform">
+        <div class="platform-head">
+          <span class="platform-ico" aria-hidden="true">🪟</span>
+          <div>
+            <h3>Windows</h3>
+            <span class="tag tag-ok">Installer ready</span>
+          </div>
+        </div>
+        <p>
+          NSIS installer, <b>unsigned</b> — SmartScreen will warn on first run.
+          It bundles the <code>sqlite3.exe</code> and Windows <code>sharp</code>
+          binaries, so nothing needs installing beforehand.
+        </p>
+        <p class="platform-status" data-state="ok">✓ Built &amp; verified</p>
+      </article>
+
+      <article class="platform">
+        <div class="platform-head">
+          <span class="platform-ico" aria-hidden="true">🐧</span>
+          <div>
+            <h3>Linux</h3>
+            <span class="tag tag-wip">Build config only</span>
+          </div>
+        </div>
+        <p>
+          The AppImage target is configured and the app was run from a source
+          checkout, but no AppImage has been produced. The bundled binary is
+          built from the SQLite amalgamation and needs a C compiler.
+        </p>
+        <p class="platform-status" data-state="wip">◐ Not built yet</p>
+      </article>
+
+      <article class="platform">
+        <div class="platform-head">
+          <span class="platform-ico" aria-hidden="true">🍎</span>
+          <div>
+            <h3>macOS</h3>
+            <span class="tag tag-todo">Not built</span>
+          </div>
+        </div>
+        <p>
+          No DMG has been built or tested. The pinned SQLite release ships no
+          arm64 CLI, so Apple Silicon would run the x64 build under Rosetta 2.
+          Build it yourself only if you already have Rosetta.
+        </p>
+        <p class="platform-status" data-state="todo">✗ Untested</p>
+      </article>
+    </div>
+
+    <div class="split">
+      <div class="panel">
+        <div class="panel-row"><span>Packaging</span><b>Electron 31 + electron-builder</b></div>
+        <div class="panel-row"><span>Where data lives</span><b><code>userData</code> (outside the install)</b></div>
+        <div class="panel-row"><span>Server port</span><b>127.0.0.1 only</b></div>
+        <div class="panel-row"><span>Database driver</span><b>Bundled <code>sqlite3</code> 3.45.1</b></div>
+        <div class="panel-row"><span>Signing</span><b>None</b></div>
+      </div>
+
+      <div>
+        <h3 class="split-h">Known rough edges</h3>
+        <ul class="bugs">
+          <li>
+            <b>Unsigned installer.</b> Windows SmartScreen shows an unknown
+            publisher warning until you click through, every time.
+          </li>
+          <li>
+            <b>Wine, not native Windows.</b> The build was verified under Wine on
+            Linux. GPU and some Win32 edge cases may differ.
+          </li>
+          <li>
+            <b>No auto-updater.</b> New builds are a fresh download; the app
+            will not tell you a newer one exists.
+          </li>
+          <li>
+            <b>A desktop database is a different database.</b> The app writes to
+            its own <code>userData</code> directory — it does not read the one in
+            your Docker volume or checkout.
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note warn">
+      <b>The desktop app has no authentication.</b> That is unchanged from the
+      server, but on a laptop it matters more: the app binds
+      <code>127.0.0.1</code> precisely so the open API is not reachable from
+      the network. Do not change that bind address.
+    </div>
+
+    <div class="cta-row">
+      <a class="btn btn-ghost" href="https://github.com/rielolita171/cosplay-cms/issues" target="_blank" rel="noopener">Report a bug ↗</a>
+    </div>
+  </div>
+</section>
+
 <!-- ============================ STACK ============================ -->
 <section class="section" id="stack">
   <div class="container stack-grid">
@@ -197,6 +327,7 @@
         <li>Rate limiting on <code>/api</code>, Helmet, CORS allowlist</li>
         <li><code>sharp</code> for image processing; <code>multer</code> for uploads</li>
         <li>Dockerfile and compose file included; SQLite file and uploads live in <code>data/</code></li>
+        <li>Same server also packages as an Electron desktop app — no separate backend to maintain</li>
       </ul>
     </div>
     <div class="panel">
@@ -204,9 +335,10 @@
       <div class="panel-row"><span>Backend</span><b>Express 5</b></div>
       <div class="panel-row"><span>Database</span><b>SQLite (CLI child process)</b></div>
       <div class="panel-row"><span>Images</span><b>sharp + multer</b></div>
+      <div class="panel-row"><span>Desktop shell</span><b>Electron 31 (optional)</b></div>
       <div class="panel-row"><span>Alerts</span><b>Telegram + n8n</b></div>
       <div class="panel-row"><span>Auth</span><b>None, by design</b></div>
-      <div class="panel-row"><span>Dependencies</span><b>8</b></div>
+      <div class="panel-row"><span>Runtime deps</span><b>8</b></div>
     </div>
   </div>
 </section>
@@ -223,6 +355,7 @@
     <div class="code-tabs" role="tablist" aria-label="Install method">
       <button class="code-tab active" role="tab" id="tab-npm" aria-selected="true" aria-controls="panel-npm" tabindex="0" data-mode="npm">Node</button>
       <button class="code-tab" role="tab" id="tab-docker" aria-selected="false" aria-controls="panel-docker" tabindex="-1" data-mode="docker">Docker</button>
+      <button class="code-tab" role="tab" id="tab-desktop" aria-selected="false" aria-controls="panel-desktop" tabindex="-1" data-mode="desktop">Desktop</button>
     </div>
 
     <div class="code-block" role="tabpanel" id="panel-npm" aria-labelledby="tab-npm" tabindex="0" data-mode="npm">
@@ -247,6 +380,22 @@ docker compose up -d --build
 <span class="c-c"># you must tunnel in.</span>
 
 <span class="c-p"># open http://localhost:4001</span></code></pre>
+    </div>
+
+    <div class="code-block" role="tabpanel" id="panel-desktop" aria-labelledby="tab-desktop" tabindex="0" data-mode="desktop" hidden>
+<pre translate="no"><code><span class="c-p"># run the desktop app from a checkout</span>
+git clone https://github.com/rielolita171/cosplay-cms.git
+cd cosplay-cms
+npm install
+npm run electron:dev
+
+<span class="c-p"># or build a Windows installer</span>
+npm run electron:dist:win
+<span class="c-c">#   -&gt; dist/Cosplay CMS Setup 1.0.0.exe</span>
+
+<span class="c-p"># if ELECTRON_RUN_AS_NODE is set in your</span>
+<span class="c-p"># shell, unset it first</span>
+unset ELECTRON_RUN_AS_NODE</code></pre>
     </div>
 
     <div class="note">
