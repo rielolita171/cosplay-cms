@@ -10,6 +10,7 @@
 [![SQLite](https://img.shields.io/badge/SQLite-CLI-003b57?style=flat-square&logo=sqlite&logoColor=white)](https://sqlite.org/)
 [![License](https://img.shields.io/badge/License-ISC-blue?style=flat-square)](#license)
 [![No build step](https://img.shields.io/badge/build-none%20required-6f42c1?style=flat-square)](#running-it)
+[![Desktop](https://img.shields.io/badge/Electron-early%20release-d29922?style=flat-square&logo=electron&logoColor=white)](#desktop-app-electron)
 
 [**Visit the project site →**](https://rielolita171.github.io/cosplay-cms/)
 
@@ -20,6 +21,10 @@
 A private, single-user inventory system for cosplay props, costumes and contact
 lenses. Express and the `sqlite3` CLI on the back end, a single self-contained
 `public/index.html` on the front end. No build step, no bundler, no CDN.
+
+It runs three ways from the same server code: as a Node process, as a Docker
+container (**the primary target**), and as a packaged desktop app (Electron,
+**early release** — see [`ELECTRON.md`](ELECTRON.md)).
 
 <p align="center">
   <em>Live screenshots of a running instance are on the project site, not pasted
@@ -49,12 +54,39 @@ npm run dev        # node --watch src/server.js
 npm test           # makers, wishlist and lens-expiry suites
 ```
 
+## Desktop app (Electron)
+
+A second way to run the *same* server code, packaged as a desktop app. The
+Express server is not reimplemented: `electron/main.js` sets the environment and
+then `require`s `src/server`, so every route, test and database behaves exactly
+as it does in the container.
+
+```bash
+npm run electron:dev          # run the app against your checkout
+npm run electron:build        # unpacked build in dist/ — fastest packaging check
+npm run electron:dist         # real installers: AppImage, NSIS, DMG
+npm run electron:dist:win     # Windows NSIS installer only
+```
+
+What is verified, and what is not, is written down in
+[`ELECTRON.md`](ELECTRON.md) rather than guessed at. The short version: the
+Linux run and the Windows installer are verified, the Windows run was verified
+under Wine rather than on native Windows, and **macOS has never been built**.
+The installers are unsigned and there is no auto-updater.
+
 
 Configuration is read from `.env` at the repository root. The names that
-matter are `PORT`, `NODE_ENV`, `DATABASE_PATH`, `API_KEY`, `CORS_ORIGIN` and
-`TELEGRAM_BOT_TOKEN`. **Their values live in `.env` and must never be copied
-into this file, into a commit, or into a ticket** — refer to them by name, as
-done here.
+matter are `PORT`, `NODE_ENV`, `DATABASE_PATH`, `CMS_DATA_DIR`,
+`CMS_UPLOAD_DIR`, `API_KEY`, `CORS_ORIGIN` and `TELEGRAM_BOT_TOKEN`. **Their
+values live in `.env` and must never be copied into this file, into a commit, or
+into a ticket** — refer to them by name, as done here.
+
+`CMS_DATA_DIR` and `CMS_UPLOAD_DIR` are the opt-in path overrides, read by
+[`src/services/paths.js`](src/services/paths.js). They exist for the desktop
+build, which cannot use `__dirname` because that resolves inside the read-only
+`app.asar` archive. Every fallback is byte-for-byte the path the old hardcoded
+literals produced, so leaving both unset changes nothing about `npm start` or
+`docker compose up`.
 
 `API_KEY` is the only credential the app still has, and **it is not a login.**
 It guards exactly one thing: the three `/api/notifications/*` endpoints that
@@ -73,13 +105,16 @@ simply ignored; you can delete it.
 
 `data/db/cms.db` is the SQLite database and `data/uploads` is the image store.
 
-> **Do not test uploads against a second/dev instance.** `UPLOAD_DIR` is dead
-> config that nothing reads; `src/routes/images.js`,
-> `src/middleware/imageUpload.js` and `src/middleware/imageProcessor.js` all
-> resolve `path.join(__dirname, '../../data/uploads')`, which is
-> `__dirname`-relative. A dev server on another port writes into the *same*
-> production upload directory. Point a dev run at a scratch copy, or simply
-> do not exercise the upload endpoints there.
+> **Do not test uploads against a second/dev instance.** A dev server on
+> another port writes into the *same* upload directory as production. Every
+> internal path is resolved by [`src/services/paths.js`](src/services/paths.js),
+> so you can now separate them — set `CMS_DATA_DIR` and `CMS_UPLOAD_DIR` to a
+> scratch directory for the dev run, or simply do not exercise the upload
+> endpoints there. Note the `CMS_` prefix is load-bearing: a bare `UPLOAD_DIR`
+> is dead config that nothing reads, and this repository's `.env` still carries
+> a container value for it. See
+> [`ELECTRON.md`](ELECTRON.md#does-this-still-run-outside-electron) for why a
+> key already sitting inert in someone's `.env` must not be given a meaning.
 
 ---
 
@@ -126,11 +161,13 @@ Being unauthenticated is not the same as undefended. What remains:
 - **`/uploads` is world-readable to anyone who can reach the port.** The
   per-image access middleware (`src/middleware/uploadAccess.js`) was deleted
   along with the role system, and `/uploads` is now a bare `express.static`
-  mount ([`src/server.js:136-144`](src/server.js:136)). In earlier versions a
+  mount ([`src/server.js:153`](src/server.js)). In earlier versions a
   viewer-tier account could not fetch an image directly. **This is a genuine
   regression in per-image access control**, accepted as part of removing auth —
   but it is the one to be aware of, because an image URL is now a bearer
-  reference with no expiry.
+  reference with no expiry. (The desktop build is the one case where this is
+  contained: it binds `127.0.0.1`, so the mount is reachable only from the
+  app's own window.)
 - **Every record is readable and writable by any client on the network.**
 
 ### Where the boundary is
@@ -155,7 +192,7 @@ and forces the tunnel.
 Two-factor login is gone, but the **Telegram chat id was deliberately kept** —
 it is what the n8n notification workflows send to. It now lives in its own
 `TelegramChat` table rather than on the user row, and on an old database it is
-migrated once at boot ([`src/services/db.js:164-200`](src/services/db.js:164)).
+migrated once at boot ([`src/services/db.js:197-213`](src/services/db.js:197)).
 See "What happens to your Telegram chat id on upgrade" in
 [`DOCKER.md`](DOCKER.md) for the verification and repair SQL.
 
@@ -171,11 +208,11 @@ it at all.
 ### `[low]` The z-index comment on the boot splash is wrong
 
 - **Symptom.** None. This is a comment that misdescribes the code beneath it.
-- **Mechanism.** [`public/index.html:718`](public/index.html:718) says the boot
+- **Mechanism.** [`public/index.html:792`](public/index.html:792) says the boot
   overlay is "the SAME `#loading-overlay` element (the same z-index and
   spinner)". The z-index is not the same: it is `9997` at
-  [`public/index.html:725`](public/index.html:725) against the base overlay's
-  `9998` at [`public/index.html:760`](public/index.html:760).
+  [`public/index.html:799`](public/index.html:799) against the base overlay's
+  `9998` at [`public/index.html:842`](public/index.html:842).
 - **Blast radius.** Effectively zero. Only the toast at
   `z-index: 9999` outranks the boot splash, which is the correct ordering.
 - **Fix.** Correct the comment, or unify the two values and then the comment is
@@ -188,29 +225,54 @@ it at all.
   the base overlay's 9998, and nothing sits between the two values.
 - **Fix.** Collapse to a single value; the distinction was never load-bearing.
 
-### `[open]` Uploads are not isolated between instances, and are never collected
+### `[open]` Uploads are not garbage-collected, and the old config key still exists
 
-- **Symptom.** A dev instance and production share one uploads directory, so
-  development writes production's user data (and vice versa). Separately, nothing
-  ever deletes an image that is no longer referenced.
-- **Mechanism.** Uploads always resolve to `data/uploads`; there is no
-  `public/uploads/` directory at all. `UPLOAD_DIR` is **dead config** —
-  `grep -rn UPLOAD_DIR src/` returns no matches — yet it is still set in
-  [`.env`](.env) and named in [`.env.example`](.env.example). The hardcoded
-  call sites are [`src/middleware/imageUpload.js:7`](src/middleware/imageUpload.js:7),
-  [`src/middleware/imageProcessor.js:94`](src/middleware/imageProcessor.js:94),
-  [`src/routes/images.js:120`](src/routes/images.js:120),
-  [`src/routes/costumes.js:911`](src/routes/costumes.js:911) and the static
-  mount at [`src/server.js:136`](src/server.js:136). Because `/uploads` is a
-  bare `express.static` mount, an image URL is a permanent bearer reference with
-  no expiry, and there is no GC pass anywhere.
+- **Symptom.** Nothing ever deletes an uploaded image that is no longer
+  referenced, so the store grows without bound.
+- **Mechanism.** There is no GC pass anywhere. Because `/uploads` is a bare
+  `express.static` mount
+  ([`src/server.js:153`](src/server.js)), an image URL is also a permanent
+  bearer reference with no expiry.
+- **Partly resolved since this was first written.** The five hardcoded
+  `path.join(__dirname, '../../data/uploads')` call sites are gone; they all
+  resolve from [`src/services/paths.js`](src/services/paths.js) now, and the
+  desktop build points them at its own `userData` directory. So *per-instance*
+  isolation is achievable today with `CMS_UPLOAD_DIR` — it is just not applied
+  to the dev-vs-production case above.
+- **Still wrong.** A bare `UPLOAD_DIR` remains **dead config** that no code
+  reads, yet it is still set in [`.env`](.env) and named in
+  [`.env.example`](.env.example). It is not harmless-looking: it holds a
+  container path, and a future edit that starts reading the bare name would
+  break every non-Electron start. Either delete it from the docs and this
+  `.env`, or leave it with a comment saying it is inert.
 - **Also unverified.** Two files in `data/uploads` (mtimes 16:35:04 and 16:43:24)
   are of **unconfirmed reference status**. An earlier session quarantined two
   *confirmed* orphans, but whether these two are still referenced by any
   `Costume` row has not been checked. Do not delete them on the strength of this
   note.
-- **Fix.** Give each instance its own upload root, make `UPLOAD_DIR` real or
-  delete it from the docs, and GC unreferenced files on a schedule.
+- **Fix.** Decide `UPLOAD_DIR`'s fate, then add a scheduled pass that deletes
+  unreferenced files. Both halves belong together: the store already relocates
+  cleanly, so without GC an isolated directory just relocates the unbounded
+  growth.
+
+### `[open]` The desktop build is early, and macOS has never been built
+
+- **Status.** The Electron target landed as an explicitly early release.
+  Verified by running: Linux under `xvfb-run`, and the Windows NSIS installer
+  run under Wine. Full detail in [`ELECTRON.md`](ELECTRON.md).
+- **Not verified.** macOS has never been built or run at all — `PRECOMPILED.mac`
+  points at the x64 SQLite build, so Apple Silicon would need Rosetta 2. The
+  Windows checks ran under Wine, which is also how NSIS itself runs, so GPU and
+  some Win32 edge cases differ from native Windows.
+- **Operational hazards while it holds.** Installers are **unsigned**, so
+  SmartScreen warns on first run, and there is **no auto-updater**. Icons are
+  unset, so builds use the default Electron icon.
+- **A desktop install does not see the Docker database.** Everything writable
+  lives under Electron's `userData`, which is a *different* database and upload
+  store from the container's Docker volume. They share nothing in either
+  direction.
+- **Fix.** Build and run a macOS DMG on a real Mac, run the installer once
+  natively on Windows, and add code signing plus an `app-builder` update feed.
 
 ### `[open]` No regression test covers the boot splash
 
@@ -273,13 +335,12 @@ it at all.
 The order I would take the items above in, bundled by what each group unblocks
 rather than by severity. None of it is committed work.
 
-**1. Isolate uploads, then garbage-collect them.** This is the only remaining
-item that can lose or corrupt someone's data, so it goes first. `imageUpload.js`,
-`imageProcessor.js` and `images.js` each hardcode
-`path.join(__dirname, '../../data/uploads')`, so every instance on the box shares
-one image store. Give each instance its own root, make `UPLOAD_DIR` real or
-delete it, then add a scheduled pass that deletes unreferenced files. Both halves
-belong together: an isolated store with no GC just relocates the unbounded growth.
+**1. Garbage-collect uploads.** This is the only remaining item that can lose
+or corrupt someone's data, so it goes first. The path half is already done:
+everything resolves from `src/services/paths.js`, so an instance can be pointed
+at its own root. What is missing is the second half — a scheduled pass that
+deletes unreferenced files. Add it while deciding `UPLOAD_DIR`'s fate; an
+isolated store with no GC just relocates the unbounded growth.
 
 **2. Prove the boot path.** Install a headless browser and assert that the splash
 is `display: none` after load and that the retry block is hidden on a successful
@@ -303,11 +364,14 @@ deployment does not have.
 
 ## Further reading
 
-This file covers the application. Container deployment — the image, the volume
-layout, the boot sequence, the verification SQL and the failure modes — is
+This file covers the application. The other two deployment targets are
 documented separately:
 
-- [`DOCKER.md`](DOCKER.md) — the deployment and operations reference.
+- [`DOCKER.md`](DOCKER.md) — the container deployment and operations reference.
+  This is the primary target.
+- [`ELECTRON.md`](ELECTRON.md) — the desktop build: what the main process
+  supplies, where the data lives, the packaging gotchas, and what has and has
+  not been verified per platform.
 - [`docker-compose.yml`](docker-compose.yml) — the deployment of record.
 - [`workflows/n8n_contact_lens_expiry_alert.json`](workflows/n8n_contact_lens_expiry_alert.json)
   — the inbound n8n workflow that drives the lens-expiry alerts.
