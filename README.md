@@ -1,4 +1,4 @@
-]633;E;sed -n '1,240p' README.md;7f8706c2-c4bb-40f7-8967-efa194394b4d]633;C]633;E;sed -n '1,161p' README.md;3550221f-99d8-4dc6-97ec-b3703000c526]633;C<div align="center">
+<div align="center">
 
 # 🧥 Cosplay CMS
 
