@@ -312,9 +312,16 @@
     }
 
     /* PAGINATION. One bar per tab, rendered by renderPager() into the
-       #pager-<tab> container that sits directly after that tab's grid. It is
-       built with DOM APIs and textContent, never innerHTML with interpolated
-       numbers, for the same reason every other control here is. */
+       #pager-<tab> container. Note the container sits ABOVE its grid, directly
+       under the filter bar (see the markup comment on #pager-costumes), not
+       below it — so the margin that matters against the cards is
+       margin-BOTTOM. It was missing entirely, which left the pager sitting
+       flush against the top row of cards while the space above it was 24px;
+       the controls looked welded to the grid. margin-bottom matches the
+       grid's own 20px row gap so the pager reads as part of the same block.
+
+       It is built with DOM APIs and textContent, never innerHTML with
+       interpolated numbers, for the same reason every other control here is. */
     .pager {
       display: flex;
       align-items: center;
@@ -322,6 +329,7 @@
       flex-wrap: wrap;
       gap: 10px;
       margin-top: 24px;
+      margin-bottom: 20px;
       padding-top: 16px;
       border-top: 1px solid var(--card-border);
     }
@@ -625,7 +633,23 @@
 
     /* --- Upload progress bar -----------------------------------------------
        Fixed to the bottom-centre so it never overlaps the toast, which sits
-       bottom-right, nor the header controls at the top. */
+       bottom-right, nor the header controls at the top.
+
+       THE Z-INDEX IS NOT THE PROBLEM, AND RAISING IT WOULD NOT HELP. A modal
+       <dialog> shown with showModal() is promoted to the browser's TOP LAYER,
+       which renders above every ordinary z-index in the document — no number
+       can put an in-flow element back on top of it. That is why this bar used to
+       vanish behind every dialog, including the very dialog whose upload button
+       started it: the progress feedback appeared exactly when it was least
+       visible.
+
+       The fix is to move the bar into the same top layer, which is what
+       popover="manual" does. A popover in the top layer stacks by SHOW ORDER, so
+       opening it after the dialog puts it above; it is also non-modal, so it
+       adds no backdrop and does not take focus away from the form. It is
+       positioned as a plain fixed box, so it looks unchanged. The z-index below
+       is now only a fallback for the brief frame between boot and the popover
+       API being applied, and is deliberately below the dialogs. */
     .upload-progress {
       position: fixed;
       left: 50%;
@@ -638,6 +662,18 @@
       border-radius: 12px;
       box-shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.7);
       z-index: 9996;
+      /* A popover is `display: none` until shown, and the element carries a
+         `hidden` attribute for the no-JS / pre-boot case. Both must lose, or
+         the bar never appears. `margin: 0` neutralises the popover UA default,
+         which would otherwise offset the fixed positioning. */
+      margin: 0;
+      padding: 14px 16px;
+      overflow: visible;
+    }
+    /* Shown via showPopover(), which sets the popover's own display. The
+       `hidden` attribute is only removed once that has happened. */
+    .upload-progress:popover-open {
+      display: block;
     }
     .upload-progress-head {
       display: flex;
@@ -1809,14 +1845,38 @@
            row first and swaps its in-memory cache from a res.on('finish')
            handler, so the NEXT request is judged against the new list. -->
       <section id="tab-settings" role="tabpanel" aria-labelledby="tabbtn-settings" tabindex="0" style="display: none;">
-        <div class="metric-card" style="max-width: 720px;">
+        <div class="metric-card" id="cors-panel" style="max-width: 720px;">
           <h3 style="font-size: 1rem; margin-bottom: 4px;">CORS allowed origins</h3>
-          <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 16px;">
+          <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 16px;" id="cors-intro">
             The browser origins allowed to call this server from another hostname.
             A plain <code>http://</code> origin is flagged, because traffic to it
             is unencrypted.
           </p>
 
+          <!-- DESKTOP BUILD. Replaces the editor above rather than sitting beside
+               it. The server accepts every origin in this mode, so an editable
+               allowlist would be a control that silently does nothing — worse
+               than showing no control, because it implies a restriction that is
+               not there. The wording states the consequence rather than just the
+               mode, because "unrestricted" without that is not a warning. -->
+          <div id="cors-disabled-notice" hidden>
+            <p style="color: var(--text-muted); font-size: 0.8rem; margin: 0 0 12px;">
+              <strong>Origin restrictions are switched off in the desktop app.</strong>
+              Every browser origin is accepted, so this list is not enforced and
+              nothing here needs changing.
+            </p>
+            <p style="color: var(--text-muted); font-size: 0.8rem; margin: 0 0 12px;">
+              The app binds to <code>127.0.0.1</code> only, so this reaches the CMS
+              from this machine alone. It does not put the server on your network.
+            </p>
+            <p style="color: #fbbf24; font-size: 0.8rem; margin: 0;">
+              The CMS has no login, so any page you visit in any browser on this
+              computer could read and change your collection while this app is
+              running. Close the app when using untrusted sites.
+            </p>
+          </div>
+
+          <div id="cors-editor">
           <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 6px;">
             Currently in force: <strong id="cors-source">not loaded</strong>
           </p>
@@ -1843,6 +1903,7 @@
             </button>
           </div>
           <p id="cors-message" style="font-size: 0.8rem; margin: 10px 0 0;"></p>
+          </div>
         </div>
 
         <!-- TELEGRAM NOTIFICATIONS.
@@ -1881,6 +1942,66 @@
              nothing, so it is safe to press with a wrong chat id and it tells
              you which half is broken. "Send test message" only means anything
              once both halves are right. -->
+        <!-- TRANSFER: EXPORT / IMPORT.
+             This is the supported way to move a collection between a desktop
+             install and a self-hosted server, in either direction. The two
+             halves are deliberately NOT symmetric in tone: exporting is
+             harmless and needs no confirmation, importing destroys the current
+             data and is routed through a confirm dialog AND an explicit
+             confirm=true on the request. Import also shows what the archive
+             contains BEFORE anything is written, so "replace" is never a
+             surprise — the operator has read the numbers and agreed. -->
+        <div class="metric-card" style="max-width: 720px; margin-top: 20px;">
+          <h3 style="font-size: 1rem; margin-bottom: 4px;">Move this collection</h3>
+          <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 16px;">
+            Export everything — every costume, prop, lens, maker and image — into
+            one <code>.zip</code>, then import it on the other machine. Use this
+            to move between the desktop app and a self-hosted server.
+          </p>
+
+          <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 8px;">
+            <strong>Export</strong> — safe, changes nothing here.
+          </p>
+          <div class="modal-actions" style="margin-top: 0; margin-bottom: 20px;">
+            <button type="button" class="btn btn-primary" id="export-btn"
+                    onclick="exportCollection()">
+              Download everything (.zip)
+            </button>
+          </div>
+          <p id="transfer-message" style="font-size: 0.8rem; margin: 0 0 20px;"></p>
+
+          <hr style="border: none; border-top: 1px solid var(--border, #333); margin: 0 0 20px;">
+
+          <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 8px;">
+            <strong>Import</strong> — replaces the data on this machine.
+          </p>
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label for="import-file">Archive (.zip) exported from the other machine</label>
+            <input type="file" class="form-control" id="import-file" accept=".zip,application/zip"
+                   onchange="inspectChosenArchive(this.files && this.files[0])">
+          </div>
+
+          <div id="import-report" hidden style="margin-bottom: 14px;">
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin: 0 0 10px;"
+               id="import-report-text"></p>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label for="import-mode">How should it be applied?</label>
+              <select class="form-control" id="import-mode">
+                <option value="replace">Replace — this machine ends up with exactly the archive</option>
+                <option value="merge">Merge — keep what is already here, add anything new</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="modal-actions" style="margin-top: 14px;">
+            <button type="button" class="btn btn-secondary" id="import-btn"
+                    onclick="importCollection()" disabled>
+              Import…
+            </button>
+          </div>
+          <p class="field-error" id="import-error"></p>
+        </div>
+
         <div class="metric-card" style="max-width: 720px; margin-top: 20px;">
           <h3 style="font-size: 1rem; margin-bottom: 4px;">Telegram notifications</h3>
           <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 16px;">
@@ -2615,7 +2736,7 @@
        the last byte leaves the browser. It then holds at "Processing…" until
        the response arrives, because the server-side sharp conversion is a real
        and visible part of the wait that the byte counter cannot measure. -->
-  <div class="upload-progress" id="upload-progress" hidden>
+  <div class="upload-progress" id="upload-progress" popover="manual" hidden>
     <div class="upload-progress-head">
       <span id="upload-progress-label">Uploading photos…</span>
       <span id="upload-progress-pct">0%</span>
@@ -3146,6 +3267,18 @@
       // their own hidden <input> because a prop can be edited from the grid and
       // from the modal, and the two must not fight over one pending FileList.
       propImageUploadTargetId: null,
+      // URLs uploaded into the OPEN Edit Prop dialog that are not yet saved.
+      //
+      // A photo is uploaded the moment it is chosen, so the user can see it while
+      // deciding — which means the file already exists on the server before Save
+      // is pressed. This is the record of what was uploaded-but-unsaved, so
+      // Cancel can hand those files to DELETE /api/images/discard instead of
+      // leaving one orphan per abandoned dialog. Keyed by prop id, cleared on
+      // save and on close.
+      propUnsavedImageUrls: {},
+      // The prop whose dialog is open, so a dialog-level close can clean up.
+      // Null whenever no Edit Prop dialog is showing.
+      editingPropModalOpen: false,
       editingCostumeId: null,
       editingPropId: null,
       editingLensId: null,
@@ -3166,6 +3299,10 @@
       corsEnvDefault: [],
       corsSource: '',
       corsCurrentRequestOrigin: null,
+      // Desktop build only: the server does not enforce an allowlist at all, so
+      // the Settings tab shows an explanation instead of the editor. Defaults
+      // to false, which is the container's behaviour.
+      corsDisabled: false,
       corsLoaded: false,
       corsLoading: false,
       // Telegram settings. `telegramToken` is the server's DESCRIPTION of the
@@ -3356,7 +3493,7 @@
       const processing = phase === 'processing';
       const safeFraction = Number.isFinite(fraction) ? Math.max(0, Math.min(1, fraction)) : 0;
 
-      box.hidden = false;
+      showUploadProgressBox(box);
       fill.style.width = Math.round(safeFraction * 100) + '%';
       fill.classList.toggle('is-processing', processing);
 
@@ -3369,9 +3506,46 @@
       if (note) note.textContent = detail || '';
     }
 
+    /**
+     * Reveal the progress bar ABOVE whatever is on screen.
+     *
+     * A modal <dialog> lives in the browser's top layer, which paints above every
+     * z-index in the document — so the bar used to disappear behind the very
+     * dialog whose upload button started it. Promoting the bar to the top layer
+     * as well (it is a popover, see the markup) is the only thing that can win
+     * that comparison, because top-layer elements stack by SHOW ORDER.
+     *
+     * `showPopover` is called on every update rather than once, because a second
+     * call while already open throws, and the uploads this serves are
+     * concurrent. The `hidden` attribute is removed as well: it is what makes
+     * the element display:none before the popover is shown, and leaving it on
+     * would keep the bar invisible even in the top layer.
+     */
+    function showUploadProgressBox(box) {
+      if (box.hidden) box.hidden = false;
+      // No popover support (or a browser that predates it): the element is
+      // already un-hidden and positioned fixed, so it is visible in the normal
+      // flow. That is the pre-existing behaviour and is a graceful fallback.
+      if (typeof box.showPopover === 'function') {
+        try {
+          if (!box.matches(':popover-open')) box.showPopover();
+        } catch (_) {
+          /* already open, or not a popover after all */
+        }
+      }
+    }
+
     function hideUploadProgress() {
       const box = document.getElementById('upload-progress');
-      if (box) box.hidden = true;
+      if (!box) return;
+      if (typeof box.hidePopover === 'function') {
+        try {
+          if (box.matches(':popover-open')) box.hidePopover();
+        } catch (_) {
+          /* not open */
+        }
+      }
+      box.hidden = true;
     }
 
     /**
@@ -4086,6 +4260,39 @@
       if (!y) return;   // already at the top: nothing to put back
       window.scrollTo(0, y);
       requestAnimationFrame(() => window.scrollTo(0, y));
+    }
+
+    /**
+     * Show a modal dialog WITHOUT moving the page.
+     *
+     * WHY THIS EXISTS. A native <dialog> opened with showModal() is centred in
+     * the VIEWPORT, and the browser scrolls the document to bring it into view.
+     * Every dialog in this app is a fixed panel near the top of the document, so
+     * opening one while the reader is halfway down a grid of cards yanked the
+     * page to the top — the reader lost their place to look at a form, and had to
+     * scroll back afterwards. It was the single most jarring thing in the UI.
+     *
+     * WHY A WRAPPER AND NOT A CSS FIX. `scroll-behavior`, `overflow-anchor` and
+     * `position: fixed` on the backdrop all fail here for the same reason: the
+     * scroll is performed by the dialog machinery, not by anything the styles
+     * own. The scroll has to be measured and undone in script.
+     *
+     * WHY IT RESTORES TWICE. The first write is in the same task as showModal(),
+     * where the document is already at full height, so it lands. The second is on
+     * the next frame, because showModal() can finish its own scroll adjustment
+     * after this task and would otherwise win. The second write is a no-op when
+     * the position never actually changed.
+     *
+     * Deliberately does NOT touch the lightbox, the confirm dialog or the text
+     * entry: those are not opened over a scrolled grid, and the confirm dialog
+     * in particular is often opened from a toast while the page is mid-scroll,
+     * where leaving the position alone is the whole point.
+     */
+    function showModalPreservingScroll(dialog) {
+      if (!dialog) return;
+      const y = currentScrollY();
+      dialog.showModal();
+      if (y > 0) restoreScrollY(y);
     }
 
     /**
@@ -6480,6 +6687,19 @@
     }
 
     function renderCorsSettings() {
+      // DESKTOP BUILD: restrictions are off, so the editor is replaced by an
+      // explanation. Hiding it is the honest rendering — leaving a Save button
+      // wired to a list the server ignores would look like a control that works.
+      if (state.corsDisabled) {
+        const notice = document.getElementById('cors-disabled-notice');
+        const editor = document.getElementById('cors-editor');
+        const intro = document.getElementById('cors-intro');
+        if (notice) notice.hidden = false;
+        if (editor) editor.hidden = true;
+        if (intro) intro.hidden = true;
+        return;
+      }
+
       const list = document.getElementById('cors-origin-list');
       if (list) {
         list.textContent = '';
@@ -6506,6 +6726,174 @@
       }
     }
 
+    // ======================================================================
+    // TRANSFER — export / import the whole collection
+    //
+    // The export is a plain anchor download rather than a fetch, because the
+    // response is a .zip and the browser's own download handling is simpler and
+    // more reliable than assembling a Blob here — a large archive then never
+    // passes through JS memory at all. There is no completion event for a
+    // navigation download, so the message reports what was STARTED rather than
+    // claiming a finished file.
+    // ======================================================================
+
+    function transferMessage(text, kind) {
+      const box = document.getElementById('transfer-message');
+      if (!box) return;
+      box.textContent = text || '';
+      box.style.color = kind === 'error' ? '#f87171'
+        : kind === 'warn' ? '#fbbf24'
+        : 'var(--success, #34d399)';
+    }
+
+    function importError(text) {
+      const box = document.getElementById('import-error');
+      if (!box) return;
+      box.textContent = text || '';
+      box.style.display = text ? 'block' : 'none';
+    }
+
+    function humanBytes(n) {
+      const value = Number(n) || 0;
+      if (value < 1024) return value + ' B';
+      if (value < 1024 * 1024) return (value / 1024).toFixed(1) + ' KB';
+      if (value < 1024 * 1024 * 1024) return (value / (1024 * 1024)).toFixed(1) + ' MB';
+      return (value / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+    }
+
+    function exportCollection() {
+      const btn = document.getElementById('export-btn');
+      importError('');
+      transferMessage('Building the archive… this can take a moment with many photos.', 'warn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Preparing…'; }
+
+      const link = document.createElement('a');
+      link.href = '/api/transfer/export';
+      link.download = '';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      setTimeout(() => {
+        if (btn) { btn.disabled = false; btn.textContent = 'Download everything (.zip)'; }
+        transferMessage('Download started. Check your browser downloads.', 'ok');
+      }, 1500);
+    }
+
+    /**
+     * Read the chosen archive and show what it contains, WITHOUT importing.
+     *
+     * This is why the Import button stays disabled until an archive has been
+     * read successfully: the operator is asked to agree to specific numbers
+     * before the destructive request is ever built.
+     */
+    function inspectChosenArchive(file) {
+      const report = document.getElementById('import-report');
+      const text = document.getElementById('import-report-text');
+      const btn = document.getElementById('import-btn');
+      importError('');
+      if (report) report.hidden = true;
+      if (btn) btn.disabled = true;
+      if (!file) return;
+
+      const form = new FormData();
+      form.append('archive', file);
+
+      transferMessage('Reading the archive…', 'warn');
+      api('/api/transfer/inspect', { method: 'POST', body: form })
+        .then(data => {
+          const when = data.createdAt ? new Date(data.createdAt).toLocaleString() : 'an unknown date';
+          const from = data.source === 'desktop' ? 'the desktop app' : 'a server';
+          const rows = Object.keys(data.tables || {})
+            .filter(k => data.tables[k] > 0)
+            .map(k => data.tables[k] + ' ' + k.toLowerCase())
+            .join(', ');
+
+          if (text) {
+            // Counts are listed rather than summarised, because "what will this
+            // replace" is answered by numbers the operator can check against
+            // what they remember, not by a reassuring adjective.
+            text.textContent = 'Made by ' + from + ' on ' + when + '. It holds '
+              + (rows || 'no records') + ' and ' + data.uploads + ' image'
+              + (data.uploads === 1 ? '' : 's') + ' (' + humanBytes(data.uploadBytes) + ').';
+          }
+          if (report) report.hidden = false;
+          if (btn) btn.disabled = false;
+          transferMessage('', 'ok');
+        })
+        .catch(err => {
+          importError(err && err.message ? err.message : 'That file could not be read as a Cosplay CMS archive.');
+          transferMessage('', 'error');
+        });
+    }
+
+    function importCollection() {
+      const input = document.getElementById('import-file');
+      const file = input && input.files && input.files[0];
+      if (!file) { importError('Choose a .zip archive first.'); return; }
+
+      const modeEl = document.getElementById('import-mode');
+      const mode = modeEl ? modeEl.value : 'replace';
+
+      if (mode === 'replace') {
+        confirmAction({
+          title: 'Replace everything on this machine?',
+          message: 'The costumes, props, lenses, makers and images currently on this machine are '
+                   + 'deleted and replaced with the contents of the archive. Anything added here '
+                   + 'since that export was made will be lost. A backup of the current database is '
+                   + 'kept on disk, but do not rely on finding it. Continue?',
+          confirmLabel: 'Replace everything'
+        }).then(ok => { if (ok) runImport(file, mode); });
+        return;
+      }
+
+      confirmAction({
+        title: 'Merge this archive in?',
+        message: 'Records already on this machine are kept, and anything new in the archive is added.',
+        confirmLabel: 'Merge'
+      }).then(ok => { if (ok) runImport(file, mode); });
+    }
+
+    function runImport(file, mode) {
+      const btn = document.getElementById('import-btn');
+      importError('');
+      if (btn) { btn.disabled = true; btn.textContent = 'Importing…'; }
+      transferMessage('Importing. Do not close the app while this runs.', 'warn');
+
+      const form = new FormData();
+      form.append('archive', file);
+      form.append('mode', mode);
+      // The server refuses without this. It is set here, after the operator
+      // agreed in the dialog above, so the destructive path always costs a
+      // second, visible act.
+      form.append('confirm', 'true');
+
+      api('/api/transfer/import', { method: 'POST', body: form })
+        .then(data => {
+          const bits = [(data.imagesWritten || 0) + ' image'
+            + (data.imagesWritten === 1 ? '' : 's') + ' restored'];
+
+          // The allowlist is host configuration, so it is reconciled rather than
+          // carried over. Say which way it went — an operator who moved a
+          // collection and then found their LAN origin gone needs to know that
+          // was deliberate, not a bug.
+          if (data.cors && data.cors.reason === 'desktop-permissive') {
+            bits.push('origin rules from the other machine were ignored — this app does not restrict origins');
+          } else if (data.cors && data.cors.applied && data.cors.added && data.cors.added.length) {
+            bits.push('this server keeps its own allowed origins, and localhost was added');
+          }
+          transferMessage('Imported. ' + bits.join('; ') + '. Reloading…', 'ok');
+          // The page is showing data that no longer exists, so it reloads
+          // rather than trying to reconcile its caches in place.
+          setTimeout(() => window.location.reload(), 1200);
+        })
+        .catch(err => {
+          importError(err && err.message ? err.message : 'The import failed.');
+          transferMessage('', 'error');
+          if (btn) { btn.disabled = false; btn.textContent = 'Import…'; }
+        });
+    }
+
     function loadCorsSettings() {
       if (state.corsLoading) return Promise.resolve();
       state.corsLoading = true;
@@ -6515,6 +6903,7 @@
           state.corsEnvDefault = (data.envDefault || []).map(String);
           state.corsSource = String(data.source || '');
           state.corsCurrentRequestOrigin = data.currentRequestOrigin || null;
+          state.corsDisabled = data.corsDisabled === true;
           state.corsLoaded = true;
           corsSetError('');
           renderCorsSettings();
@@ -6526,6 +6915,7 @@
     }
 
     function addCorsOrigin() {
+      if (state.corsDisabled) return;
       const input = document.getElementById('cors-origin-input');
       if (!input) return;
       const value = input.value.trim();
@@ -6590,6 +6980,7 @@
     }
 
     function saveCorsSettings() {
+      if (state.corsDisabled) return;
       const payload = { origins: state.corsDraft.slice() };
 
       // Does this save drop the origin we are calling from? If so the server
@@ -6629,6 +7020,7 @@
     }
 
     function resetCorsSettings() {
+      if (state.corsDisabled) return;
       confirmAction({
         title: 'Reset the CORS allowlist?',
         message: 'This discards the saved allowlist and goes back to the value configured in CORS_ORIGIN on the ' +
@@ -7377,6 +7769,9 @@
         // rather than in closeModal() — a cancelled dialog must NOT clear it, or
         // reopening the modal would silently drop already-uploaded photos.
         delete state.imageUrlsCache[NEW_PROP_IMAGES_KEY];
+        // The photos are now referenced by a saved prop, so they must not be
+        // discarded by the close handler that fires next.
+        delete state.propUnsavedImageUrls[NEW_PROP_IMAGES_KEY];
         document.getElementById('add-prop-media').innerHTML = MEDIA_PLACEHOLDER_HTML;
         document.getElementById('add-prop-strip').innerHTML = '';
         document.getElementById('add-prop-photo-count').textContent = '0';
@@ -7531,7 +7926,7 @@
         ? makerType
         : (select.options[0] ? select.options[0].value : makerType);
 
-      dialog.showModal();
+      showModalPreservingScroll(dialog);
     }
 
     async function handleEditMaker(e) {
@@ -7641,7 +8036,7 @@
       // silently dropped, so it is formatted plainly when finite.
       form.querySelector('[name="buyPrice"]').value = plainNumber(costume.buyPrice);
 
-      dialog.showModal();
+      showModalPreservingScroll(dialog);
     }
 
     async function handleEditCostume(e) {
@@ -7796,7 +8191,13 @@
       state.imageUrlsCache[clean(prop.id)] = parseImageUrls(prop.imageUrls);
       renderPropImages(prop, 'modal-edit-prop');
 
-      dialog.showModal();
+      // Any leftover pending list is from a previous dialog that was closed
+      // without saving; drop it here so it cannot be discarded later against
+      // this id by mistake.
+      delete state.propUnsavedImageUrls[clean(prop.id)];
+      state.editingPropModalOpen = true;
+
+      showModalPreservingScroll(dialog);
     }
 
     async function handleEditProp(e) {
@@ -7864,6 +8265,11 @@
           method: 'PUT',
           body: JSON.stringify(payload)
         });
+        // The photos are now referenced by a saved record, so they are no longer
+        // ours to delete. Clearing BEFORE the dialog closes is what stops the
+        // close handler from discarding files this very call just committed.
+        delete state.propUnsavedImageUrls[id];
+        state.editingPropModalOpen = false;
         state.editingPropId = null;
         showToast('Prop updated.', 'success');
         closeModal('modal-edit-prop');
@@ -7924,7 +8330,7 @@
       form.querySelector('[name="expiryDate"]').value = dateInputValue(lens.expiryDate);
       form.querySelector('[name="notes"]').value = clean(lens.notes);
 
-      dialog.showModal();
+      showModalPreservingScroll(dialog);
     }
 
     async function handleEditLens(e) {
@@ -8538,10 +8944,19 @@
       // closes without saving, and reopens must SEE what they already attached
       // — otherwise the thumbnails vanish while the files are still stashed and
       // handleCreateProp() would silently send them to the new prop anyway.
+      //
+      // This is the counterpart to onPropDialogClosed(), which DELETES both the
+      // stash and the uploaded files when the Add dialog closes unsaved. The two
+      // are deliberately opposite: closing means "I changed my mind", so the
+      // files go and the stash is cleared. Reopening therefore starts empty,
+      // which is the only consistent reading — keeping a preview of files that
+      // have been deleted off the server would render a broken image.
       if (id === 'modal-add-prop') {
         renderPropImages({ id: NEW_PROP_IMAGES_KEY, name: '', imageUrls: '[]' }, 'modal-add-prop');
+        const count = document.getElementById('add-prop-photo-count');
+        if (count) count.textContent = '0';
       }
-      dialog.showModal();
+      showModalPreservingScroll(dialog);
     }
 
     /**
@@ -8610,6 +9025,96 @@
     function closeModal(id) {
       const dialog = document.getElementById(id);
       if (dialog && dialog.open) dialog.close();
+    }
+
+    /**
+     * Discard photos uploaded into a prop dialog that closed WITHOUT a save.
+     *
+     * Bound to the dialogs' own `close` event rather than to the Cancel button,
+     * because `close` is the only event that fires for EVERY way out: the Cancel
+     * button, the injected ×, and the Escape key. Wiring only the button would
+     * leave the two keyboard paths silently orphaning a file each.
+     *
+     * The saved paths clear their own pending list first (see handleEditProp and
+     * handleCreateProp), so by the time this runs there is nothing left to delete
+     * for a saved dialog and the guard below makes that explicit rather than
+     * relying on the ordering.
+     */
+    function onPropDialogClosed() {
+      if (!state.editingPropModalOpen) {
+        // The Add Prop dialog uses the sentinel slot and has no such flag.
+        discardUnsavedPropImages(NEW_PROP_IMAGES_KEY);
+        delete state.imageUrlsCache[NEW_PROP_IMAGES_KEY];
+        return;
+      }
+      const propId = state.editingPropId;
+      state.editingPropModalOpen = false;
+      if (!propId) return;
+      discardUnsavedPropImages(propId);
+      // Drop the staged URLs from the cache too, or the next open of this prop
+      // would show photos the server never received.
+      const server = state.props.find(p => clean(p.id) === clean(propId));
+      state.imageUrlsCache[propId] = server ? parseImageUrls(server.imageUrls) : [];
+    }
+
+    // ==========================================================================
+    // UNSAVED PHOTO CLEANUP (Edit Prop)
+    //
+    // A photo is uploaded the instant it is picked, so the operator can see a
+    // preview in the dialog while they decide. The cost of that is that the file
+    // already exists on the server BEFORE Save is pressed — so pressing Cancel
+    // would otherwise leave a file nothing references, once per abandoned
+    // dialog. The upload directory has no collector (see the README's open
+    // issue on orphaned images), so "unreferenced" would also mean "forever".
+    //
+    // Deletion is therefore explicit and is ONLY done for files this session
+    // uploaded and has not saved. The server refuses to delete anything a saved
+    // record still points at, so a mistake here cannot destroy real data — but
+    // the client half still has to be careful about WHICH files it offers.
+    // ==========================================================================
+
+    /**
+     * Delete one uploaded-but-unsaved file.
+     *
+     * Fire-and-forget on purpose: this runs on a Cancel or a dialog close, where
+     * there is no one left to read a result, and a failure must not interrupt
+     * closing the dialog. The server's 409 (still referenced) is swallowed for
+     * the same reason — the important thing is that the dialog closes.
+     */
+    function discardUnsavedImage(url) {
+      if (!url) return;
+      try {
+        fetch('/api/images/discard?url=' + encodeURIComponent(url), { method: 'DELETE' })
+          .catch(() => {});
+      } catch (_) {
+        /* a discarded cleanup is not worth surfacing */
+      }
+    }
+
+    /**
+     * Discard every photo uploaded into the given prop's dialog but never saved.
+     *
+     * @param {string} propId the prop id, or NEW_PROP_IMAGES_KEY
+     */
+    function discardUnsavedPropImages(propId) {
+      const pending = state.propUnsavedImageUrls[propId];
+      if (!pending || !pending.length) return;
+      delete state.propUnsavedImageUrls[propId];
+      pending.forEach(discardUnsavedImage);
+    }
+
+    /**
+     * Record photos as uploaded-but-unsaved, so a later Cancel can clean them up.
+     *
+     * Deduped because the same file can be picked twice (the input is cleared
+     * before each click precisely so a re-pick fires change, and a user may
+     * choose the same photo again).
+     */
+    function rememberUnsavedPropImages(propId, urls) {
+      if (!propId || !urls || !urls.length) return;
+      const current = state.propUnsavedImageUrls[propId] || [];
+      urls.forEach(url => { if (current.indexOf(url) === -1) current.push(url); });
+      state.propUnsavedImageUrls[propId] = current;
     }
 
     // ==========================================================================
@@ -8802,12 +9307,34 @@
 
         if (isNewProp) {
           renderPropImages({ id: NEW_PROP_IMAGES_KEY, name: '', imageUrls: '[]' });
+          // Recorded as unsaved even though the sentinel is stashed rather than
+          // PUT: the file is on the server already, so closing the Add dialog
+          // without saving must still delete it. The prop has no id yet, so
+          // handleCreateProp() carries the URLs in the POST instead.
+          rememberUnsavedPropImages(NEW_PROP_IMAGES_KEY, urls);
           showToast(urls.length === 1 ? 'Photo attached. Save the prop to keep it.' : urls.length + ' photos attached. Save the prop to keep them.', 'success');
           return;
         }
 
         renderPropImages(prop);
         await loadProps();
+
+        // FROM THE EDIT DIALOG: stage, do not save.
+        //
+        // The photo is already on the server (that is what makes the preview
+        // possible), but it must NOT be written to the prop until the operator
+        // presses Save — otherwise Cancel would be a lie, because the change
+        // they are trying to abandon has already been committed. handleEditProp
+        // sends the whole set with the rest of the form, and the unsaved list
+        // below is what lets a Cancel delete the file again.
+        //
+        // From a CARD button there is no dialog and no Save to wait for, so the
+        // immediate PUT is the correct behaviour there and is unchanged.
+        if (state.editingPropModalOpen) {
+          rememberUnsavedPropImages(targetId, urls);
+          showToast(urls.length === 1 ? 'Photo ready. Press Save to keep it.' : urls.length + ' photos ready. Press Save to keep them.', 'success');
+          return;
+        }
 
         // One PUT carrying the WHOLE set — the route replaces imageUrls, so a
         // partial body would drop the photos already on the prop. The
@@ -8976,6 +9503,14 @@
         // rather than authored into each dialog, so they exist by the time the
         // first modal is shown.
         installModalCloseButtons();
+        // A photo picked in a prop dialog is uploaded before Save, so BOTH prop
+        // dialogs need to know when they closed without saving — otherwise each
+        // abandoned dialog leaves a file on the server. The `close` event is the
+        // only one that covers Cancel, the injected × and Escape alike.
+        ['modal-edit-prop', 'modal-add-prop'].forEach(id => {
+          const d = document.getElementById(id);
+          if (d) d.addEventListener('close', onPropDialogClosed);
+        });
         // The Add Lens modal's swatch row holds no state, so it is built once here
         // rather than on every open. The Edit Lens row is rebuilt by
         // openEditLens() because what is "selected" depends on the row being opened.

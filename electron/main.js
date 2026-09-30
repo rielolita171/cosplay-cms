@@ -140,6 +140,36 @@ if (configuredOrigins.indexOf(electronOrigin) === -1) {
 process.env.CORS_ORIGIN = configuredOrigins.join(',');
 
 /**
+ * Make the serving origin non-removable, for the database-migration case.
+ *
+ * CORS_ORIGIN above is necessary but NOT sufficient, and the reason is the
+ * resolution order in src/services/settings.js:
+ *
+ *     database row  ->  CORS_ORIGIN  ->  hardcoded default
+ *
+ * A database moved over from a self-hosted install brings its `cors_origins`
+ * row with it. That row names the origin it was saved on (typically
+ * http://localhost:4001), outranks everything set here, and the desktop app's
+ * own origin is dropped from the allowlist. Browsers omit Origin on same-origin
+ * GETs, so reads keep returning 200 and the app looks healthy — but they DO
+ * send it on a same-origin JSON PUT/POST/DELETE, so every settings write comes
+ * back 403 CORS_DENIED, including the write that would fix the allowlist and
+ * the "reset" that would clear it. The operator is stuck in the Settings tab
+ * with no in-app way out, and the row can only be cleared by hand-editing JSON
+ * in a SQLite file.
+ *
+ * CMS_SELF_ORIGIN is read by settings.js and merged into the resolved list
+ * AFTER that chain, so it survives a stored override. It is deliberately not a
+ * wildcard: the allowlist still rejects "null" and every foreign origin, which
+ * matters because this app has no authentication at all.
+ *
+ * Set from process.env as well as unconditionally, so an operator who exports
+ * CMS_SELF_ORIGIN for a different port (e.g. to point at a LAN-bound instance)
+ * is not silently overridden.
+ */
+process.env.CMS_SELF_ORIGIN = process.env.CMS_SELF_ORIGIN || electronOrigin;
+
+/**
  * A shipped app has no .env. The container reads one; dotenv finds nothing and
  * every variable falls back to its default, which is the correct outcome. The
  * Telegram token and the API key are deliberately NOT invented here — they are

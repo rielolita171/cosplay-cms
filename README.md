@@ -51,7 +51,7 @@ container (**the primary target**), and as a packaged desktop app (Electron,
 npm install
 npm start          # node src/server.js, listens on PORT (default 4001)
 npm run dev        # node --watch src/server.js
-npm test           # makers, wishlist and lens-expiry suites
+npm test           # makers, wishlist, lens-expiry and transfer suites
 ```
 
 ## Desktop app (Electron)
@@ -165,9 +165,11 @@ Being unauthenticated is not the same as undefended. What remains:
   viewer-tier account could not fetch an image directly. **This is a genuine
   regression in per-image access control**, accepted as part of removing auth —
   but it is the one to be aware of, because an image URL is now a bearer
-  reference with no expiry. (The desktop build is the one case where this is
-  contained: it binds `127.0.0.1`, so the mount is reachable only from the
-  app's own window.)
+  reference with no expiry. (The desktop build is the one case where the blast
+  radius is smaller — it binds `127.0.0.1` — but it also **switches the origin
+  allowlist off entirely**, so any page in any browser on that machine can reach
+  it. See "The desktop build runs with CORS restrictions switched off" in
+  [`ELECTRON.md`](ELECTRON.md).)
 - **Every record is readable and writable by any client on the network.**
 
 ### Where the boundary is
@@ -204,6 +206,15 @@ Engineer-facing notes. These are **real, unfixed defects** in the tree right now
 Severities are the honest ones, not the flattering ones: `[low]` means a comment
 or a cosmetic value is wrong, and `[open]` means a known gap with no code behind
 it at all.
+
+> **Test coverage.** `npm test` runs four suites: makers (85), wishlist (59),
+> lens expiry (44) and transfer (61). The transfer suite covers the ZIP
+> container, export, the inspect pre-flight, import in both modes, the ZIP-slip
+> guard, the HTTP confirmation gate, and the CORS reconciliation in both
+> migration directions. **Not covered:** anything needing a browser, so the
+> Settings "Move this collection" panel is verified only by static checks — the
+> inline script parses and every `getElementById` target exists, but the panel
+> has never been rendered.
 
 ### `[low]` The z-index comment on the boot splash is wrong
 
@@ -270,7 +281,11 @@ it at all.
 - **A desktop install does not see the Docker database.** Everything writable
   lives under Electron's `userData`, which is a *different* database and upload
   store from the container's Docker volume. They share nothing in either
-  direction.
+  direction. **Settings → Move this collection** is the supported way to get
+  data across: export on one side, import on the other. It carries every table
+  and every image, takes a backup first, and handles the origin allowlist per
+  direction — discarded when the target is a desktop app, and the target
+  server's own rules preserved when it is self-hosted.
 - **Fix.** Build and run a macOS DMG on a real Mac, run the installer once
   natively on Windows, and add code signing plus an `app-builder` update feed.
 

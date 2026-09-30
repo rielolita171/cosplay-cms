@@ -14,10 +14,11 @@
     "electron:build:win": "npm run electron:sqlite:win && electron-builder --win --x64",
     "electron:dist": "npm run electron:sqlite && electron-builder -mwl",
     "electron:dist:win": "npm run electron:sqlite:win && electron-builder --win --x64",
-    "test": "npm run test:makers && npm run test:wishlist && npm run test:lenses",
+    "test": "npm run test:makers && npm run test:wishlist && npm run test:lenses && npm run test:transfer",
     "test:makers": "node scripts/test_makers.js",
     "test:wishlist": "node scripts/test_wishlist.js",
     "test:lenses": "node scripts/test_lens_expiry_checker.js",
+    "test:transfer": "node scripts/test_transfer.js",
     "test:api": "node scripts/test_api.js",
     "test:phase4": "node scripts/test_phase4.js"
   },

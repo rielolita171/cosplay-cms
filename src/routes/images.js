@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const upload = require('../middleware/imageUpload');
 const { processImage, processImages } = require('../middleware/imageProcessor');
+const { esc } = require('../services/sqlSafety');
 
 // ============================================================================
 // POST /api/images/upload - CANONICAL single image upload
@@ -144,6 +145,97 @@ router.get('/stats', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ===========================================================================
+// DELETE /api/images/discard - Drop an image the operator decided not to keep
+//
+// WHY THIS EXISTS
+// A photo chosen in an Edit dialog is uploaded to the server IMMEDIATELY, so
+// that the user can see it while deciding. If they then press Cancel, the file
+// is already on disk and already in the session cache. Without this endpoint
+// the file is an orphan: nothing references it, nothing will ever collect it,
+// and the upload directory grows by one image per abandoned dialog.
+//
+// The refusal to delete a REFERENCED image is the whole point of this
+// endpoint existing at this layer. A filename alone is not enough to know
+// whether an image is in use — costume, prop and lens rows each hold their own
+// JSON array of URLs — so the check has to ask the database, and it has to ask
+// ALL THREE tables. Deleting a file that a row still points at would leave a
+// broken image on a saved record, which is far worse than a wasted file.
+//
+// This is deliberately narrow: one filename, only a basename (never a path),
+// and only files inside the resolved UPLOAD_DIR.
+// ===========================================================================
+router.delete('/discard', async (req, res) => {
+  try {
+    const raw = String((req.query && req.query.url) || (req.body && req.body.url) || '').trim();
+    if (!raw) {
+      return res.status(400).json({ error: 'No image url given.', code: 'NO_URL' });
+    }
+
+    // Only the FILENAME is used, and only a bare basename. Accepting a path
+    // here would be a delete-any-file primitive, and this app has no
+    // authentication, so that would be catastrophic rather than merely careless.
+    let filename;
+    try {
+      filename = decodeURIComponent(raw.split('/').pop() || '');
+    } catch (_) {
+      return res.status(400).json({ error: 'The image url is malformed.', code: 'BAD_URL' });
+    }
+
+    if (!filename || filename === '.' || filename === '..' || filename.indexOf('/') !== -1
+        || filename.indexOf('\\') !== -1 || filename.indexOf('\0') !== -1) {
+      return res.status(400).json({ error: 'That is not a valid image name.', code: 'BAD_URL' });
+    }
+
+    const { UPLOAD_DIR } = require('../services/paths');
+    const path = require('path');
+    const fs = require('fs');
+    const { runSql } = require('../services/db');
+
+    // Belt and braces on the resolved path: even a basename that survived the
+    // checks above (an encoded separator, a symlinked name) cannot point
+    // outside the upload directory.
+    const target = path.resolve(UPLOAD_DIR, filename);
+    if (target !== path.resolve(UPLOAD_DIR)
+        && !target.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) {
+      return res.status(400).json({ error: 'That is not a valid image name.', code: 'BAD_URL' });
+    }
+
+    // Referenced by ANY record? Then it is not ours to delete. Each of the three
+    // tables stores its image URL(s) in a differently-named TEXT column —
+    // Costume/Prop hold a JSON array in "imageUrls", ContactLens a single
+    // "imageUrl" — so all three are asked. A LIKE on the filename is sufficient
+    // here, and a false positive (a shared substring) only means we decline to
+    // delete, which is the safe direction to err in.
+    const needle = esc(filename);
+    const references = await runSql(
+      `SELECT (SELECT COUNT(*) FROM "Costume" WHERE imageUrls LIKE '%' || ${needle} || '%')`
+      + ` + (SELECT COUNT(*) FROM "Prop" WHERE imageUrls LIKE '%' || ${needle} || '%')`
+      + ` + (SELECT COUNT(*) FROM "ContactLens" WHERE imageUrl LIKE '%' || ${needle} || '%');`
+    );
+    const inUse = parseInt(String(references).trim(), 10) || 0;
+    if (inUse > 0) {
+      return res.status(409).json({
+        error: 'That image is still used by a saved record, so it was not deleted.',
+        code: 'IMAGE_IN_USE'
+      });
+    }
+
+    if (!fs.existsSync(target)) {
+      // Already gone. Reported as success on purpose: the caller's intent —
+      // "this file should not exist" — is already satisfied, and a 404 here
+      // would make an abandoned-dialog cleanup look like a failure.
+      return res.json({ ok: true, deleted: false, reason: 'already-absent' });
+    }
+
+    fs.unlinkSync(target);
+    res.json({ ok: true, deleted: true });
+  } catch (error) {
+    console.error('❌ discard image error:', error);
+    res.status(500).json({ error: error.message, code: 'DISCARD_FAILED' });
   }
 });
 

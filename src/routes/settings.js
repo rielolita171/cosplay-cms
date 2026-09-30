@@ -59,6 +59,10 @@ router.get('/settings/cors', async (req, res) => {
       source: effective.source,
       envDefault: envDefault,
       currentRequestOrigin: req.get('origin') || null,
+      // True on the desktop build, where the allowlist is not enforced at all.
+      // The UI keys its whole rendering off this, so the operator is never
+      // shown an editable list whose changes would have no effect.
+      corsDisabled: settings.isCorsDisabled(),
       limits: {
         maxOrigins: settings.MAX_ORIGINS,
         maxOriginLength: settings.MAX_ORIGIN_LENGTH
@@ -123,6 +127,22 @@ router.put('/settings/cors', corsWriteLimiter, async (req, res) => {
     const requestOrigin = req.get('origin') || null;
     const removesOwnOrigin = !!requestOrigin && validation.origins.indexOf(requestOrigin) === -1;
     const confirmed = body.confirmSelfRemoval === true;
+
+    // In permissive mode no stored list can lock anyone out — the server accepts
+    // every origin regardless of what is saved here — so LOCKOUT_RISK would be
+    // a dialog warning about a consequence that cannot occur. The desktop build
+    // skips it, and reports the change as not-a-self-removal.
+    if (settings.isCorsDisabled()) {
+      await settings.setCorsOrigins(validation.origins, null, { cacheImmediately: false });
+      res.on('finish', () => { settings.applyCorsOriginsCache(validation.origins); });
+      return res.json({
+        ok: true,
+        origins: validation.origins,
+        source: 'database',
+        removedOwnOrigin: false,
+        corsDisabled: true
+      });
+    }
 
     if (removesOwnOrigin && !confirmed) {
       return res.status(400).json({

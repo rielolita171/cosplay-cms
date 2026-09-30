@@ -277,6 +277,101 @@ function getDefaultOrigins() {
 }
 
 /**
+ * The origin this process is actually served on, injected by the desktop build.
+ *
+ * WHY THIS EXISTS
+ *
+ * A migrated database carries its `cors_origins` row with it. That row was
+ * saved on the machine where the app was self-hosted, so it names THAT origin
+ * — typically `http://localhost:4001` — and the desktop app runs on a different
+ * one (`http://127.0.0.1:4101`). Because the database row outranks
+ * `CORS_ORIGIN` in the resolution order, the injected desktop origin is
+ * discarded and the allowlist rejects the app's own requests:
+ *
+ *     GET  /api/costumes          (no Origin header)  -> 200, unaffected
+ *     PUT  /api/settings/cors     (Origin: 127.0.0.1:4101) -> 403 CORS_DENIED
+ *
+ * The 200 is what makes this look fine on a casual test. Browsers omit `Origin`
+ * on same-origin GETs but DO send it on a same-origin JSON PUT/POST/DELETE, so
+ * reads keep working while every settings write is refused — and the setting
+ * that would fix it is precisely the one being blocked. The operator is locked
+ * out of the Settings tab with no in-app way back, and "reset to default" is
+ * itself a write that 403s.
+ *
+ * The fix is to make the serving origin non-removable rather than to relax
+ * validation. The alternative — telling the operator to edit the row by hand —
+ * asks someone to hand-edit JSON in a SQLite file with no sqlite3 UI, which is
+ * the exact failure this project keeps trying to remove.
+ *
+ * WHY ONLY LOOPBACK, AND WHY OPT-IN
+ *
+ * The value comes from `CMS_SELF_ORIGIN`, which only electron/main.js sets, so
+ * this is inert for `npm start` and for Docker — the resolution chain for those
+ * is byte-for-byte what it was. It is validated through the same
+ * validateOneOrigin() used for every admin-supplied entry, so a malformed
+ * value degrades to "not set" rather than widening the allowlist.
+ *
+ * It is deliberately NOT a wildcard and does not disable the allowlist. Removing
+ * CORS entirely would also stop rejecting the opaque origin "null", which
+ * sandboxed iframes, `file://` and `data:` pages all send — on an API with no
+ * authentication at all that is a real hole, and it would not fix this problem
+ * anyway, because the origin being rejected here is a legitimate loopback one.
+ */
+function getSelfOrigin() {
+  const raw = process.env.CMS_SELF_ORIGIN;
+  if (!raw || String(raw).trim() === '') return null;
+  const check = validateOneOrigin(raw);
+  if (!check.ok) {
+    console.warn(
+      `⚠️  CMS_SELF_ORIGIN is invalid (${check.reason}) — the serving origin will not be added to the CORS allowlist.`
+    );
+    return null;
+  }
+  return check.origin;
+}
+
+/**
+ * Append the serving origin to a resolved list, if it is not already there.
+ *
+ * Note this can push the effective list one past MAX_ORIGINS. That is accepted
+ * deliberately: the cap exists to stop an admin assembling an unmanageable
+ * list, and silently dropping the origin the app is served on to respect it
+ * would reintroduce the exact lockout described above.
+ */
+function withSelfOrigin(origins) {
+  const self = getSelfOrigin();
+  if (!self) return origins;
+  return origins.indexOf(self) === -1 ? origins.concat([self]) : origins;
+}
+
+/**
+ * Is the CORS allowlist switched off entirely?
+ *
+ * TRUE only when CMS_SELF_ORIGIN is set, which only electron/main.js does. In
+ * that mode src/server.js accepts every origin, so the stored list, the .env
+ * value and the hardcoded default are all inert — the Settings tab says so
+ * rather than showing a list that has no effect.
+ *
+ * WHAT THIS COSTS, STATED PLAINLY
+ *
+ * The app has no authentication, so with the allowlist off ANY web page the
+ * operator visits in ANY browser on that machine can make requests to
+ * 127.0.0.1:4101 and both read and write the whole collection. CORS is the only
+ * thing standing between a random site and the database, because there are no
+ * tokens to steal — there are no tokens. That is a deliberate operator choice
+ * for a single-user desktop app, not a safe default.
+ *
+ * The desktop build binds 127.0.0.1, so the exposure is "any page in any
+ * browser on this laptop", NOT "anything on the LAN". That is exactly why this
+ * is gated on the desktop build rather than made global: the container's blast
+ * radius would be the entire network, and the same flag there would be a much
+ * worse trade.
+ */
+function isCorsDisabled() {
+  return getSelfOrigin() !== null;
+}
+
+/**
  * The "no database override" answer, as a { origins, source } pair.
  *
  * This is the one place that knows how the fallback chain resolves, so the cache
@@ -362,21 +457,24 @@ function refresh() {
   refreshInFlight = readStoredOrigins()
     .then(stored => {
       if (stored) {
-        cache = { origins: stored, source: 'database', loadedAt: Date.now() };
+        // withSelfOrigin is applied on EVERY branch, including this one, which
+        // is the whole point: the stored row is the case that locks the desktop
+        // app out of its own settings page after a database migration.
+        cache = { origins: withSelfOrigin(stored), source: 'database', loadedAt: Date.now() };
         return cache;
       }
       const env = getEnvOrigins();
       cache = env
-        ? { origins: env, source: 'env', loadedAt: Date.now() }
-        : { origins: getDefaultOrigins(), source: 'default', loadedAt: Date.now() };
+        ? { origins: withSelfOrigin(env), source: 'env', loadedAt: Date.now() }
+        : { origins: withSelfOrigin(getDefaultOrigins()), source: 'default', loadedAt: Date.now() };
       return cache;
     })
     .catch(error => {
       console.warn('⚠️  Could not read the stored CORS allowlist:', error.message);
       const env = getEnvOrigins();
       cache = env
-        ? { origins: env, source: 'env', loadedAt: Date.now() }
-        : { origins: getDefaultOrigins(), source: 'default', loadedAt: Date.now() };
+        ? { origins: withSelfOrigin(env), source: 'env', loadedAt: Date.now() }
+        : { origins: withSelfOrigin(getDefaultOrigins()), source: 'default', loadedAt: Date.now() };
       return cache;
     })
     .then(result => {
@@ -404,7 +502,7 @@ function getCorsOriginsSync() {
     const env = getEnvOrigins();
     const fallback = env || getDefaultOrigins();
     refresh();
-    return fallback;
+    return withSelfOrigin(fallback);
   }
   if (Date.now() - cache.loadedAt > CACHE_TTL_MS) {
     refresh();
@@ -443,14 +541,19 @@ function invalidate() {
  * tidy.
  */
 function applyCorsOriginsCache(origins) {
-  cache = { origins: origins.slice(), source: 'database', loadedAt: Date.now() };
+  // A save narrows the STORED list, but the serving origin is appended here too
+  // rather than being written to the row. That keeps the row a faithful record
+  // of what the admin chose, so the Settings tab does not show an entry nobody
+  // typed and cannot remove, while still making the app's own origin
+  // untouchable. The operator is never locked out by their own save.
+  cache = { origins: withSelfOrigin(origins), source: 'database', loadedAt: Date.now() };
   return cache;
 }
 
 /** Recompute the cache from .env / the hardcoded default, for use after a reset. */
 function applyFallbackCache() {
   const fallback = getFallbackCorsOrigins();
-  cache = { origins: fallback.origins, source: fallback.source, loadedAt: Date.now() };
+  cache = { origins: withSelfOrigin(fallback.origins), source: fallback.source, loadedAt: Date.now() };
   return cache;
 }
 
@@ -505,6 +608,8 @@ module.exports = {
   DEFAULT_CORS_ORIGIN,
   MAX_ORIGINS,
   MAX_ORIGIN_LENGTH,
+  getSelfOrigin,
+  isCorsDisabled,
   CACHE_TTL_MS,
   validateCorsOrigins,
   validateOneOrigin,

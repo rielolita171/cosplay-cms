@@ -105,6 +105,27 @@ app.use(cors({
   origin(origin, callback) {
     // Same-origin / curl / server-to-server requests have no Origin header.
     if (!origin) return callback(null, true);
+
+    // DESKTOP BUILD ONLY: the allowlist is switched off. The desktop app binds
+    // 127.0.0.1 and is operated by one person, and an origin allowlist carried
+    // over in a migrated database can lock that person out of their own
+    // Settings tab with no in-app way back (the save that would fix it is
+    // itself blocked). The operator has asked for the restriction to be gone.
+    //
+    // `callback(null, true)` with a boolean reflects the request origin back,
+    // which is what a permissive mode needs — returning a literal '*' would
+    // instead be rejected by the browser because `credentials: true` is set
+    // below. Note this also permits the opaque origin "null", which sandboxed
+    // iframes, file:// and data: pages all send.
+    //
+    // THE EXPOSURE THIS CREATES: the app has no authentication, so with the
+    // allowlist off, any web page the operator visits in any browser on that
+    // machine can read AND write the whole collection over 127.0.0.1:4101. That
+    // is accepted deliberately, and it is bounded to this machine by the
+    // loopback bind. It is NOT enabled for Docker or `npm start`, where the
+    // same flag would expose the collection to the whole network instead.
+    if (settings.isCorsDisabled()) return callback(null, true);
+
     const allowed = settings.getCorsOriginsSync();
     if (allowed.indexOf(origin) !== -1) return callback(null, true);
     return callback(new Error('Origin not allowed by CORS'));
@@ -290,6 +311,14 @@ app.use('/images', imageRoutes);
 // same response shape as the canonical /api/images/upload.
 app.post('/api/upload', imageRoutes.singleUploadChain);
 app.post('/upload', imageRoutes.singleUploadChain);
+
+// Export / import of the whole collection. Mounted under /api only, like the
+// settings router and for the same reason: an import replaces the operator's
+// data, and it has no business also being reachable on a second, un-prefixed
+// path that a caller could stumble into. The router carries its own
+// confirmation requirement and its own tight rate limit.
+const transferRoutes = require('./routes/transfer');
+app.use('/api', transferRoutes);
 
 // Notification endpoints are the ONE surface that still requires a credential:
 // machine-to-machine callers only, gated on X-CMS-API-KEY inside the router.

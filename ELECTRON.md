@@ -8,7 +8,7 @@ second way to run the same code.
 
 The Express server is **not reimplemented**. `electron/main.js` sets the
 environment and then does `require('../src/server')`, so the desktop app runs
-byte-identical server code to the container, and all six existing test suites
+byte-identical server code to the container, and the existing test suites
 keep exercising the same surface. What the main process supplies is the four
 things Docker got from `docker/entrypoint.sh` and its environment — writable
 paths, the schema bootstrap, the driver check, and a loopback bind.
@@ -149,10 +149,53 @@ blast radius than the same app has inside a container network.
 `main.js` sets `BIND_ADDRESS=127.0.0.1`, the correct boundary for a single-user
 desktop app whose only client is its own window.
 
-The window is same-origin with the server it loads, and `src/server.js` allows
-requests with no `Origin` header, so CORS never actually fires. The Electron
-origin is still appended to the allowlist as insurance for preload/devtools
-fetches. The operator's `.env` `CORS_ORIGIN` is preserved, never replaced.
+### 5. The desktop build runs with CORS restrictions switched off
+
+**An operator decision, and the one security trade-off in this document.**
+
+`main.js` sets `CMS_SELF_ORIGIN`, which puts the app into permissive mode:
+`src/server.js` accepts **every** origin, so the allowlist — stored row, `.env`
+or default — is not consulted at all. The Settings tab detects the mode from
+`GET /api/settings/cors` and renders an explanation in place of the editor,
+because a Save button wired to a list the server ignores would look like a
+control that works.
+
+The original reason for this was narrower, and is still the reason it is
+*scoped* this way. A database migrated from a self-hosted install brings its
+`cors_origins` row with it, naming the origin it was saved on
+(`http://localhost:4001`). That row outranks everything `.env` can say, so the
+app rejected its own writes:
+
+| Request | Result |
+|---|---|
+| `GET /api/costumes` (no `Origin`) | 200 — looks healthy |
+| `PUT /api/settings/cors` (`Origin: 127.0.0.1:4101`) | 403 `CORS_DENIED` |
+
+Browsers omit `Origin` on same-origin GETs but send it on a same-origin JSON
+`PUT`/`POST`/`DELETE`, so reads worked and every settings write failed —
+including the save that would fix the list, and the reset that would clear it.
+The operator was stuck with no in-app way back.
+
+**What this costs.** The app has no authentication, so with the allowlist off,
+**any web page visited in any browser on that machine can read and write the
+whole collection** over `127.0.0.1:4101`. There are no tokens to steal,
+because there are no tokens — CORS was the only boundary. This includes the
+opaque origin `null`, which sandboxed iframes, `file://` and `data:` pages send.
+
+**Why it is bounded.** The desktop app binds `127.0.0.1`, so the exposure is
+"any page in any browser on this laptop", *not* "anything on the LAN". The same
+flag in Docker would expose the collection to the whole network, which is why
+this is gated on `CMS_SELF_ORIGIN` — set only by `main.js` — and is inert for
+`npm start` and `docker compose up`. Verified: with the flag unset, a foreign
+origin still gets `403` and `LOCKOUT_RISK` still fires.
+
+**To restore the allowlist in the desktop app**, comment out the
+`CMS_SELF_ORIGIN` line in `electron/main.js`. The stored list takes effect
+again immediately, with no migration step.
+
+In permissive mode the `LOCKOUT_RISK` check is skipped on save: no stored list
+can lock anyone out, so warning about it would describe a consequence that
+cannot occur.
 
 ## Does this still run outside Electron?
 
@@ -198,6 +241,23 @@ Inside `data/` are `db/cms.db` and `uploads/`. Back up the whole `data/`
 directory — it is the only copy of the collection. The repository's own `data/`
 is a *different* database and is never touched by the desktop app.
 
+**Migrating from a self-hosted install** means exporting there (Settings →
+Move this collection), then importing the `.zip` here. Everything in the
+database carries over — costumes, props, lenses, makers, brands, fandoms,
+Telegram config and every image.
+
+**The origin allowlist is the one thing that does NOT travel, in either
+direction.** It is host configuration — it names a hostname and a port — so it
+is reconciled per direction rather than carried along:
+
+| Direction | What happens to the allowlist |
+|---|---|
+| **self-hosted → desktop** | The incoming origins are **discarded**. The desktop build enforces no allowlist, so a stored `http://192.168.1.50:4001` would be a rule about a network this machine is not on. The row is dropped, so this data later run under `npm start` does not silently inherit a dead allowlist. |
+| **desktop → self-hosted** | The **target server's own rules win**, exactly as they were. Only `localhost`/`127.0.0.1` for that server's own port are added, and only if its list does not already permit them. Your existing LAN or domain origins are never removed. |
+
+Neither direction can lock you out of the machine you are sitting at, and
+neither removes an origin you configured deliberately.
+
 ## Gotchas
 
 ### `ELECTRON_RUN_AS_NODE` breaks the desktop app
@@ -240,12 +300,25 @@ The Dockerfile installs with `npm ci`. After **any** dependency change, run
 SmartScreen warns on first run; no code-signing certificate is configured. Drop
 an `.ico` in `build/` and reference it under the `win` block to change the icon.
 
-### The Windows package carries unused Linux sharp binaries
+### The Windows package no longer carries unused Linux sharp binaries
 
-`node_modules` holds the `linux-x64` and `linuxmusl-x64` variants alongside the
-Windows one, and `asarUnpack` keeps them all. Harmless — sharp selects at
-runtime — but it is why `win-unpacked` is ~327MB. Excluding the unused variants
-in the `win` block would shrink the installer.
+`sharp` resolves its platform binaries from optional dependencies, so
+`node_modules` on a Linux build holds `@img/sharp-linux-x64`,
+`@img/sharp-linuxmusl-x64` and both libvips trees. The Windows build now
+excludes them under the `win` block: the installer went from 99.4 MB to
+87.7 MB and the payload from 119 to 103 files, with `@img/sharp-win32-x64` the
+only `@img` package left inside the extracted `app-64.7z`. Image conversion was
+re-verified under Wine after the exclusion.
+
+Two things to know if you edit that block:
+
+- The exclusions are under `win` **only**. A top-level rule would strip the
+  Linux binaries and produce a Linux package that cannot process an image.
+  macOS is handled by omission — its block excludes nothing today, but adding
+  `darwin/linux` there keeps the three builds from drifting.
+- A platform-level `files` array **replaces** the top-level one rather than
+  merging, so the includes are repeated verbatim above the exclusions. Dropping
+  that repetition ships an installer with no application in it.
 
 ## What has and has not been verified
 
