@@ -352,10 +352,12 @@ const scenarios = {
   async 'cors-selfhosted-to-desktop-discards'(j) {
     freshDb(j.db);
     // The archive carries a self-hosted LAN allowlist; the target is a desktop
-    // build, which enforces nothing. Those origins describe another machine.
+    // build, on a different host and port. Those origins describe another
+    // machine, so they are discarded regardless of how permissive CORS is.
     insertCors(j.db, ['http://192.168.1.50:4001']);
     const report = await transfer.importFrom(j.archive, { mode: 'replace' });
     return {
+      isDesktopTarget: settings.isDesktopTarget(),
       isCorsDisabled: settings.isCorsDisabled(),
       cors: report.cors,
       storedCors: readCors(j.db)
@@ -368,6 +370,7 @@ const scenarios = {
     insertCors(j.db, ['https://cms.example.com', 'http://10.0.0.5:4001']);
     const report = await transfer.importFrom(j.archive, { mode: 'replace' });
     return {
+      isDesktopTarget: settings.isDesktopTarget(),
       isCorsDisabled: settings.isCorsDisabled(),
       cors: report.cors,
       storedCors: readCors(j.db)
@@ -622,11 +625,13 @@ function testCorsByDirection(good) {
     db: toDesktop.db, uploads: toDesktop.uploads, archive: good,
     selfOrigin: 'http://127.0.0.1:4101', port: '4101'
   });
-  check('a desktop target really is in permissive mode', out.isCorsDisabled === true);
+  check('a desktop target is recognised as such', out.isDesktopTarget === true);
+  check('...and it still ENFORCES an allowlist (CORS is not permissive)',
+    out.isCorsDisabled === false);
   check('self-hosted -> desktop DISCARDS the incoming origins',
     out.storedCors === null, 'stored=' + JSON.stringify(out.storedCors));
-  check('the discard is reported as desktop-permissive',
-    out.cors && out.cors.reason === 'desktop-permissive', JSON.stringify(out.cors));
+  check('the discard is reported as desktop-allowlist-reset',
+    out.cors && out.cors.reason === 'desktop-allowlist-reset', JSON.stringify(out.cors));
 
   // ---- desktop -> self-hosted: the TARGET's own rules are what survive ----
   const toServer = slot('cors-to-server');

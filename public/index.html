@@ -6967,8 +6967,8 @@
           // carried over. Say which way it went — an operator who moved a
           // collection and then found their LAN origin gone needs to know that
           // was deliberate, not a bug.
-          if (data.cors && data.cors.reason === 'desktop-permissive') {
-            bits.push('origin rules from the other machine were ignored — this app does not restrict origins');
+          if (data.cors && data.cors.reason === 'desktop-allowlist-reset') {
+            bits.push('origin rules from the other machine were ignored — this app only accepts its own origin');
           } else if (data.cors && data.cors.applied && data.cors.added && data.cors.added.length) {
             bits.push('this server keeps its own allowed origins, and localhost was added');
           }

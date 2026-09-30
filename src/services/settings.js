@@ -345,30 +345,66 @@ function withSelfOrigin(origins) {
 }
 
 /**
- * Is the CORS allowlist switched off entirely?
+ * Is this process a DESKTOP build? (i.e. electron/main.js set CMS_SELF_ORIGIN)
  *
- * TRUE only when CMS_SELF_ORIGIN is set, which only electron/main.js does. In
- * that mode src/server.js accepts every origin, so the stored list, the .env
- * value and the hardcoded default are all inert — the Settings tab says so
- * rather than showing a list that has no effect.
+ * This is deliberately NOT the same question as isCorsDisabled() below. The two
+ * used to be conflated: having a self origin used to mean "switch CORS off", so
+ * the desktop build accepted every origin. They are now separate concerns:
  *
- * WHAT THIS COSTS, STATED PLAINLY
+ *   - "is this the desktop app" decides MIGRATION behaviour — a `cors_origins`
+ *     row that travelled in from a self-hosted install describes a different
+ *     machine and is discarded. See src/services/transfer.js.
+ *   - "is CORS permissive" decides ENFORCEMENT, and defaults to false everywhere.
+ *
+ * Conflating them meant the desktop app could not have a real allowlist, because
+ * the flag that identified it was the same flag that disabled the check.
+ */
+function isDesktopTarget() {
+  return getSelfOrigin() !== null;
+}
+
+/**
+ * Is the CORS allowlist switched off entirely? (escape hatch)
+ *
+ * DEFAULT: false, on every platform including the desktop build. The desktop
+ * app now enforces a real allowlist — its own serving origin, appended by
+ * withSelfOrigin() — so a page in any other browser on that laptop can no longer
+ * read or write the collection over 127.0.0.1:4101.
+ *
+ * WHY THIS EXISTS AT ALL
+ *
+ * It is an escape hatch, not a supported mode. An operator whose setup somehow
+ * depends on a foreign origin reaching the API can set CMS_ALLOW_ANY_ORIGIN=1 and
+ * get the old behaviour back without waiting for a build.
+ *
+ * WHAT IT COSTS, STATED PLAINLY
  *
  * The app has no authentication, so with the allowlist off ANY web page the
  * operator visits in ANY browser on that machine can make requests to
  * 127.0.0.1:4101 and both read and write the whole collection. CORS is the only
  * thing standing between a random site and the database, because there are no
- * tokens to steal — there are no tokens. That is a deliberate operator choice
- * for a single-user desktop app, not a safe default.
+ * tokens to steal — there are no tokens. It also permits the opaque origin
+ * "null", which file://, data: and sandboxed iframes all send.
  *
  * The desktop build binds 127.0.0.1, so the exposure is "any page in any
- * browser on this laptop", NOT "anything on the LAN". That is exactly why this
- * is gated on the desktop build rather than made global: the container's blast
- * radius would be the entire network, and the same flag there would be a much
- * worse trade.
+ * browser on this laptop", NOT "anything on the LAN". That is why the escape
+ * hatch is documented as desktop-only: on the container the same flag would
+ * expose the collection to the entire network, which is a far worse trade.
+ *
+ * Accepted values are the usual truthy spellings; anything else — including
+ * unset and "0"/"false" — leaves the allowlist enforced. Unrecognised values
+ * are ignored rather than guessed at, so a typo fails CLOSED.
  */
 function isCorsDisabled() {
-  return getSelfOrigin() !== null;
+  const raw = String(process.env.CMS_ALLOW_ANY_ORIGIN || '').trim().toLowerCase();
+  if (raw === '') return false;
+  const truthy = ['1', 'true', 'yes', 'on'];
+  if (truthy.indexOf(raw) !== -1) return true;
+  if (['0', 'false', 'no', 'off'].indexOf(raw) !== -1) return false;
+  console.warn(
+    `⚠️  CMS_ALLOW_ANY_ORIGIN="${raw}" is not a recognised boolean — treating it as false, so the CORS allowlist stays enforced. Use one of: 1/true/yes/on.`
+  );
+  return false;
 }
 
 /**
@@ -609,6 +645,7 @@ module.exports = {
   MAX_ORIGINS,
   MAX_ORIGIN_LENGTH,
   getSelfOrigin,
+  isDesktopTarget,
   isCorsDisabled,
   CACHE_TTL_MS,
   validateCorsOrigins,

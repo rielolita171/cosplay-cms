@@ -106,26 +106,27 @@ app.use(cors({
     // Same-origin / curl / server-to-server requests have no Origin header.
     if (!origin) return callback(null, true);
 
-    // DESKTOP BUILD ONLY: the allowlist is switched off. The desktop app binds
-    // 127.0.0.1 and is operated by one person, and an origin allowlist carried
-    // over in a migrated database can lock that person out of their own
-    // Settings tab with no in-app way back (the save that would fix it is
-    // itself blocked). The operator has asked for the restriction to be gone.
-    //
+    // ESCAPE HATCH, OFF BY DEFAULT: CMS_ALLOW_ANY_ORIGIN=1 accepts every origin.
     // `callback(null, true)` with a boolean reflects the request origin back,
     // which is what a permissive mode needs — returning a literal '*' would
     // instead be rejected by the browser because `credentials: true` is set
-    // below. Note this also permits the opaque origin "null", which sandboxed
-    // iframes, file:// and data: pages all send.
+    // below. It also permits the opaque origin "null", which file://, data: and
+    // sandboxed iframes all send.
     //
-    // THE EXPOSURE THIS CREATES: the app has no authentication, so with the
-    // allowlist off, any web page the operator visits in any browser on that
-    // machine can read AND write the whole collection over 127.0.0.1:4101. That
-    // is accepted deliberately, and it is bounded to this machine by the
-    // loopback bind. It is NOT enabled for Docker or `npm start`, where the
-    // same flag would expose the collection to the whole network instead.
+    // This used to be the DESKTOP BUILD'S NORMAL MODE, back when a migrated
+    // `cors_origins` row could lock the app out of its own Settings tab with no
+    // in-app way back. That hole is closed: CMS_SELF_ORIGIN is merged in AFTER
+    // the whole database -> .env -> default chain by withSelfOrigin(), so the
+    // app's own origin can never be the one that gets dropped. The desktop build
+    // therefore enforces a real allowlist now, and only the desktop build is
+    // expected to ever set this escape hatch — on the container it would expose
+    // the collection to the whole network instead of just this machine.
     if (settings.isCorsDisabled()) return callback(null, true);
 
+    // One path for every platform. On desktop the list contains the serving
+    // origin (appended by withSelfOrigin()); on a self-hosted server it is the
+    // admin-editable allowlist. There is no longer a desktop branch, so the
+    // allowlist cannot silently stop being enforced there.
     const allowed = settings.getCorsOriginsSync();
     if (allowed.indexOf(origin) !== -1) return callback(null, true);
     return callback(new Error('Origin not allowed by CORS'));

@@ -149,20 +149,16 @@ blast radius than the same app has inside a container network.
 `main.js` sets `BIND_ADDRESS=127.0.0.1`, the correct boundary for a single-user
 desktop app whose only client is its own window.
 
-### 5. The desktop build runs with CORS restrictions switched off
+### 5. The desktop build enforces a CORS allowlist like any other build
 
-**An operator decision, and the one security trade-off in this document.**
+`main.js` sets `CMS_SELF_ORIGIN`, which marks the app's own serving origin
+(`http://127.0.0.1:4101`) as permanently allowed. `src/server.js` runs the same
+allowlist check on the desktop build as on a self-hosted server — there is no
+desktop bypass. A page in any other browser on the machine is refused.
 
-`main.js` sets `CMS_SELF_ORIGIN`, which puts the app into permissive mode:
-`src/server.js` accepts **every** origin, so the allowlist — stored row, `.env`
-or default — is not consulted at all. The Settings tab detects the mode from
-`GET /api/settings/cors` and renders an explanation in place of the editor,
-because a Save button wired to a list the server ignores would look like a
-control that works.
-
-The original reason for this was narrower, and is still the reason it is
-*scoped* this way. A database migrated from a self-hosted install brings its
-`cors_origins` row with it, naming the origin it was saved on
+**This used to be permissive, and the reason it was is still the reason it is
+scoped to the desktop build.** A database migrated from a self-hosted install
+brings its `cors_origins` row with it, naming the origin it was saved on
 (`http://localhost:4001`). That row outranks everything `.env` can say, so the
 app rejected its own writes:
 
@@ -176,26 +172,40 @@ Browsers omit `Origin` on same-origin GETs but send it on a same-origin JSON
 including the save that would fix the list, and the reset that would clear it.
 The operator was stuck with no in-app way back.
 
-**What this costs.** The app has no authentication, so with the allowlist off,
-**any web page visited in any browser on that machine can read and write the
-whole collection** over `127.0.0.1:4101`. There are no tokens to steal,
-because there are no tokens — CORS was the only boundary. This includes the
-opaque origin `null`, which sandboxed iframes, `file://` and `data:` pages send.
+The fix was not to disable the check but to make that origin **non-removable**:
+`withSelfOrigin()` in [`src/services/settings.js`](src/services/settings.js)
+appends `CMS_SELF_ORIGIN` *after* the whole `database → .env → default`
+resolution chain, so no stored row can evict it and no save can lock the
+operator out. That is why enforcement is now safe on the desktop build, and why
+the earlier "enforce but risk lockout" objection no longer applies.
 
-**Why it is bounded.** The desktop app binds `127.0.0.1`, so the exposure is
-"any page in any browser on this laptop", *not* "anything on the LAN". The same
-flag in Docker would expose the collection to the whole network, which is why
-this is gated on `CMS_SELF_ORIGIN` — set only by `main.js` — and is inert for
-`npm start` and `docker compose up`. Verified: with the flag unset, a foreign
-origin still gets `403` and `LOCKOUT_RISK` still fires.
+**What is enforced now.** Only the serving origin, plus any origin the operator
+adds in the Settings tab. The opaque origin `null` — which sandboxed iframes,
+`file://` and `data:` pages send — is rejected, as is every foreign origin.
 
-**To restore the allowlist in the desktop app**, comment out the
-`CMS_SELF_ORIGIN` line in `electron/main.js`. The stored list takes effect
-again immediately, with no migration step.
+**Note for non-browser clients.** CORS is a browser mechanism, not
+authorization. `curl`, the n8n workflow and any server-to-server caller send no
+`Origin` header, so they are unaffected either way and were never blocked by the
+allowlist. That is why tightening this closes browser-based cross-origin access
+without changing any integration.
 
-In permissive mode the `LOCKOUT_RISK` check is skipped on save: no stored list
-can lock anyone out, so warning about it would describe a consequence that
-cannot occur.
+**Escape hatch.** If some setup of yours genuinely needs a foreign origin to
+reach the API, set `CMS_ALLOW_ANY_ORIGIN=1` before launching and the old
+permissive behaviour returns. It accepts `1`/`true`/`yes`/`on`, is **off by
+default**, and an unrecognised value is ignored with a warning rather than
+guessed at, so a typo fails closed. The Settings tab detects the mode from
+`GET /api/settings/cors` and renders an explanation in place of the editor,
+because a Save button wired to a list the server ignores would look like a
+control that works. In that mode the `LOCKOUT_RISK` check is skipped on save:
+no stored list can lock anyone out, so warning about it would describe a
+consequence that cannot occur.
+
+Set it as an environment variable, not in `.env` — a packaged app has no
+`.env`, and dotenv never runs against it. On Windows:
+
+```
+set CMS_ALLOW_ANY_ORIGIN=1 && npm run electron:dev
+```
 
 ## Does this still run outside Electron?
 
@@ -252,7 +262,7 @@ is reconciled per direction rather than carried along:
 
 | Direction | What happens to the allowlist |
 |---|---|
-| **self-hosted → desktop** | The incoming origins are **discarded**. The desktop build enforces no allowlist, so a stored `http://192.168.1.50:4001` would be a rule about a network this machine is not on. The row is dropped, so this data later run under `npm start` does not silently inherit a dead allowlist. |
+| **self-hosted → desktop** | The incoming origins are **discarded**. They would be rules about a network this machine is not on, and the desktop build now enforces its own origin. The row is dropped, so this data later run under `npm start` does not silently inherit a dead allowlist. |
 | **desktop → self-hosted** | The **target server's own rules win**, exactly as they were. Only `localhost`/`127.0.0.1` for that server's own port are added, and only if its list does not already permit them. Your existing LAN or domain origins are never removed. |
 
 Neither direction can lock you out of the machine you are sitting at, and

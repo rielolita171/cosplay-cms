@@ -345,14 +345,22 @@ function inspect(zipPath) {
  */
 async function reconcileCorsAfterImport(targetOrigins) {
   // ---- self-hosted -> desktop: ignore whatever came in -------------------
-  if (settings.isCorsDisabled()) {
+  //
+  // This keys off isDesktopTarget(), NOT isCorsDisabled(). The two were the
+  // same predicate when the desktop build enforced nothing, and splitting them
+  // matters here: an operator who sets CMS_ALLOW_ANY_ORIGIN=1 as an escape hatch
+  // must NOT thereby start retaining a `cors_origins` row imported from another
+  // machine. Origins describe a host and port, so that row is meaningless on the
+  // machine that imported it either way. Migration behaviour is keyed on WHICH
+  // BUILD this is, never on how permissive its CORS currently is.
+  if (settings.isDesktopTarget()) {
     // Clear any row the import brought in, so nothing survives that references
     // an origin belonging to another machine. resetCorsOrigins() is the
     // supported way to drop it and re-seed the cache from the env/default.
     await settings.resetCorsOrigins();
     return {
       applied: true,
-      reason: 'desktop-permissive',
+      reason: 'desktop-allowlist-reset',
       // Reported so the UI can say what happened rather than showing a silent
       // "ok" for a list the operator may have expected to see.
       added: [],

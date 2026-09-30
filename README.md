@@ -85,15 +85,15 @@ The Windows installer for the current release:
 `latest.yml` is published alongside it for a future `electron-updater` feed.
 No auto-updater is wired into the app yet, so nothing will update itself.
 
-> **The desktop build runs with origin restrictions switched off.** This is an
-> operator decision, not an oversight: the app binds `127.0.0.1` and is used by one
-> person, and an origin allowlist carried over in a migrated database can lock
-> that person out of their own Settings tab with no in-app way back. The cost is
-> that **any web page you visit in any browser on that machine** can read and
-> change the collection while the app is running — there is no login, so CORS was
-> the only boundary. It is **not** enabled for Docker or `npm start`, where the
-> same setting would expose the collection to your whole network. To turn it back
-> on, comment out the `CMS_SELF_ORIGIN` line in `electron/main.js`.
+> **The desktop build enforces the same origin allowlist as every other build.**
+> It accepts only its own serving origin, so **no other web page you visit in any
+> browser on that machine** can read or change the collection while the app is
+> running — there is no login, so CORS is the only boundary. Non-browser callers
+> (`curl`, the n8n workflow) send no `Origin` header and are unaffected. If you
+> genuinely need a foreign origin to reach it, set `CMS_ALLOW_ANY_ORIGIN=1` to get
+> the old permissive behaviour back; it is off by default. See section 5 of
+> [`ELECTRON.md`](ELECTRON.md). The escape hatch is **desktop-only** — on Docker or
+> `npm start` it would expose the collection to your whole network.
 
 ## Moving a collection
 
@@ -118,7 +118,7 @@ reconciled per direction:
 
 | Direction | What happens |
 |---|---|
-| **self-hosted → desktop** | The incoming origins are **discarded**. The desktop build enforces no allowlist, so a stored `http://192.168.1.50:4001` is a rule about a network this laptop is not on. |
+| **self-hosted → desktop** | The incoming origins are **discarded**. They would be rules about a network this laptop is not on, and the desktop build enforces its own serving origin. |
 | **desktop → self-hosted** | The **target server's own rules are preserved exactly**, and only `localhost` / `127.0.0.1` for that server's own port are added — and only if its list does not already permit them. |
 
 Nothing is ever removed from the target's list, so your LAN or domain origins
@@ -222,10 +222,8 @@ Being unauthenticated is not the same as undefended. What remains:
   regression in per-image access control**, accepted as part of removing auth —
   but it is the one to be aware of, because an image URL is now a bearer
   reference with no expiry. (The desktop build is the one case where the blast
-  radius is smaller — it binds `127.0.0.1` — but it also **switches the origin
-  allowlist off entirely**, so any page in any browser on that machine can reach
-  it. See "The desktop build runs with CORS restrictions switched off" in
-  [`ELECTRON.md`](ELECTRON.md).)
+  radius is smaller — it binds `127.0.0.1`, and it accepts only its own origin,
+  so no other page in any browser on that machine can reach it.)
 - **Every record is readable and writable by any client on the network.**
 
 ### Where the boundary is
