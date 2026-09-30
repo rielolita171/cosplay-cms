@@ -10,7 +10,7 @@
 [![SQLite](https://img.shields.io/badge/SQLite-CLI-003b57?style=flat-square&logo=sqlite&logoColor=white)](https://sqlite.org/)
 [![License](https://img.shields.io/badge/License-ISC-blue?style=flat-square)](#license)
 [![No build step](https://img.shields.io/badge/build-none%20required-6f42c1?style=flat-square)](#running-it)
-[![Desktop](https://img.shields.io/badge/Electron-early%20release-d29922?style=flat-square&logo=electron&logoColor=white)](#desktop-app-electron)
+[![Desktop](https://img.shields.io/badge/Release-v1.0.0-2ea44f?style=flat-square&logo=electron&logoColor=white)](https://github.com/rielolita171/cosplay-cms/releases/tag/v1.0.0)
 
 [**Visit the project site →**](https://rielolita171.github.io/cosplay-cms/)
 
@@ -23,8 +23,9 @@ lenses. Express and the `sqlite3` CLI on the back end, a single self-contained
 `public/index.html` on the front end. No build step, no bundler, no CDN.
 
 It runs three ways from the same server code: as a Node process, as a Docker
-container (**the primary target**), and as a packaged desktop app (Electron,
-**early release** — see [`ELECTRON.md`](ELECTRON.md)).
+container (**the primary target**), and as a packaged desktop app (Electron).
+The Windows installer is **released as [v1.0.0](https://github.com/rielolita171/cosplay-cms/releases/tag/v1.0.0)** —
+see [`ELECTRON.md`](ELECTRON.md).
 
 <p align="center">
   <em>Live screenshots of a running instance are on the project site, not pasted
@@ -70,9 +71,19 @@ npm run electron:dist:win     # Windows NSIS installer only
 
 What is verified, and what is not, is written down in
 [`ELECTRON.md`](ELECTRON.md) rather than guessed at. The short version: the
-Windows installer is built and packages correctly, the Linux run works,
-**macOS has never been built**, and there is no AppImage for Linux yet. The
-installers are unsigned and there is no auto-updater.
+Windows installer is built, packages correctly, and is **published as
+[v1.0.0](https://github.com/rielolita171/cosplay-cms/releases/tag/v1.0.0)**;
+the Linux run works, **macOS has never been built**, and there is no AppImage
+for Linux yet. The installers are unsigned and there is no auto-updater.
+
+### Download
+
+The Windows installer for the current release:
+
+- [`Cosplay-CMS-Setup-1.0.0.exe`](https://github.com/rielolita171/cosplay-cms/releases/download/v1.0.0/Cosplay-CMS-Setup-1.0.0.exe) — 84 MB, unsigned (expect a SmartScreen warning on first run)
+
+`latest.yml` is published alongside it for a future `electron-updater` feed.
+No auto-updater is wired into the app yet, so nothing will update itself.
 
 > **The desktop build runs with origin restrictions switched off.** This is an
 > operator decision, not an oversight: the app binds `127.0.0.1` and is used by one
@@ -320,13 +331,20 @@ it at all.
   cleanly, so without GC an isolated directory just relocates the unbounded
   growth.
 
-### `[open]` The desktop build is early, and macOS has never been built
+### `[open]` The Windows installer is released, but macOS has never been built
 
-- **Status.** The Electron target landed as an explicitly early release. The
-  Windows installer builds and packages correctly — the new modules are inside
-  `app.asar`, the bundled `sqlite3.exe` has the Windows `MZ` header, and only
-  `@img/sharp-win32-x64` ships, so the package carries no dead Linux binaries.
-  Full detail in [`ELECTRON.md`](ELECTRON.md).
+- **Status.** The Windows installer is built, packages correctly, and is
+  **published as
+  [v1.0.0](https://github.com/rielolita171/cosplay-cms/releases/tag/v1.0.0)**. The
+  new modules are inside `app.asar` and the bundled `sqlite3.exe` has the
+  Windows `MZ` header. Exactly one sharp package ships, `@img/sharp-win32-x64`,
+  and it carries its own libvips: the `sharp-win32-x64.node` binding and the
+  `libvips-42.dll` / `libvips-cpp.dll` pair all sit inside its `lib/`. No
+  separate `@img/sharp-libvips-*` package is shipped, and no `*sharp-linux*`
+  or `*sharp-darwin*` files ship at all — so nothing platform-mismatched is
+  dead weight in the package. Verified against the built artifact, not
+  inferred from a directory listing. Full detail in
+  [`ELECTRON.md`](ELECTRON.md).
 - **Not verified.** macOS has never been built or run at all — `PRECOMPILED.mac`
   points at the x64 SQLite build, so Apple Silicon would need Rosetta 2. Linux has
   an AppImage target configured but no AppImage has been produced.
@@ -343,6 +361,8 @@ it at all.
   server's own rules preserved when it is self-hosted.
 - **Fix.** Build and run a macOS DMG on a real Mac, run the installer once
   natively on Windows, and add code signing plus an `app-builder` update feed.
+  The `latest.yml` shipped with v1.0.0 makes that feed possible, but no
+  auto-updater is wired into the app yet.
 
 ### `[open]` No regression test covers the boot splash
 
