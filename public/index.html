@@ -6884,13 +6884,21 @@
         ));
       }
 
+      // The wording here is conditional on the editor being visible. On the
+      // desktop build it is not shown (see renderCorsSettings), so "listed below"
+      // would point at nothing.
       rows.push(securityBadge(
         'Page-origin allowlist — ' + (state.corsDisabled ? 'switched off' : 'enforced'),
         state.corsDisabled
           ? 'CMS_ALLOW_ANY_ORIGIN is set, so any page may call this server. ' +
             'Unset it to restore the allowlist.'
-          : 'Only the origins listed below may call this server from another ' +
-            'hostname. Your app\'s own window is always permitted.',
+          : (isDesktop
+              ? 'Only the app\'s own window may call this server. On this build ' +
+                'there is nothing for you to configure: the allowlist is fixed to ' +
+                'this app, and the window identity check is what actually keeps ' +
+                'other callers out.'
+              : 'Only the origins listed below may call this server from another ' +
+                'hostname. Your app\'s own window is always permitted.'),
         !state.corsDisabled
       ));
 
@@ -6908,6 +6916,25 @@
 
     function renderCorsSettings() {
       renderSecurityPanel();
+
+      // NO CROSS-ORIGIN CALLER EXISTS TO ALLOW ON THE DESKTOP BUILD. The server is
+      // bound to 127.0.0.1 and reachable only by this app's own window, which
+      // passes the per-launch token. Every entry a user could add here would be an
+      // origin nothing legitimate calls from — while the token check is what
+      // actually decides. So the whole editor is removed rather than shown inert,
+      // because a Save button that saves nothing is worse than no button.
+      //
+      // The Docker and `npm start` builds are unaffected: they ARE reached from
+      // other origins (browsers on other devices, n8n), so the allowlist is the
+      // only thing protecting them and the editor stays.
+      if (state.isDesktopTarget) {
+        const panel = document.getElementById('cors-panel');
+        if (panel) panel.hidden = true;
+        return;
+      }
+
+      const panelEl = document.getElementById('cors-panel');
+      if (panelEl) panelEl.hidden = false;
 
       // THE OPT-OUT IS ON. The editor is replaced by an explanation. Hiding it is
       // the honest rendering — leaving a Save button wired to a list the server

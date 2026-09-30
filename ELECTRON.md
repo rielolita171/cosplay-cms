@@ -431,6 +431,43 @@ read and the `X-CMS-Desktop-Token` header. The published download was then
 fetched back and its SHA-512 compared against `latest.yml` — identical, so the
 update feed points at the binary that is actually being served.
 
+## The guard shipped switched off, and it shipped twice
+
+**Read this before touching the token code.** Both published v1.0.0 installers
+had `isGuarded()` returning `false`. Not "off by default" — the guard was never
+established in the packaged app at all, while the headless path worked, and the
+UI asserted the guard was on.
+
+The cause was load ordering, and it is worth writing down because the code
+*reads* like it works:
+
+```js
+const { generate } = require('../src/services/desktopToken');   // runs install()
+process.env.CMS_DESKTOP_TOKEN ||= generate();                    // too late
+```
+
+`require` executes a module's top-level code once and caches the result.
+`desktopToken.js` self-installs from `CMS_DESKTOP_TOKEN` as it loads. That
+`require` therefore ran the self-install while the variable was still unset, and
+the module latched onto nothing. The assignment on the next line could not
+recover it, and re-requiring would not have helped either — `require` hands back
+the same cached object. The comment in `desktopToken.js` claiming `main.js` set
+the variable *before* requiring the module was the false premise behind it.
+
+Two things are now load-bearing and should stay that way:
+
+- `electron/main.js` calls `desktopToken.install()` **explicitly**, after the
+  value exists, and calls `app.quit()` if a token still cannot be obtained.
+- `scripts/test_desktop_token.js` replays the exact `main.js` sequence in a
+  fresh child process, so this specific ordering cannot regress silently again.
+  Run it alongside the rest of the suite.
+
+**The reason it was found at all** was the Settings panel reporting live state
+from the server rather than asserting it in prose. The badge read "NOT ACTIVE"
+and was telling the truth. Anything that reports a security control's real state
+is worth building before the control, not after — the badge found the bug in one
+glance, and a paragraph in this file would have kept claiming it worked.
+
 **Not verified — treat as untested:**
 
 - **The preload bridge inside a running Electron window.** The server side is
@@ -461,6 +498,12 @@ can leave it, or delete it to avoid confusion.
   value off `window.cosplayCms` and sends it as a header. On a non-desktop
   origin `window.cosplayCms` is `undefined`, so the header is simply omitted and
   the request is byte-identical to before.
+- **The CORS allowlist editor is removed on the desktop build only.** No
+  cross-origin caller exists to allow there — the server is on 127.0.0.1 and the
+  token check decides who gets in — so an editor would save origins nothing
+  legitimate calls from. It is still fully functional on Docker and `npm start`,
+  where the allowlist is the only protection there is and other origins really
+  do need adding.
 - **No route changes.** All eight routers, both mount paths, and the n8n
   `X-CMS-API-KEY` integration are untouched.
 - **Single-instance lock.** Two processes writing one SQLite file can corrupt it,

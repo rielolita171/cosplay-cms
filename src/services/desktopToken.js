@@ -137,15 +137,21 @@ function matches(presented) {
 
 // Self-install from the environment at module load.
 //
-// electron/main.js generates the token and puts it in CMS_DESKTOP_TOKEN BEFORE
-// it requires src/server.js, so the value is already here. Doing the install here
-// rather than from main.js means the guard is owned by the module that enforces
-// it — there is no ordering in which the server comes up "guarded but with no
-// token", which would silently be the unguarded case.
+// THIS ONLY WORKS IF THE VARIABLE IS ALREADY SET WHEN THIS MODULE IS FIRST
+// REQUIRED. Requiring a module runs its top-level code and caches it, so the
+// read below happens exactly once. That is true on the headless path:
 //
-// It also makes the whole thing testable from a plain `node` process:
 //   CMS_SELF_ORIGIN=http://127.0.0.1:4101 CMS_DESKTOP_TOKEN=<64 hex> npm start
-// behaves exactly like the packaged app, with no Electron involved.
+//
+// …where the variable is set before the process starts. It was NOT true on the
+// packaged path, and the mismatch shipped: electron/main.js required this module
+// BEFORE assigning CMS_DESKTOP_TOKEN, so this line latched onto nothing and the
+// guard silently reported itself off. Setting the variable on the next line did not
+// help, and neither did re-requiring — require returns the cached copy.
+//
+// electron/main.js therefore calls install() EXPLICITLY, after the value exists.
+// This self-install stays for the headless path, and it is covered by
+// scripts/test_desktop_token.js. Do not "simplify" main.js back to relying on it.
 install(process.env.CMS_DESKTOP_TOKEN);
 
 module.exports = {

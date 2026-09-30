@@ -196,8 +196,33 @@ process.env.CMS_SELF_ORIGIN = process.env.CMS_SELF_ORIGIN || electronOrigin;
  * ships one: a fixed token in a binary is a fixed token forever, which is exactly
  * what a per-launch random value avoids.
  */
-const { generate: generateDesktopToken } = require('../src/services/desktopToken');
-process.env.CMS_DESKTOP_TOKEN = process.env.CMS_DESKTOP_TOKEN || generateDesktopToken();
+const desktopToken = require('../src/services/desktopToken');
+
+// ORDERING, AND IT IS LOAD-BEARING. `require` above ALREADY ran the module, and
+// the module self-installs from CMS_DESKTOP_TOKEN as it loads — at that moment
+// the variable is still unset, so it latched onto nothing and the guard was
+// off. Setting the env var on the next line is therefore not enough: the module
+// has already read it. Re-requiring would not help either, because require
+// caches and would hand back the same stale copy.
+//
+// So the token is installed explicitly, after the value exists. The
+// self-install on load remains, for the headless `CMS_DESKTOP_TOKEN=… npm start`
+// path where the variable IS set before the first require.
+desktopToken.install(
+  process.env.CMS_DESKTOP_TOKEN || desktopToken.generate()
+);
+process.env.CMS_DESKTOP_TOKEN = desktopToken.get();
+
+if (!desktopToken.get()) {
+  // Should be unreachable — generate() cannot fail — but shipping a desktop
+  // build whose guard is silently off is precisely the failure worth stopping
+  // for. Refusing to start is better than starting unprotected.
+  console.error(
+    '🔒 The desktop token could not be established, so this build cannot ' +
+    'protect your collection. Refusing to start.'
+  );
+  app.quit();
+}
 
 /**
  * A shipped app has no .env. The container reads one; dotenv finds nothing and
