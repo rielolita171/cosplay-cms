@@ -607,11 +607,43 @@
       outline: 2px solid var(--accent);
       outline-offset: 2px;
     }
-    /* The button is positioned against the dialog box, so the dialog must be a
-       containing block. Not all engines treat a `dialog` as positioned, hence
-       the explicit `relative` rather than relying on the default `static`. */
+    /* THE DIALOG MUST BE POSITIONED, AND `relative` IS NOT ENOUGH.
+     *
+     * This rule was originally written to give the injected close button a
+     * containing block — a `dialog` is not guaranteed by every engine to be a
+     * positioned element, and an `absolute` button placed against a `static`
+     * parent resolves to the nearest positioned ANCESTOR, or the initial
+     * containing block, which is not where the button belongs. That reasoning
+     * was sound and the `fixed` below serves it just as well: a `fixed` box is
+     * a containing block for `absolute` descendants exactly as a `relative` one
+     * is. The close buttons land in the same place either way.
+     *
+     * WHAT IT COST. `position: relative` silently cancels `dialog:modal`'s
+     * `position: fixed` from the UA stylesheet — an author declaration beats a
+     * UA one at any specificity. Being in the TOP LAYER is not what goes away,
+     * because `showModal()` puts the dialog there independently of CSS: the
+     * dialog kept painting above every card and behind its own blurred
+     * backdrop, and stayed un-dismissable by clicking the page. What went away
+     * is the LAYOUT. A `fixed` dialog is laid out against the viewport; a
+     * `relative` one is laid out in normal flow, at its document position —
+     * these eleven dialogs are the last children of `body`, i.e. somewhere far
+     * below a grid the reader has scrolled through. Scrolling the page then
+     * carried the panel with it, which is the bug: the modal stopped following
+     * the viewport and stayed behind at the offset where it happened to open.
+     *
+     * So this is declared `fixed` to reinstate the viewport-relative layout,
+     * NOT to add a layer or a z-index. The top layer already handles stacking
+     * (see the comment above .upload-progress). Being stated explicitly rather
+     * than left to the UA is the point: the whole failure mode is an author
+     * rule quietly overriding the UA one, so the rule that does the work is
+     * named where it is needed instead of depending on a UA default that a
+     * later edit can break a second time.
+     *
+     * `inset-block: 0` still arrives from `dialog:modal` and is deliberately
+     * left alone: with `margin: auto` above, it is what centres the panel in
+     * the viewport now that the dialog is viewport-sized again. */
     dialog {
-      position: relative;
+      position: fixed;
     }
     /* The lightbox manages its own chrome and sizes to the viewport; an injected
        close button would land on top of the image controls it already has. */
@@ -3303,6 +3335,15 @@
       // leaving one orphan per abandoned dialog. Keyed by prop id, cleared on
       // save and on close.
       propUnsavedImageUrls: {},
+      // Photos staged in the OPEN Edit Prop dialog, keyed by prop id.
+      //
+      // Deliberately SEPARATE from imageUrlsCache, which the cards read. The
+      // cache is the committed, server-confirmed view; a draft is what the
+      // operator is still deciding about. Merging the two is what made a photo
+      // appear on the card behind the modal before Save — so the card claimed a
+      // change the server had not been told about, and reverted on Cancel.
+      // Nothing outside the modal ever reads this.
+      propImageDraft: {},
       // The prop whose dialog is open, so a dialog-level close can clean up.
       // Null whenever no Edit Prop dialog is showing.
       editingPropModalOpen: false,
@@ -5356,6 +5397,28 @@
       const stored = parseImageUrls(prop.imageUrls);
       const merged = stored.concat(cached.filter(url => stored.indexOf(url) === -1));
       return merged.slice(0, MAX_PROP_IMAGES);
+    }
+
+    /**
+     * What the EDIT PROP modal shows, which is not always what propImages() shows.
+     *
+     * While a prop dialog is open it owns a DRAFT — the photos the operator has
+     * picked but not yet saved. The draft is what the modal renders, so a photo
+     * appears in the dialog and NOWHERE ELSE: not on the card behind it, and not
+     * on the card after a Cancel. The card keeps showing the committed, server-
+     * confirmed set until Save actually succeeds, which is the only moment the
+     * change is real.
+     *
+     * Falling back to propImages() when no draft exists is what makes a freshly
+     * opened dialog show the prop's real photos, and what makes the strip correct
+     * for a photo removed earlier in the session.
+     *
+     * @param {object} prop  the prop (or the Add-Prop sentinel)
+     * @returns {string[]} the URLs the dialog should render
+     */
+    function modalPropImages(prop) {
+      const draft = state.propImageDraft[prop.id];
+      return draft ? draft.slice() : propImages(prop);
     }
 
     function milestoneChip(label, rawValue) {
@@ -7784,7 +7847,15 @@
       // under the linked costume's id: they belong to the prop being created, and
       // reading them from data.costumeId would attach a new prop's photos to
       // whatever costume the select happened to hold.
-      const cachedImages = state.imageUrlsCache[NEW_PROP_IMAGES_KEY] || [];
+      //
+      // The DRAFT first, the cache only as the fallback. The upload path stages
+      // into state.propImageDraft[NEW_PROP_IMAGES_KEY] and deliberately never
+      // writes state.imageUrlsCache[NEW_PROP_IMAGES_KEY] — that slot is
+      // card-visible. So reading the cache alone POSTed a prop with NO photos
+      // even though the dialog had been showing the thumbnails the whole time,
+      // i.e. Save silently discarded the photo the operator had just attached.
+      const cachedImages = (state.propImageDraft[NEW_PROP_IMAGES_KEY]
+        || state.imageUrlsCache[NEW_PROP_IMAGES_KEY] || []).slice();
       if (cachedImages.length) data.imageUrls = JSON.stringify(cachedImages.slice(0, MAX_PROP_IMAGES));
 
       try {
@@ -7799,6 +7870,10 @@
         // The photos are now referenced by a saved prop, so they must not be
         // discarded by the close handler that fires next.
         delete state.propUnsavedImageUrls[NEW_PROP_IMAGES_KEY];
+        // The draft goes with the cache: it holds the URLs that now belong to the
+        // saved prop, and leaving it would make the next openModal('modal-add-
+        // prop') render the new prop's photos inside an empty Add form.
+        delete state.propImageDraft[NEW_PROP_IMAGES_KEY];
         document.getElementById('add-prop-media').innerHTML = MEDIA_PLACEHOLDER_HTML;
         document.getElementById('add-prop-strip').innerHTML = '';
         document.getElementById('add-prop-photo-count').textContent = '0';
@@ -8283,8 +8358,14 @@
       // then saves an unrelated field edit must get a cleared column, not a PUT
       // with the key omitted (which the server reads as "leave it alone") that
       // quietly resurrects the photo they just deleted.
+      //
+      // The DRAFT, not the cache: photos picked in this dialog live in
+      // propImageDraft until this call commits them, and the cache holds only
+      // what the server has confirmed. Reading the cache here would send a list
+      // missing every photo just uploaded in this dialog.
       payload.imageUrls = JSON.stringify(
-        (state.imageUrlsCache[id] || []).filter(url => url.length <= MAX_IMAGE_URL_LENGTH)
+        modalPropImages({ id: id, imageUrls: '[]' })
+          .filter(url => url.length <= MAX_IMAGE_URL_LENGTH)
       );
 
       try {
@@ -8296,6 +8377,13 @@
         // ours to delete. Clearing BEFORE the dialog closes is what stops the
         // close handler from discarding files this very call just committed.
         delete state.propUnsavedImageUrls[id];
+        // The draft is dropped HERE as well as on the cancel path, because this
+        // save resets editingPropModalOpen=false and clears editingPropId — so the
+        // close handler about to fire takes its Add-Prop branch and never reaches
+        // the real-id cleanup. A surviving draft would then be what
+        // modalPropImages() returns on the next openPropDialog(), painting the
+        // pre-save set over the cache's freshly re-seeded server set.
+        delete state.propImageDraft[id];
         state.editingPropModalOpen = false;
         state.editingPropId = null;
         showToast('Prop updated.', 'success');
@@ -8979,9 +9067,14 @@
       // which is the only consistent reading — keeping a preview of files that
       // have been deleted off the server would render a broken image.
       if (id === 'modal-add-prop') {
-        renderPropImages({ id: NEW_PROP_IMAGES_KEY, name: '', imageUrls: '[]' }, 'modal-add-prop');
+        // renderPropImages() owns the counter, so it has to run LAST. The reset
+        // used to sit after the render, which meant the label was overwritten
+        // with '0' even if the render had just painted a real count — the exact
+        // "Photos (0 / 3)" symptom of an upload that appeared to do nothing,
+        // this time with the thumbnails already on screen beside it.
         const count = document.getElementById('add-prop-photo-count');
         if (count) count.textContent = '0';
+        renderPropImages({ id: NEW_PROP_IMAGES_KEY, name: '', imageUrls: '[]' }, 'modal-add-prop');
       }
       showModalPreservingScroll(dialog);
     }
@@ -9072,12 +9165,23 @@
         // The Add Prop dialog uses the sentinel slot and has no such flag.
         discardUnsavedPropImages(NEW_PROP_IMAGES_KEY);
         delete state.imageUrlsCache[NEW_PROP_IMAGES_KEY];
+        // The draft has to be cleared HERE too, not only in handleCreateProp().
+        // The URLs in it are the ones just deleted off the server, so leaving the
+        // draft behind would make the next openModal('modal-add-prop') — which
+        // renders the draft — paint thumbnails of files that no longer exist,
+        // i.e. broken images, in a dialog that is supposed to start empty.
+        delete state.propImageDraft[NEW_PROP_IMAGES_KEY];
         return;
       }
       const propId = state.editingPropId;
       state.editingPropModalOpen = false;
       if (!propId) return;
       discardUnsavedPropImages(propId);
+      // The Edit Prop draft dies with the cache below, for the same reason as the
+      // Add Prop sentinel: a draft that outlives the dialog would be rendered by
+      // the next openPropDialog() over the cache's freshly re-seeded server set,
+      // resurrecting photos the operator cancelled.
+      delete state.propImageDraft[propId];
       // Drop the staged URLs from the cache too, or the next open of this prop
       // would show photos the server never received.
       const server = state.props.find(p => clean(p.id) === clean(propId));
@@ -9325,43 +9429,61 @@
       try {
         const urls = await uploadPropImageBatch(files);
 
-        // The cache is the session's view; the strip and card read it through
-        // propImages(), so writing it here is what makes a new photo appear
-        // before the server has confirmed anything.
-        const mergedCache = existing.slice();
-        urls.forEach(url => { if (mergedCache.indexOf(url) === -1) mergedCache.push(url); });
-        state.imageUrlsCache[targetId] = mergedCache.slice(0, MAX_PROP_IMAGES);
+        const merged = existing.slice();
+        urls.forEach(url => { if (merged.indexOf(url) === -1) merged.push(url); });
+        const staged = merged.slice(0, MAX_PROP_IMAGES);
+
+        // FROM THE EDIT DIALOG: stage into the DRAFT, and touch nothing the
+        // cards read.
+        //
+        // The photo is on the server (that is what makes the preview possible),
+        // but it is not on the prop until Save. Writing it into the shared
+        // imageUrlsCache instead is what put it on the card behind the modal —
+        // the card advertised a change the server had not been told about, and
+        // it snapped back on Cancel.
+        if (state.editingPropModalOpen) {
+          state.propImageDraft[targetId] = staged;
+          rememberUnsavedPropImages(targetId, urls);
+          // The modalId is named, never inferred: renderPropImages() defaults an
+          // omitted modalId to the EDIT Prop block, so an unnamed call here paints
+          // #modal-edit-prop and leaves the dialog the operator is actually
+          // looking at blank. See the note in renderPropImages().
+          renderPropImages(prop, 'modal-edit-prop');
+          showToast(urls.length === 1 ? 'Photo ready. Press Save to keep it.' : urls.length + ' photos ready. Press Save to keep them.', 'success');
+          return;
+        }
 
         if (isNewProp) {
-          renderPropImages({ id: NEW_PROP_IMAGES_KEY, name: '', imageUrls: '[]' });
-          // Recorded as unsaved even though the sentinel is stashed rather than
-          // PUT: the file is on the server already, so closing the Add dialog
-          // without saving must still delete it. The prop has no id yet, so
-          // handleCreateProp() carries the URLs in the POST instead.
+          // The Add Prop modal also owns a draft. It has to, for the same
+          // reason: its cache slot is the sentinel, and putting the photo there
+          // would be the card-visible write we just removed.
+          state.propImageDraft[NEW_PROP_IMAGES_KEY] = staged;
+          // 'modal-add-prop' is REQUIRED, not decoration. Without it
+          // renderPropImages() falls through to its default branch and redraws
+          // #modal-edit-prop's media, strip and counter — so the upload landed
+          // in state.propImageDraft[NEW_PROP_IMAGES_KEY] correctly, the success
+          // toast fired, and the Add Prop block still read "Photos (0 / 3)" with
+          // the "No image" placeholder. The draft is keyed by the sentinel, the
+          // paint target by the modal, and they are two different namespaces.
+          renderPropImages({ id: NEW_PROP_IMAGES_KEY, name: '', imageUrls: '[]' }, 'modal-add-prop');
+          // Recorded as unsaved even though nothing is PUT yet: the file is on
+          // the server already, so closing the Add dialog without saving must
+          // still delete it. The prop has no id yet, so handleCreateProp()
+          // carries the URLs in the POST instead.
           rememberUnsavedPropImages(NEW_PROP_IMAGES_KEY, urls);
           showToast(urls.length === 1 ? 'Photo attached. Save the prop to keep it.' : urls.length + ' photos attached. Save the prop to keep them.', 'success');
           return;
         }
 
-        renderPropImages(prop);
+        // A CARD button: no dialog, no Save to wait for, so committing straight
+        // to the cache and the server is correct here and is unchanged.
+        state.imageUrlsCache[targetId] = staged;
+        // Kept explicit for the same reason as above. No prop dialog is open on
+        // this path (the card is behind the modal and cannot be clicked), so this
+        // repaint is only ever a no-op safety for the Edit block; what actually
+        // updates the card is the loadProps() re-render on the next line.
+        renderPropImages(prop, 'modal-edit-prop');
         await loadProps();
-
-        // FROM THE EDIT DIALOG: stage, do not save.
-        //
-        // The photo is already on the server (that is what makes the preview
-        // possible), but it must NOT be written to the prop until the operator
-        // presses Save — otherwise Cancel would be a lie, because the change
-        // they are trying to abandon has already been committed. handleEditProp
-        // sends the whole set with the rest of the form, and the unsaved list
-        // below is what lets a Cancel delete the file again.
-        //
-        // From a CARD button there is no dialog and no Save to wait for, so the
-        // immediate PUT is the correct behaviour there and is unchanged.
-        if (state.editingPropModalOpen) {
-          rememberUnsavedPropImages(targetId, urls);
-          showToast(urls.length === 1 ? 'Photo ready. Press Save to keep it.' : urls.length + ' photos ready. Press Save to keep them.', 'success');
-          return;
-        }
 
         // One PUT carrying the WHOLE set — the route replaces imageUrls, so a
         // partial body would drop the photos already on the prop. The
@@ -9437,11 +9559,24 @@
       });
       if (!ok) return;
 
+      // Where the removal is recorded has to match where the modal READS it. In
+      // the Add Prop dialog modalPropImages() returns the draft, so writing only
+      // the cache left the draft intact and the removed thumbnail reappeared on
+      // the very next repaint — the × looked like it had done nothing. The cache
+      // write is kept because propImages() is still what handleCreateProp()
+      // falls back to.
       const remaining = propImages(prop).filter(existing => existing !== url);
       state.imageUrlsCache[propId] = remaining.slice();
+      if (isNewProp) {
+        state.propImageDraft[NEW_PROP_IMAGES_KEY] = remaining.slice();
+      }
 
       if (isNewProp) {
-        renderPropImages(prop);
+        // Same rule as the upload path above: the sentinel-draft removal is
+        // painted into the ADD Prop block. Called without a modalId this used to
+        // repaint the Edit Prop dialog instead, leaving the removed thumbnail
+        // still on screen in the dialog the operator was looking at.
+        renderPropImages(prop, 'modal-add-prop');
         showToast('Photo removed.', 'success');
         return;
       }
@@ -9472,7 +9607,13 @@
      * always do, because a closed <dialog> stays in the DOM.
      *
      * @param {object} prop  any object with { id, imageUrls, name? }.
-     * @param {string} modalId  'modal-edit-prop' or 'modal-add-prop'.
+     * @param {string} modalId  'modal-edit-prop' or 'modal-add-prop'. An omitted
+     *   argument resolves to 'modal-edit-prop' — which is a live footgun, not a
+     *   convenience. Every call site now names its modal explicitly: this bug
+     *   report is exactly what an omitted argument caused, because a caller
+     *   holding an Add-Prop draft silently painted the Edit Prop dialog instead,
+     *   leaving the Add Prop photo block at "Photos (0 / 3)" with the
+     *   placeholder still showing after a successful upload.
      */
     function renderPropImages(prop, modalId) {
       const mediaEl = document.getElementById(modalId === 'modal-add-prop' ? 'add-prop-media' : 'edit-prop-media');
@@ -9480,7 +9621,10 @@
       const countEl = document.getElementById(modalId === 'modal-add-prop' ? 'add-prop-photo-count' : 'edit-prop-photo-count');
       if (!mediaEl || !stripEl) return;
 
-      const urls = propImages(prop);
+      // modalPropImages(), not propImages(): this is the dialog, so it renders the
+      // draft the operator is still deciding about. propImages() is what the
+      // CARDS read, and it must not see an unsaved photo.
+      const urls = modalPropImages(prop);
 
       if (countEl) countEl.textContent = urls.length;
 
