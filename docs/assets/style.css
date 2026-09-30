@@ -376,6 +376,10 @@ code {
 }
 .note b { color: var(--text); }
 .note.warn { border-left-color: var(--warning); background: rgba(245, 158, 11, 0.08); }
+/* The "this is working as intended" note. Distinct from the default .note
+   primary tint, which reads as informational rather than reassuring. */
+.note.ok { border-left-color: var(--success); background: rgba(16, 185, 129, 0.08); }
+.note p:last-child { margin-bottom: 0; }
 
 /* ---------------------------- CTA + FOOTER ---------------------------- */
 .cta { text-align: center; }

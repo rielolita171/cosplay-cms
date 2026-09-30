@@ -14,6 +14,7 @@ const express = require('express');
 const router = express.Router();
 
 const settings = require('../services/settings');
+const desktopToken = require('../services/desktopToken');
 const telegramConfig = require('../services/telegramConfig');
 const telegram = require('../services/telegramService');
 const { rateLimit } = require('../middleware/rateLimit');
@@ -59,10 +60,15 @@ router.get('/settings/cors', async (req, res) => {
       source: effective.source,
       envDefault: envDefault,
       currentRequestOrigin: req.get('origin') || null,
-      // True on the desktop build, where the allowlist is not enforced at all.
+      // True only when the CMS_ALLOW_ANY_ORIGIN opt-out is set. This used to
+      // be hardcoded true on every desktop build; it is now an escape hatch.
       // The UI keys its whole rendering off this, so the operator is never
       // shown an editable list whose changes would have no effect.
       corsDisabled: settings.isCorsDisabled(),
+      // Whether the two desktop isolation layers are in force, so Settings can
+      // report them instead of asserting them in prose that can go stale.
+      isDesktopTarget: settings.isDesktopTarget(),
+      tokenGuardActive: desktopToken.isGuarded(),
       limits: {
         maxOrigins: settings.MAX_ORIGINS,
         maxOriginLength: settings.MAX_ORIGIN_LENGTH

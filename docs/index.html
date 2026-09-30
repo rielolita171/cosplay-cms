@@ -325,14 +325,34 @@
       it is a server. Nothing you configured is ever removed.
     </div>
 
+    <div class="note ok">
+      <b>Only the app's own window can read your collection.</b> Two independent
+      layers, because either one alone leaves a gap. An <b>origin allowlist</b>
+      decides which pages may call the server, and a <b>secret generated when the
+      app launches</b> is required on every request that returns data.
+      <p style="margin: 10px 0 0;">
+        The second layer is the one that matters most, and it exists because of a
+        subtlety worth knowing: <b>CORS never stopped a browser from typing in the
+        URL.</b> CORS governs requests made <i>by</i> a page, not the address bar,
+        and a top-level navigation carries no <code>Origin</code> header at all. So
+        a page alone would not have been enough — anyone on that machine could
+        point a browser straight at the port. With both layers, a browser gets an
+        empty window and nothing else.
+      </p>
+    </div>
+
     <div class="note warn">
-      <b>The desktop app has no authentication, and it also does not restrict
-      origins.</b> The server is unchanged, but the desktop build additionally
-      accepts requests from <i>any</i> web page — so a site you visit in any
-      browser on that machine could read and change your collection while the app
-      is running. The bind is still <code>127.0.0.1</code>, which keeps this to
-      the one computer. Do not change that bind address, and do not run the
-      server build this way on a network.
+      <b>This protects the app, not your data, and it is desktop-only.</b> It
+      stops websites, the address bar, and other software on the machine. It does
+      <i>not</i> stop whoever owns the computer — the database file is readable on
+      disk, and no application-level lock can change that.
+      <p style="margin: 10px 0 0;">
+        A Docker or <code>npm start</code> deployment gets <b>none</b> of this. It
+        has no login either, so the boundary there is your network: keep it on a
+        trusted LAN or VPN, bind it to <code>127.0.0.1</code> behind a tunnel, or
+        put an authenticating reverse proxy in front. Do not publish the port to
+        the internet.
+      </p>
     </div>
 
     <div class="cta-row">

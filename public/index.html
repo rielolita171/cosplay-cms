@@ -1904,6 +1904,28 @@
            row first and swaps its in-memory cache from a res.on('finish')
            handler, so the NEXT request is judged against the new list. -->
       <section id="tab-settings" role="tabpanel" aria-labelledby="tabbtn-settings" tabindex="0" style="display: none;">
+
+        <!-- WHAT IS ACTUALLY PROTECTING THIS INSTALLATION.
+             Every item below reports a value the server just told us, rather
+             than a claim baked into this file. That is the whole point: the
+             previous version of this panel asserted in prose that restrictions
+             were off, and that prose went stale the moment the behaviour
+             changed. A badge that reads "enforced" while the server accepts
+             everything is worse than no badge, so each one is derived. -->
+        <div class="metric-card" id="security-panel" style="max-width: 720px;" hidden>
+          <h3 style="font-size: 1rem; margin-bottom: 4px;">How this install is protected</h3>
+          <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 16px;">
+            There is no login and no password. These are the only boundaries, so
+            they are worth being able to see at a glance.
+          </p>
+          <div id="security-badges" style="display: flex; flex-direction: column; gap: 10px;"></div>
+          <p style="color: var(--text-muted); font-size: 0.78rem; margin: 16px 0 0;">
+            None of this hides your collection from whoever owns this machine —
+            the database file is readable on disk. It stops other software, and
+            it stops web pages. See <code>ELECTRON.md</code> for the details.
+          </p>
+        </div>
+
         <div class="metric-card" id="cors-panel" style="max-width: 720px;">
           <h3 style="font-size: 1rem; margin-bottom: 4px;">CORS allowed origins</h3>
           <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 16px;" id="cors-intro">
@@ -1912,26 +1934,22 @@
             is unencrypted.
           </p>
 
-          <!-- DESKTOP BUILD. Replaces the editor above rather than sitting beside
-               it. The server accepts every origin in this mode, so an editable
-               allowlist would be a control that silently does nothing — worse
-               than showing no control, because it implies a restriction that is
-               not there. The wording states the consequence rather than just the
-               mode, because "unrestricted" without that is not a warning. -->
+          <!-- THE OPT-OUT IS ON. CMS_ALLOW_ANY_ORIGIN is set, so the server accepts
+               every origin and this list is genuinely not enforced. An editable
+               allowlist here would be a control that silently does nothing, which
+               is worse than showing none. The wording states the consequence
+               rather than just the mode, because "unrestricted" without that is
+               not a warning. -->
           <div id="cors-disabled-notice" hidden>
             <p style="color: var(--text-muted); font-size: 0.8rem; margin: 0 0 12px;">
-              <strong>Origin restrictions are switched off in the desktop app.</strong>
-              Every browser origin is accepted, so this list is not enforced and
-              nothing here needs changing.
-            </p>
-            <p style="color: var(--text-muted); font-size: 0.8rem; margin: 0 0 12px;">
-              The app binds to <code>127.0.0.1</code> only, so this reaches the CMS
-              from this machine alone. It does not put the server on your network.
+              <strong>Origin restrictions are switched off.</strong>
+              <code>CMS_ALLOW_ANY_ORIGIN</code> is set, so every browser origin is
+              accepted and this list is not enforced. Unset it and restart the app
+              to bring the allowlist back.
             </p>
             <p style="color: #fbbf24; font-size: 0.8rem; margin: 0;">
-              The CMS has no login, so any page you visit in any browser on this
-              computer could read and change your collection while this app is
-              running. Close the app when using untrusted sites.
+              While it is on, any page you visit in any browser on this computer
+              could read and change your collection.
             </p>
           </div>
 
@@ -3367,10 +3385,15 @@
       corsEnvDefault: [],
       corsSource: '',
       corsCurrentRequestOrigin: null,
-      // Desktop build only: the server does not enforce an allowlist at all, so
-      // the Settings tab shows an explanation instead of the editor. Defaults
-      // to false, which is the container's behaviour.
+      // True only when the CMS_ALLOW_ANY_ORIGIN opt-out is set, so the Settings
+      // tab shows an explanation instead of the editor. Defaults to false, which
+      // is the behaviour of every build that has not opted out — including the
+      // desktop app, which used to be hardcoded true and no longer is.
       corsDisabled: false,
+      // Whether this is the desktop build, and whether its per-launch token guard
+      // is in force. Both come from the server; neither is assumed by this page.
+      isDesktopTarget: false,
+      tokenGuardActive: false,
       corsLoaded: false,
       corsLoading: false,
       // Telegram settings. `telegramToken` is the server's DESCRIPTION of the
@@ -6793,10 +6816,102 @@
       return chip;
     }
 
+    // ONE BADGE, DERIVED. `ok` decides the colour and the label never lies
+    // about the mechanism — it names what is enforcing the rule, so a reader
+    // who wants to verify it knows where to look.
+    function securityBadge(label, detail, ok) {
+      const row = makeEl('div', '');
+      row.style.display = 'flex';
+      row.style.gap = '10px';
+      row.style.alignItems = 'flex-start';
+      row.style.padding = '10px 12px';
+      row.style.borderRadius = '8px';
+      row.style.background = ok ? 'rgba(52, 211, 153, 0.08)' : 'rgba(251, 191, 36, 0.10)';
+      row.style.border = '1px solid ' + (ok ? 'rgba(52, 211, 153, 0.25)' : 'rgba(251, 191, 36, 0.30)');
+
+      const dot = makeEl('span', '');
+      dot.style.color = ok ? '#34d399' : '#fbbf24';
+      dot.style.fontWeight = '700';
+      dot.style.lineHeight = '1.4';
+      dot.textContent = ok ? '✓' : '!';
+      dot.setAttribute('aria-hidden', 'true');
+
+      const text = makeEl('div', '');
+      const title = makeEl('strong', '', label);
+      title.style.display = 'block';
+      title.style.fontSize = '0.85rem';
+      const note = makeEl('span', '', detail);
+      note.style.display = 'block';
+      note.style.color = 'var(--text-muted)';
+      note.style.fontSize = '0.78rem';
+      note.style.marginTop = '2px';
+      text.appendChild(title);
+      text.appendChild(note);
+
+      row.appendChild(dot);
+      row.appendChild(text);
+      return row;
+    }
+
+    // Built fresh on every settings load. `isDesktopTarget` decides whether the
+    // desktop-only rows appear at all — a Docker install showing "token guard:
+    // active" would be a lie, because the guard is inert there by design.
+    function renderSecurityPanel() {
+      const panel = document.getElementById('security-panel');
+      if (!panel) return;
+      const host = document.getElementById('security-badges');
+      if (host) host.textContent = '';
+
+      const isDesktop = state.isDesktopTarget === true;
+      const guardOn = state.tokenGuardActive === true;
+      const rows = [];
+
+      if (isDesktop) {
+        rows.push(securityBadge(
+          'Only this app\'s window can read your collection',
+          'Every request must carry a secret generated when the app launched. ' +
+          'A browser pointed at this port gets an empty window and nothing else.',
+          guardOn
+        ));
+        rows.push(securityBadge(
+          guardOn ? 'Window identity check — active' : 'Window identity check — NOT ACTIVE',
+          guardOn
+            ? 'A page opened in any browser, or a request typed straight into the ' +
+              'address bar, is rejected.'
+            : 'The per-launch token is not in force. Restart the app; if this ' +
+              'persists, the build is broken rather than merely misconfigured.',
+          guardOn
+        ));
+      }
+
+      rows.push(securityBadge(
+        'Page-origin allowlist — ' + (state.corsDisabled ? 'switched off' : 'enforced'),
+        state.corsDisabled
+          ? 'CMS_ALLOW_ANY_ORIGIN is set, so any page may call this server. ' +
+            'Unset it to restore the allowlist.'
+          : 'Only the origins listed below may call this server from another ' +
+            'hostname. Your app\'s own window is always permitted.',
+        !state.corsDisabled
+      ));
+
+      if (isDesktop) {
+        rows.push(securityBadge(
+          'Listening on this machine only',
+          'Bound to 127.0.0.1, so nothing on your network can reach it.',
+          true
+        ));
+      }
+
+      if (host) rows.forEach(row => host.appendChild(row));
+      panel.hidden = false;
+    }
+
     function renderCorsSettings() {
-      // DESKTOP BUILD: restrictions are off, so the editor is replaced by an
-      // explanation. Hiding it is the honest rendering — leaving a Save button
-      // wired to a list the server ignores would look like a control that works.
+      renderSecurityPanel();
+
+      // THE OPT-OUT IS ON. The editor is replaced by an explanation. Hiding it is
+      // the honest rendering — leaving a Save button wired to a list the server
+      // ignores would look like a control that works.
       if (state.corsDisabled) {
         const notice = document.getElementById('cors-disabled-notice');
         const editor = document.getElementById('cors-editor');
@@ -7011,6 +7126,8 @@
           state.corsSource = String(data.source || '');
           state.corsCurrentRequestOrigin = data.currentRequestOrigin || null;
           state.corsDisabled = data.corsDisabled === true;
+          state.isDesktopTarget = data.isDesktopTarget === true;
+          state.tokenGuardActive = data.tokenGuardActive === true;
           state.corsLoaded = true;
           corsSetError('');
           renderCorsSettings();
