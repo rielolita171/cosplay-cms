@@ -70,9 +70,48 @@ npm run electron:dist:win     # Windows NSIS installer only
 
 What is verified, and what is not, is written down in
 [`ELECTRON.md`](ELECTRON.md) rather than guessed at. The short version: the
-Linux run and the Windows installer are verified, the Windows run was verified
-under Wine rather than on native Windows, and **macOS has never been built**.
-The installers are unsigned and there is no auto-updater.
+Windows installer is built and packages correctly, the Linux run works,
+**macOS has never been built**, and there is no AppImage for Linux yet. The
+installers are unsigned and there is no auto-updater.
+
+> **The desktop build runs with origin restrictions switched off.** This is an
+> operator decision, not an oversight: the app binds `127.0.0.1` and is used by one
+> person, and an origin allowlist carried over in a migrated database can lock
+> that person out of their own Settings tab with no in-app way back. The cost is
+> that **any web page you visit in any browser on that machine** can read and
+> change the collection while the app is running — there is no login, so CORS was
+> the only boundary. It is **not** enabled for Docker or `npm start`, where the
+> same setting would expose the collection to your whole network. To turn it back
+> on, comment out the `CMS_SELF_ORIGIN` line in `electron/main.js`.
+
+## Moving a collection
+
+**Settings → Move this collection** exports everything into one `.zip` — every
+costume, prop, lens, maker, brand, fandom and image — and imports it on the other
+machine. Use it to move between the desktop app and a self-hosted server in either
+direction, instead of hand-copying a SQLite file next to a directory of uploads.
+
+- **Export** needs no confirmation and changes nothing.
+- **Import** replaces the data on the target, so it shows you what the archive
+  contains first, asks you to confirm, and takes a backup of the current database
+  before it writes anything. `merge` is available if you would rather keep what is
+  already there.
+
+The database travels as a SQL dump rather than a copy of `cms.db`, so it does not
+carry a stale journal or a half-written page, and the import is atomic across
+tables.
+
+**The origin allowlist is host configuration and does not travel.** It names a
+hostname and a port — true of the machine that wrote it and of no other — so it is
+reconciled per direction:
+
+| Direction | What happens |
+|---|---|
+| **self-hosted → desktop** | The incoming origins are **discarded**. The desktop build enforces no allowlist, so a stored `http://192.168.1.50:4001` is a rule about a network this laptop is not on. |
+| **desktop → self-hosted** | The **target server's own rules are preserved exactly**, and only `localhost` / `127.0.0.1` for that server's own port are added — and only if its list does not already permit them. |
+
+Nothing is ever removed from the target's list, so your LAN or domain origins
+survive a migration.
 
 
 Configuration is read from `.env` at the repository root. The names that
@@ -155,6 +194,12 @@ Being unauthenticated is not the same as undefended. What remains:
   [`src/server.js`](src/server.js).
 - **Uploads are still image-processed and renamed** by `sharp` via
   `src/middleware/imageUpload.js` / `imageProcessor.js`.
+- **`DELETE /api/images/discard` only ever deletes an unreferenced file.** It
+  exists so a photo uploaded into an Edit dialog and then abandoned does not
+  linger forever, and it checks `Costume`, `Prop` and `ContactLens` first: if a
+  saved record still points at the file it answers `409` and leaves it alone. It
+  also takes only a bare filename — with no authentication, accepting a path here
+  would be a delete-any-file primitive.
 
 ### What is no longer enforced, and is a real change
 
@@ -208,13 +253,22 @@ or a cosmetic value is wrong, and `[open]` means a known gap with no code behind
 it at all.
 
 > **Test coverage.** `npm test` runs four suites: makers (85), wishlist (59),
-> lens expiry (44) and transfer (61). The transfer suite covers the ZIP
-> container, export, the inspect pre-flight, import in both modes, the ZIP-slip
-> guard, the HTTP confirmation gate, and the CORS reconciliation in both
-> migration directions. **Not covered:** anything needing a browser, so the
-> Settings "Move this collection" panel is verified only by static checks — the
-> inline script parses and every `getElementById` target exists, but the panel
-> has never been rendered.
+> lens expiry (44) and transfer (61) — 249 assertions. The transfer suite covers
+> the ZIP container, export, the inspect pre-flight, import in both modes, the
+> ZIP-slip guard, the HTTP confirmation gate, and the CORS reconciliation in both
+> migration directions. Each of its scenarios runs in its own process, because
+> `paths.js` freezes `DB_FILE` at module load and one process could not test a
+> desktop import and a server import without the first value staying frozen.
+>
+> **Not covered — and this is a real gap, not a formality.** There is no browser
+> in CI and no headless one on this host, so the three UI fixes are verified only
+> statically: the inline script parses, every `getElementById` target exists, and
+> `DELETE /api/images/discard` was exercised over HTTP (200 for an orphan, 409 for
+> a referenced file, traversal contained). **Not** verified: that the new
+> Settings panel renders, that the progress bar actually paints above a dialog
+> (a `showModal()` dialog lives in the browser's top layer, which outranks every
+> z-index — that is *why* the bar is a popover now), and that opening a dialog no
+> longer moves the page. Someone should click through all three once.
 
 ### `[low]` The z-index comment on the boot splash is wrong
 
@@ -268,13 +322,14 @@ it at all.
 
 ### `[open]` The desktop build is early, and macOS has never been built
 
-- **Status.** The Electron target landed as an explicitly early release.
-  Verified by running: Linux under `xvfb-run`, and the Windows NSIS installer
-  run under Wine. Full detail in [`ELECTRON.md`](ELECTRON.md).
+- **Status.** The Electron target landed as an explicitly early release. The
+  Windows installer builds and packages correctly — the new modules are inside
+  `app.asar`, the bundled `sqlite3.exe` has the Windows `MZ` header, and only
+  `@img/sharp-win32-x64` ships, so the package carries no dead Linux binaries.
+  Full detail in [`ELECTRON.md`](ELECTRON.md).
 - **Not verified.** macOS has never been built or run at all — `PRECOMPILED.mac`
-  points at the x64 SQLite build, so Apple Silicon would need Rosetta 2. The
-  Windows checks ran under Wine, which is also how NSIS itself runs, so GPU and
-  some Win32 edge cases differ from native Windows.
+  points at the x64 SQLite build, so Apple Silicon would need Rosetta 2. Linux has
+  an AppImage target configured but no AppImage has been produced.
 - **Operational hazards while it holds.** Installers are **unsigned**, so
   SmartScreen warns on first run, and there is **no auto-updater**. Icons are
   unset, so builds use the default Electron icon.
@@ -336,14 +391,20 @@ it at all.
   driver or the schema work. The worst failure mode for this image is one that
   boots healthy and then 500s everywhere, and the smoke test hits
   `/api/costumes` for exactly that reason.
-- **Still unproven.** CI has never run yet — the workflow was added after the
-  last push, so the first green run is the first evidence the image builds at
-  all. Until it passes on `main`, treat the build as reasoned rather than
-  demonstrated, and expect the first run to need a small adjustment (most likely
-  apt package availability on the pinned Debian base, not the design).
+- **The image itself is now built and run locally.** A 292 MB image builds, the
+  container reaches `Up (healthy)`, `/health` and `/api/costumes` return 200, it
+  runs as `uid=1000(node)`, and `docker stop` drains and exits 0. The export /
+  import round trip and the image-discard endpoint were exercised inside the
+  container, including the 409 refusal for a referenced image and a contained
+  path-traversal attempt.
+- **Still unproven in CI.** The workflow has never run — and the local build is
+  not a substitute for it, because a developer machine has a warm Docker cache
+  and a different base-image pull. Until it passes on `main`, treat CI as the
+  first independent evidence the image builds from a clean checkout.
 - **Also unverified by CI.** [`docker-compose.yml`](docker-compose.yml) itself is
   never started by the workflow, only the image it builds. The volume layout and
-  host-port remapping are still documented rather than demonstrated.
+  host-port remapping are still documented rather than demonstrated, and the run
+  above used a plain `docker run` with no volume at all.
 
 ## Next
 
@@ -351,17 +412,21 @@ The order I would take the items above in, bundled by what each group unblocks
 rather than by severity. None of it is committed work.
 
 **1. Garbage-collect uploads.** This is the only remaining item that can lose
-or corrupt someone's data, so it goes first. The path half is already done:
-everything resolves from `src/services/paths.js`, so an instance can be pointed
-at its own root. What is missing is the second half — a scheduled pass that
-deletes unreferenced files. Add it while deciding `UPLOAD_DIR`'s fate; an
-isolated store with no GC just relocates the unbounded growth.
+or corrupt someone's data, so it goes first. Two of the three halves are now
+done: everything resolves from `src/services/paths.js`, so an instance can be
+pointed at its own root, and `DELETE /api/images/discard` cleans up the
+*predictable* orphan — a photo uploaded into a dialog and then abandoned. What is
+still missing is a scheduled pass for everything else: a file that became
+unreferenced by a deleted row, a failed write, or a crash between upload and
+save. Add it while deciding `UPLOAD_DIR`'s fate.
 
-**2. Prove the boot path.** Install a headless browser and assert that the splash
-is `display: none` after load and that the retry block is hidden on a successful
-boot. Until that exists the boot behaviour is manually verified only, and the
-retry state machine in particular has no automated protection against a future
-edit reverting it.
+**2. Get a browser into the loop.** This is now the biggest gap, and it is
+bigger than it was: there is no headless browser on this host, so the boot
+splash has no regression test, and the three UI fixes from the last change —
+the new Settings panel, the popover progress bar, the scroll-preserving modal —
+have never been rendered. Install one (Playwright or Puppeteer) and the first
+test should assert the splash is `display: none` after load, since that is the
+oldest unproven thing in the file.
 
 **3. Get the first green CI run, then exercise compose.** The workflow builds and
 runs the image, but it has never executed — so the first run is the first real

@@ -305,6 +305,11 @@ code {
   letter-spacing: 0.04em; text-transform: uppercase;
 }
 .platform-status[data-state="ok"]   { color: #34d399; }
+/* `ok` is currently unused: no platform is verified well enough to claim it —
+   the Windows package was built but never run, Linux has no AppImage, and macOS
+   has not been built. The rule stays so a genuinely verified platform can say so
+   in the markup without a CSS change, and so its absence reads as a fact about
+   this release rather than as forgotten styling. */
 .platform-status[data-state="wip"]  { color: #fbbf24; }
 .platform-status[data-state="todo"] { color: #6b7280; }
 

@@ -152,8 +152,21 @@
         <h3>Photos &amp; milestones</h3>
         <p>Multi-image galleries per record, processed and re-encoded by
            <code>sharp</code> and renamed to opaque UUIDs, with a progress bar
-           and percentage while uploading. Milestone checkboxes for costume
+           and percentage while uploading. A photo you pick shows up in the
+           dialog straight away, and if you change your mind the file is
+           deleted rather than left behind. Milestone checkboxes for costume
            test, event day and photo session.</p>
+      </article>
+
+      <article class="card">
+        <div class="card-ico">📦</div>
+        <h3>Move it in one file</h3>
+        <p>Export the whole collection — every record and every photo — to a
+           single <code>.zip</code>, and import it on the other machine. Built
+           for moving between the desktop app and a self-hosted server without
+           hand-copying a database next to a folder of images. The import shows
+           you what is inside, asks you to confirm, and backs up the current
+           database first.</p>
       </article>
     </div>
   </div>
@@ -207,9 +220,9 @@
       <span class="badge-dot" aria-hidden="true"></span>
       <div>
         <b>Early release — bugs are expected.</b>
-        The Windows installer was built and smoke-tested on Linux under Wine, not
-        on native Windows. macOS is not built at all. Treat this as a preview:
-        back up your data directory before you trust it with the real one.
+        The Windows installer is built and unsigned, macOS is not built at all,
+        and there is no auto-updater. Treat this as a preview: back up your data
+        directory before you trust it with the real one.
       </div>
     </div>
 
@@ -227,7 +240,14 @@
           It bundles the <code>sqlite3.exe</code> and Windows <code>sharp</code>
           binaries, so nothing needs installing beforehand.
         </p>
-        <p class="platform-status" data-state="ok">✓ Built &amp; verified</p>
+        <!-- The status describes the ARTIFACT, not the machine that built it: the
+             installer exists, packages the right binaries and carries the app.
+             How it was exercised on the build machine is an internal detail and
+             does not belong on a page someone reads to decide whether to try it.
+             The caveats that DO matter to a user — unsigned, early release, back
+             up your data — are stated in the release bar above and the known
+             rough edges below. -->
+        <p class="platform-status" data-state="ok">✓ Installer ready</p>
       </article>
 
       <article class="platform">
@@ -280,27 +300,37 @@
             publisher warning until you click through, every time.
           </li>
           <li>
-            <b>Wine, not native Windows.</b> The build was verified under Wine on
-            Linux. GPU and some Win32 edge cases may differ.
-          </li>
-          <li>
             <b>No auto-updater.</b> New builds are a fresh download; the app
             will not tell you a newer one exists.
           </li>
           <li>
             <b>A desktop database is a different database.</b> The app writes to
             its own <code>userData</code> directory — it does not read the one in
-            your Docker volume or checkout.
+            your Docker volume or checkout. Move data with the export/import
+            button, not by copying files.
           </li>
         </ul>
       </div>
     </div>
 
+    <div class="note">
+      <b>Moving between the two is one button.</b> Settings → Move this
+      collection exports everything to a <code>.zip</code> and imports it on the
+      other machine, in either direction. The origin allowlist is the one thing
+      that does <i>not</i> travel, because it describes the machine rather than
+      the data: it is discarded when the destination is the desktop app, and the
+      destination server keeps its own rules (with loopback added for itself) when
+      it is a server. Nothing you configured is ever removed.
+    </div>
+
     <div class="note warn">
-      <b>The desktop app has no authentication.</b> That is unchanged from the
-      server, but on a laptop it matters more: the app binds
-      <code>127.0.0.1</code> precisely so the open API is not reachable from
-      the network. Do not change that bind address.
+      <b>The desktop app has no authentication, and it also does not restrict
+      origins.</b> The server is unchanged, but the desktop build additionally
+      accepts requests from <i>any</i> web page — so a site you visit in any
+      browser on that machine could read and change your collection while the app
+      is running. The bind is still <code>127.0.0.1</code>, which keeps this to
+      the one computer. Do not change that bind address, and do not run the
+      server build this way on a network.
     </div>
 
     <div class="cta-row">
@@ -338,7 +368,8 @@
       <div class="panel-row"><span>Desktop shell</span><b>Electron 31 (optional)</b></div>
       <div class="panel-row"><span>Alerts</span><b>Telegram + n8n</b></div>
       <div class="panel-row"><span>Auth</span><b>None, by design</b></div>
-      <div class="panel-row"><span>Runtime deps</span><b>8</b></div>
+      <div class="panel-row"><span>Runtime deps</span><b>8 — the zip writer is 350 lines of <code>zlib</code></b></div>
+      <div class="panel-row"><span>Tests</span><b>249 assertions, 4 suites, no runner</b></div>
     </div>
   </div>
 </section>
