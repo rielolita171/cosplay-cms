@@ -91,7 +91,10 @@ async function processImages(filePaths) {
  * @returns {Promise<string>} - Path to optimized WebP
  */
 async function optimizeExistingImage(imagePath) {
-  const fullPath = path.join(__dirname, '../../data/uploads', imagePath);
+  // See src/services/paths.js — UPLOAD_DIR replaces a __dirname-anchored
+  // literal so this resolves outside app.asar in a packaged Electron build.
+  const { UPLOAD_DIR } = require('../services/paths');
+  const fullPath = path.join(UPLOAD_DIR, imagePath);
   return await processImage(fullPath);
 }
 

@@ -2,10 +2,18 @@
   "name": "cosplay-cms",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "electron/main.js",
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
+    "electron:dev": "electron .",
+    "electron:sqlite": "node scripts/fetch_sqlite.js",
+    "electron:sqlite:win": "node scripts/fetch_sqlite.js --platform=win",
+    "electron:sqlite:linux": "node scripts/fetch_sqlite.js --platform=linux",
+    "electron:build": "npm run electron:sqlite && electron-builder --dir",
+    "electron:build:win": "npm run electron:sqlite:win && electron-builder --win --x64",
+    "electron:dist": "npm run electron:sqlite && electron-builder -mwl",
+    "electron:dist:win": "npm run electron:sqlite:win && electron-builder --win --x64",
     "test": "npm run test:makers && npm run test:wishlist && npm run test:lenses",
     "test:makers": "node scripts/test_makers.js",
     "test:wishlist": "node scripts/test_wishlist.js",
@@ -28,5 +36,60 @@
     "multer": "^1.4.5-lts.1",
     "sharp": "^0.33.5",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.natanieldt.cosplay-cms",
+    "productName": "Cosplay CMS",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*",
+      "src/**/*",
+      "public/**/*",
+      "init_db.sql",
+      "package.json",
+      "!**/*.map",
+      "!node_modules/**/{test,__tests__,tests,example,examples,doc,docs}/**"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/sqlite3/linux-x64",
+        "to": "sqlite3"
+      }
+    ],
+    "asarUnpack": [
+      "**/node_modules/sharp/**",
+      "**/node_modules/@img/**"
+    ],
+    "npmRebuild": false,
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Utility"
+    },
+    "win": {
+      "target": ["nsis"],
+      "extraResources": [
+        {
+          "from": "resources/sqlite3/win-x64",
+          "to": "sqlite3"
+        }
+      ]
+    },
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.utilities",
+      "extraResources": [
+        {
+          "from": "resources/sqlite3/mac-x64",
+          "to": "sqlite3"
+        }
+      ]
+    }
   }
 }

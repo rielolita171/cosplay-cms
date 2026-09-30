@@ -8,3 +8,10 @@ data/uploads/*
 # of the collection, not source, and must never be committed — a DB in git is
 # a permanent, world-readable history of every costume ever entered.
 backups/
+
+# Electron build output and the downloaded sqlite3 binary.
+# resources/sqlite3/ is NOT committed: scripts/fetch_sqlite.js downloads it at
+# build time, and a committed binary would be a 2MB platform-specific blob in git
+# that is stale by definition and unverifiable as to origin.
+dist/
+resources/sqlite3/

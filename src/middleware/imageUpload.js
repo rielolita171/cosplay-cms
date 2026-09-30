@@ -3,8 +3,14 @@ const path = require('path');
 const fs = require('fs');
 const { randomUUID } = require('crypto');
 
-// Ensure upload directory exists
-const uploadDir = path.join(__dirname, '../../data/uploads');
+// Ensure upload directory exists.
+// Resolved through src/services/paths.js rather than inlined as
+// path.join(__dirname, '../../data/uploads'). The default is that exact path, so
+// a source checkout and the container are unaffected — but under a packaged
+// Electron app __dirname is inside the read-only app.asar, and multer's
+// destination would be unwritable. UPLOAD_DIR lets the desktop build redirect
+// it to app.getPath('userData')/uploads.
+const uploadDir = require('../services/paths').UPLOAD_DIR;
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }

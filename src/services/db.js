@@ -20,6 +20,12 @@
  * directly, so setting DATABASE_PATH moved the settings surface onto one
  * database while the data routes silently kept reading another.
  *
+ * The resolution itself now lives in src/services/paths.js, shared with the
+ * upload directory and the SPA directory. It is imported here rather than
+ * inlined because those five literals were once duplicated across five files,
+ * each independently anchored to __dirname — which is correct in a container
+ * and wrong inside a packaged Electron app.asar. See that module for why.
+ *
  * The default is __dirname-anchored, NOT cwd-relative. A bare
  * `node src/server.js` from the wrong directory used to resolve
  * 'data/db/cms.db' against process.cwd() and therefore open a different
@@ -35,11 +41,7 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-
-const DEFAULT_DB_FILE = path.resolve(__dirname, '../../data/db/cms.db');
-const DB_FILE = process.env.DATABASE_PATH
-  ? path.resolve(process.env.DATABASE_PATH)
-  : DEFAULT_DB_FILE;
+const { DB_FILE } = require('./paths');
 
 // The sqlite3 CLI will not create the file's parent directory, so a container
 // starting against a mounted-but-empty volume would fail on the very first

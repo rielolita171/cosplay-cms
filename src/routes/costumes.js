@@ -905,10 +905,13 @@ router.delete('/:id/images', async (req, res) => {
       if (fileName) {
         const fs = require('fs').promises;
         const path = require('path');
-        // Same directory images.js serves from. Note this is resolved from
-        // __dirname, not from the process cwd, so it stays correct no matter
-        // which directory the server was started in.
-        const filePath = path.join(__dirname, '../../data/uploads', fileName);
+        // Same directory images.js serves from, via the shared UPLOAD_DIR
+        // constant. This was __dirname-anchored so it stayed correct no matter
+        // which directory the server was started from — that property is kept,
+        // and UPLOAD_DIR additionally lets a packaged Electron build redirect
+        // it out of the read-only app.asar. See src/services/paths.js.
+        const { UPLOAD_DIR } = require('../services/paths');
+        const filePath = path.join(UPLOAD_DIR, fileName);
         try {
           await fs.unlink(filePath);
           fileDeleted = true;

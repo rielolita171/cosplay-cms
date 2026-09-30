@@ -117,7 +117,12 @@ router.get('/stats', async (req, res) => {
   try {
     const fs = require('fs').promises;
     const path = require('path');
-    const uploadDir = path.join(__dirname, '../../data/uploads');
+    // UPLOAD_DIR replaces the previous __dirname-relative literal so this
+    // resolves outside app.asar in a packaged Electron build. `path` is still
+    // needed below to join each filename — dropping it here made this endpoint
+    // fail with "path is not defined".
+    const { UPLOAD_DIR } = require('../services/paths');
+    const uploadDir = UPLOAD_DIR;
 
     const files = await fs.readdir(uploadDir);
     let totalSize = 0;

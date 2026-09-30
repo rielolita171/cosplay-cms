@@ -10,6 +10,23 @@ const { rateLimit } = require('./middleware/rateLimit');
 const app = express();
 const PORT = process.env.PORT || 4001;
 
+// The interface the listener binds to.
+//
+// DEFAULT 0.0.0.0 IS DELIBERATE AND UNCHANGED — see the no-authentication note
+// at the top of this file. The container is meant to publish the port onto a
+// trusted network, which requires binding every interface.
+//
+// It is overridable because a DESKTOP build must not do that. This app has no
+// authentication whatsoever (every data route is open), so binding 0.0.0.0 on a
+// laptop would put full read AND write access to the entire costume collection
+// behind a plain TCP port on the operator's office or home LAN — a strictly
+// larger blast radius than the same app has inside a container network.
+// electron/main.js sets this to 127.0.0.1, which is the correct boundary for a
+// single-user desktop app whose only client is its own window.
+//
+// Set in .env only if you genuinely want a container exposed off-box.
+const BIND_ADDRESS = process.env.BIND_ADDRESS || '0.0.0.0';
+
 // ============================================================================
 // NO AUTHENTICATION — READ THIS BEFORE EXPOSING THE PORT
 // ============================================================================
@@ -133,7 +150,7 @@ app.use('/api', apiLimiter);
  */
 app.use(
   '/uploads',
-  express.static(path.join(__dirname, '../data/uploads'), {
+  express.static(require('./services/paths').UPLOAD_DIR, {
     index: false,
     dotfiles: 'deny',
     redirect: false
@@ -280,8 +297,11 @@ const notificationRoutes = require('./routes/notifications');
 app.use('/api', notificationRoutes);
 app.use('/', notificationRoutes);
 
-// Static frontend UI
-app.use(express.static(path.join(__dirname, '../public')));
+// Static frontend UI. PUBLIC_DIR rather than a __dirname-relative literal: it
+// stays read-only in every deployment, so the main process needs no override,
+// but routing it through the shared module keeps all five path resolutions in
+// one place.
+app.use(express.static(require('./services/paths').PUBLIC_DIR));
 
 // ============================================================================
 // ERROR HANDLING MIDDLEWARE
@@ -398,11 +418,12 @@ function reportTelegramConfig(source) {
 // into a listen-only-on-loopback. Naming 0.0.0.0 states the intent: reachable
 // from outside this network namespace, which is what a published container port
 // needs.
-const server = app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, BIND_ADDRESS, () => {
   console.log(`\n${'='.repeat(60)}`);
   console.log('✅ Express Server Started');
   console.log(`${'='.repeat(60)}`);
   console.log(`🌐 Server running on: http://localhost:${PORT}`);
+  console.log(`   Bound to: ${BIND_ADDRESS === '0.0.0.0' ? '0.0.0.0 (all interfaces)' : BIND_ADDRESS}`);
   console.log(`📋 Health check: http://localhost:${PORT}/health`);
   console.log(`📚 API version: http://localhost:${PORT}/api/version`);
   // The allowlist is resolved at runtime now, so this line reports the cached
