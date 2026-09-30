@@ -207,6 +207,70 @@ Set it as an environment variable, not in `.env` — a packaged app has no
 set CMS_ALLOW_ANY_ORIGIN=1 && npm run electron:dev
 ```
 
+### 6. Only the Electron window can read the collection
+
+**The CORS allowlist above is necessary but not sufficient, and this is the part
+that closes the remaining gap.**
+
+Typing `http://127.0.0.1:4101` into Chrome is a top-level **navigation**. Browsers
+send no `Origin` header on navigation, so the CORS callback never runs at all and
+every `/api` route answers normally. A tightened allowlist does nothing about it,
+because CORS governs `fetch()`, not the address bar. Without the mechanism below,
+any browser on the machine got the full collection, including export/import.
+
+So the desktop build requires a **per-launch 256-bit token**:
+
+| Step | Where |
+|---|---|
+| Generated before the server is required | [`electron/main.js`](../electron/main.js) |
+| Held only by the main process, in memory | `CMS_DESKTOP_TOKEN` |
+| Handed to the renderer through a context bridge | [`electron/preload.js`](../electron/preload.js) |
+| Attached to every request at the single chokepoint | `api()` in [`public/index.html`](../public/index.html) |
+| Compared in constant time | [`src/services/desktopToken.js`](../src/services/desktopToken.js) |
+| Enforced on `/api` and `/uploads` | [`src/server.js`](../src/server.js) |
+
+A browser pointed at the same server has no preload, so it cannot obtain the
+token: every request that returns collection data comes back **403
+`DESKTOP_TOKEN_REQUIRED`**.
+
+**Two deliberate exceptions, neither of which leaks anything:**
+
+- **`GET /` is not guarded, and cannot be.** Electron's first page load is a
+  navigation, which carries no custom headers — there is no mechanism by which the
+  shell could present the token, so guarding it would mean the app could never
+  start. `index.html` contains no collection data: it is markup and script, so a
+  browser loading it renders an empty shell, because every request it then makes is
+  refused.
+- **`/health` is not guarded**, so "is the server up" stays answerable without the
+  token.
+
+The token is never written to disk, never persisted, never placed in a URL (so it
+cannot reach an access log, browser history, or a `Referer` header), and a fresh
+one is generated on every launch.
+
+**What this does not do.** It does not protect against the person at the keyboard.
+They can read the SQLite file directly, or open the app's DevTools and call
+`window.cosplayCms.desktopToken()`. The renderer has to hold the token in order to
+send it, and the renderer is theirs. What it stops is a website, a browser address
+bar, and other software on the machine — raising the bar from "type a URL" to
+"deliberately extract a secret from a running process".
+
+**Docker and `npm start` are unaffected.** The guard requires both
+`CMS_SELF_ORIGIN` and a valid `CMS_DESKTOP_TOKEN`; a self-hosted server has
+neither, so `isGuarded()` is false and the middleware is a straight pass-through.
+The n8n notification endpoints and any `curl` workflow keep working unchanged —
+they have no way to receive a token, and demanding one would break them for no
+security gain on a server that is meant to be reachable over the network behind
+its own boundary.
+
+To reproduce the guarded behaviour without Electron:
+
+```
+CMS_SELF_ORIGIN=http://127.0.0.1:4101 \
+CMS_DESKTOP_TOKEN=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))") \
+npm start
+```
+
 ## Does this still run outside Electron?
 
 Yes — `npm start`, `node src/server.js`, and `docker compose up` all behave
@@ -345,8 +409,25 @@ Two things to know if you edit that block:
   (3.45.1), applied the schema, served every route 200, and converted an uploaded
   PNG to WebP via the bundled Windows `sharp`.
 
+**Verified by running (the server-side token guard, without Electron):**
+
+- **The guard itself** — a real `node src/server.js` in desktop mode with a
+  generated token: `GET /` → 200 (the shell), `/api/costumes` with no token → 403,
+  with a wrong token → 403, with the correct token → 200 and real JSON; same for
+  `/api/props` and `/api/lenses`; `POST` → 403; `/health` → 200.
+- **The self-hosted path is untouched** — the same server without the desktop
+  variables: `curl` → 200, the n8n notification endpoint with
+  `X-CMS-API-KEY` → 200 and with a wrong key → 403, a browser from an allowed
+  origin → 200, and from a foreign origin → 403. `isGuarded()` is `false` and the
+  CORS allowlist resolves exactly as before.
+
 **Not verified — treat as untested:**
 
+- **The preload bridge end-to-end.** The server side is proven above, and the
+  bridge is a single `contextBridge.exposeInMainWorld` call, but it has not been
+  exercised inside a running Electron window: confirm the desktop app still loads
+  data on your first launch of a new build. If it does not, the likely cause is
+  the preload path, not the guard.
 - **macOS.** Never built or run. `PRECOMPILED.mac` points at the x64 build, and
   on Apple Silicon that needs Rosetta 2.
 - **Native Windows.** The Windows checks ran under wine, which is how NSIS itself

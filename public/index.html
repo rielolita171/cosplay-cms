@@ -3730,9 +3730,26 @@
       // suite asserts there are no bare fetch() calls anywhere else).
       const wantBinary = opts.binary === true;
 
+      // The desktop token, when this page is running inside the Electron app.
+      //
+      // window.cosplayCms exists ONLY there — it is published by electron/preload.js
+      // through contextBridge. A browser pointed at the same server has no such
+      // object, gets null, and sends no header; the server answers 403 and the app
+      // shows nothing. That is the intended outcome, not an error to handle: the
+      // desktop build is meant to be reachable only from its own window.
+      //
+      // It is attached here, at the single chokepoint every request passes through,
+      // rather than at each call site — the same reason auth used to be handled.
+      // A per-call-site header is one forgotten argument away from silently
+      // un-guarding the whole app.
+      const desktopToken = (window.cosplayCms && typeof window.cosplayCms.desktopToken === 'function')
+        ? window.cosplayCms.desktopToken()
+        : null;
+
       const headers = Object.assign(
         {},
         isFormData ? {} : { 'Content-Type': 'application/json' },
+        desktopToken ? { 'X-CMS-Desktop-Token': desktopToken } : {},
         opts.headers || {}
       );
 

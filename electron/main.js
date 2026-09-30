@@ -170,6 +170,36 @@ process.env.CORS_ORIGIN = configuredOrigins.join(',');
 process.env.CMS_SELF_ORIGIN = process.env.CMS_SELF_ORIGIN || electronOrigin;
 
 /**
+ * The desktop token — what makes the app reachable ONLY from this window.
+ *
+ * Generated here, in the Electron process, before src/server.js is required
+ * (which happens inside app.whenReady()). The ordering is load-bearing for the
+ * same reason the DATA_DIR block above is: src/server.js reads configuration at
+ * module load, so a token installed later would arrive too late and the guard
+ * would silently evaluate as "no token installed" — which is the UNGUARDED case.
+ *
+ * WHY IT IS AN ENV VAR AT ALL
+ *
+ * src/server.js is required in-process rather than reimplemented, and the guard
+ * has to live inside that shared code path so it cannot be bypassed by forgetting
+ * a check somewhere. Passing the token through the environment is the one channel
+ * that works for an in-process require, and it is not exposed to anything: the
+ * renderer never reads process.env (nodeIntegration is off, sandbox is on), it can
+ * only ask the preload bridge for it.
+ *
+ * It is 256 bits from crypto.randomBytes, per-launch, in memory only. It is never
+ * written to disk, never persisted, and never put in a URL — so it cannot land in
+ * an access log, in browser history, or in a Referer header.
+ *
+ * An operator-supplied CMS_DESKTOP_TOKEN is honoured so a headless test can
+ * reproduce the guarded behaviour without Electron, but the packaged app never
+ * ships one: a fixed token in a binary is a fixed token forever, which is exactly
+ * what a per-launch random value avoids.
+ */
+const { generate: generateDesktopToken } = require('../src/services/desktopToken');
+process.env.CMS_DESKTOP_TOKEN = process.env.CMS_DESKTOP_TOKEN || generateDesktopToken();
+
+/**
  * A shipped app has no .env. The container reads one; dotenv finds nothing and
  * every variable falls back to its default, which is the correct outcome. The
  * Telegram token and the API key are deliberately NOT invented here — they are
@@ -202,7 +232,18 @@ function createWindow() {
       // off. Everything the UI needs goes over HTTP exactly as in a browser.
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true
+      sandbox: true,
+      // The one addition, and it is what makes this window distinguishable from a
+      // browser pointed at the same URL: the preload publishes exactly one
+      // function that returns the per-launch desktop token. A browser has no
+      // preload, so it can never obtain the token and every request that returns
+      // collection data comes back 403. See electron/preload.js.
+      //
+      // `sandbox: true` is compatible with a preload that only uses
+      // contextBridge and process.env, both of which are available in a sandboxed
+      // renderer — the sandbox restricts Node built-ins, it does not forbid them
+      // from being listed in the preload's require allowlist.
+      preload: path.join(__dirname, 'preload.js')
     }
   });
 

@@ -100,6 +100,7 @@ app.use(helmet({
 const settings = require('./services/settings');
 const telegramConfig = require('./services/telegramConfig');
 const lensExpiryChecker = require('./services/lensExpiryChecker');
+const desktopToken = require('./services/desktopToken');
 
 app.use(cors({
   origin(origin, callback) {
@@ -135,6 +136,74 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-CMS-API-KEY']
 }));
+
+/**
+ * DESKTOP TOKEN GUARD — desktop build only.
+ *
+ * This is what actually makes the desktop app reachable only from its own
+ * window. The CORS check above closes cross-origin JavaScript, but a browser
+ * NAVIGATION to http://127.0.0.1:4101/ sends no Origin header at all, so it walks
+ * straight past CORS and then reads every /api route. CORS cannot close that gap:
+ * it governs fetch(), not the address bar.
+ *
+ * So the desktop build requires a per-launch 256-bit token that only the Electron
+ * process holds (see src/services/desktopToken.js and electron/preload.js). A
+ * browser that types the URL gets the HTML shell — which contains no collection
+ * data — and 403 on everything that returns data.
+ *
+ * INERT EVERYWHERE ELSE. Docker and `npm start` set neither CMS_SELF_ORIGIN nor
+ * CMS_DESKTOP_TOKEN, so isGuarded() is false and this is a straight pass-through.
+ * That is deliberate and load-bearing: the n8n notification endpoints and any
+ * curl-based workflow on a self-hosted server must keep working unchanged, and
+ * they cannot present a token they have no way to receive.
+ *
+ * ORDER MATTERS. This sits after cors() so a rejected-origin response still wins
+ * (there is no point minting a token error for a request that was already refused
+ * for being foreign), and before every route so nothing is served ahead of it.
+ *
+ * SCOPE — DATA ROUTES ONLY, AND THIS IS LOAD-BEARING
+ *
+ * Only /api and /uploads are guarded. The HTML shell is NOT, and it cannot be:
+ * Electron's very first page load is a top-level NAVIGATION, and browsers send no
+ * custom headers on navigation — there is no mechanism by which the shell could
+ * present the token. Guarding it would mean the app could never start. The shell
+ * is index.html, which contains no collection data: no costumes, no props, no
+ * images, nothing. A browser loading it gets an empty shell that renders nothing,
+ * because every request it then makes comes back 403. That is precisely the
+ * intended behaviour, and it is why "serve the shell unguarded, guard everything
+ * that returns data" is the design rather than a compromise.
+ *
+ * /health is unguarded too, so an operator can still tell "is the server up" from
+ * "is the app working" without holding the token.
+ *
+ * WHY NOT A HEADER-BASED ALTERNATIVE
+ *
+ * Restricting the shell to a `Sec-Fetch-Site: same-origin` check was rejected: it
+ * is trivially satisfied by any browser request, so it would guard nothing while
+ * looking like it did.
+ */
+const GUARDED_PREFIXES = ['/api', '/uploads'];
+
+function requireDesktopToken(req, res, next) {
+  if (!desktopToken.isGuarded()) return next();
+  if (!GUARDED_PREFIXES.some(prefix => req.path === prefix || req.path.startsWith(prefix + '/'))) {
+    return next();
+  }
+
+  if (desktopToken.matches(req.get(desktopToken.TOKEN_HEADER))) return next();
+
+  // 403, not 401: the caller is not asking to log in, and there is no login to
+  // perform. The body deliberately names the expected header so a developer
+  // debugging the desktop build is not left guessing, but it reveals nothing an
+  // attacker does not already know — the token itself is never echoed, and its
+  // absence is the whole point.
+  return res.status(403).json({
+    error: 'This server only answers requests from the Cosplay CMS desktop app.',
+    code: 'DESKTOP_TOKEN_REQUIRED'
+  });
+}
+
+app.use(requireDesktopToken);
 
 // Logging middleware
 app.use(morgan(':method :url :status :response-time ms'));
