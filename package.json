@@ -84,7 +84,7 @@
     },
     "win": {
       "target": ["nsis"],
-      "icon": "assets/favicon.ico",
+      "icon": "assets/favicon-256.png",
       "files": [
         "electron/**/*",
         "src/**/*",
