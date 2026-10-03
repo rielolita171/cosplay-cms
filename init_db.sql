@@ -80,7 +80,25 @@ CREATE TABLE IF NOT EXISTS "Costume" (
   referenceUrl TEXT,
   imageUrls TEXT DEFAULT '[]',
   createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP,
+  -- THE MILESTONE LADDER, FIVE STEPS IN ORDER. See the migration in
+  -- src/services/db.js for why `costumeOnly` is declared LAST: it is added by
+  -- ALTER TABLE, and SQLite always appends an added column at the end of the
+  -- physical order. Declaring it last here too means a fresh database and a
+  -- migrated one have the SAME physical order, which is the only reason the
+  -- positional `SELECT *` in src/routes/costumes.js stays correct on both.
+  --
+  -- The four older booleans are the ladder minus its first rung:
+  --   costumeOnly       the garment alone, nothing to complete the look
+  --   isFullset         garment + bare minimum styled wig
+  --   doneCostest       tried once or twice, you know how to look it
+  --   doneEvent         taken to an event, fits and wears comfortably
+  --   donePhotoSession  properly styled and shot by a photographer
+  --
+  -- These stay INDEPENDENT booleans rather than one ordinal. An ordinal cannot
+  -- represent the costume whose wig is ready but which has never been costested
+  -- (Fullset yes, Costest no), which is a perfectly ordinary state.
+  costumeOnly INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS "Prop" (

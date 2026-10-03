@@ -34,8 +34,74 @@ const COSTUME_COLUMNS = [
   'id', 'fandom', 'character', 'brand', 'size', 'isFullset',
   'doneCostest', 'doneEvent', 'donePhotoSession', 'status',
   'buyPrice', 'sellPrice', 'sellPriceMutual',
-  'notes', 'referenceUrl', 'imageUrls', 'createdAt', 'updatedAt'
+  'notes', 'referenceUrl', 'imageUrls', 'createdAt', 'updatedAt',
+  // LAST, and the position is load-bearing for the same reason `colorHex` is
+  // last in src/routes/lenses.js: it is added by ALTER TABLE, so SQLite puts it
+  // at the end of the physical order on a migrated database. init_db.sql
+  // declares it last too, so both shapes parse identically here.
+  'costumeOnly'
 ];
+
+// THE FIVE MILESTONE FLAGS, IN ORDER. One definition, read by the completion
+// maths and by the client-facing shape below, so the denominator can never
+// disagree with the number of flags actually shown in the UI.
+//
+// THEY ARE FIVE INDEPENDENT FLAGS, NOT A LADDER. No flag implies another, and
+// none is a prerequisite for any other: a costume can be photographed without
+// ever having been worn to a con, and this number exists to show how much of
+// the checklist is honestly ticked — not to reconstruct a sequence. The
+// percentage is therefore the plain count, each flag ticked worth exactly 20%,
+// and no key is ever read on another key's behalf.
+//
+// The consequence, accepted knowingly: a row with the four original flags
+// ticked and `costumeOnly` 0 — every row predating that column — now reads
+// 80%. That is the honest count of what is actually ticked, and no backfill is
+// run to disguise it.
+//
+// `glossary` is the plain-language meaning of each flag. It lives here as well
+// as in public/index.html so the definition and its explanation cannot be split:
+// a flag whose label is not explained is the exact problem this checklist was
+// introduced to fix. The client is the copy that is displayed.
+const MILESTONE_LADDER = [
+  {
+    key: 'costumeOnly',
+    label: 'Costume Ready',
+    glossary: 'The outfit exists and the zipper works. No wig, no styling — nothing else has to be ticked first.'
+  },
+  {
+    key: 'isFullset',
+    label: 'Fullset',
+    glossary: 'The costume plus a wig that has met a brush. Ten minutes of work, and suddenly the whole thing reads.'
+  },
+  {
+    key: 'doneCostest',
+    label: 'Costest Done',
+    glossary: 'Tried it on at home, walked a lap of the room, maybe took a photo. You know the look now, and so does the mirror.'
+  },
+  {
+    key: 'doneEvent',
+    label: 'Event Done',
+    glossary: 'Wore it to a con and survived the crowd, the heat and the 47 photos. Debut officially made.'
+  },
+  {
+    key: 'donePhotoSession',
+    label: 'Photoshoot Done',
+    glossary: 'Studio lighting, styled to death, shot by someone who knows the craft. An achievement genuinely unlocked.'
+  }
+];
+
+/**
+ * Milestone completion as a percentage of the five flags ticked.
+ *
+ * @param {object} costume  anything with the five milestone keys
+ * @returns {number} 0–100, rounded to a whole percent
+ */
+function milestoneCompletionPercent(costume) {
+  // THE PLAIN COUNT, one flag at a time. Nothing stands in for anything else,
+  // so a costume with two of the five ticked reads 40% whichever two they are.
+  const reached = MILESTONE_LADDER.filter(rung => !!costume[rung.key]).length;
+  return Math.round((reached / MILESTONE_LADDER.length) * 100);
+}
 
 // Parse SQLite output into objects
 function parseSqlResult(output, columns) {
@@ -86,6 +152,18 @@ async function distinctCostumeValues() {
   const brands = await queryDb(
     `SELECT DISTINCT brand FROM "Costume" WHERE brand IS NOT NULL AND TRIM(brand) <> '';`
   );
+  // SIZES ARE ORDERED BY THE GARMENT LADDER, NOT ALPHABETICALLY. The dropdown
+  // is the third dimension (fandom, brand, size) and reuses `collect`, but its
+  // values are not all names: seven of the eight possible values are the enum in
+  // COSTUME_SIZES, which a plain localeCompare would render as
+  // "2XL, 3XL, L, M, S, XL" — the same spelling-order bug the list view's Size
+  // sort had. So the enum members are pinned to their ladder position and only
+  // the `sizeOther` escape hatch (bespoke values like "One Size") falls through
+  // to alphabetical, AFTER the ladder. The server owns COSTUME_SIZES, so the
+  // ordering is done here rather than duplicated in the client.
+  const sizes = await queryDb(
+    `SELECT DISTINCT size FROM "Costume" WHERE size IS NOT NULL AND TRIM(size) <> '';`
+  );
   // parseSqlResult on a single-column result gives [{fandom: 'x'}, ...].
   const collect = (output, column) => {
     const seen = new Map();
@@ -97,7 +175,24 @@ async function distinctCostumeValues() {
     });
     return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
   };
-  return { fandoms: collect(result, 'fandom'), brands: collect(brands, 'brand') };
+  const bySizeLadder = (a, b) => {
+    // indexOf is case-insensitive in EFFECT because the enum was uppercased on
+    // write (normalizeSize); the upper() here covers a row imported straight
+    // into the column by a script as "xl".
+    const rank = value => {
+      const i = COSTUME_SIZES.indexOf(String(value).trim().toUpperCase());
+      return i === -1 ? COSTUME_SIZES.length : i;
+    };
+    const ra = rank(a);
+    const rb = rank(b);
+    if (ra !== rb) return ra - rb;
+    return String(a).localeCompare(String(b));
+  };
+  return {
+    fandoms: collect(result, 'fandom'),
+    brands: collect(brands, 'brand'),
+    sizes: collect(sizes, 'size').sort(bySizeLadder)
+  };
 }
 
 // ============================================================================
@@ -394,10 +489,22 @@ router.get('/', async (req, res) => {
     // an injection — it cannot widen access beyond rows the caller could already
     // list, and changing it would alter a documented filter behaviour.
     // `filters` echoes back exactly what the caller sent, unchanged.
-    const { fandom: rawFandom, status: rawStatus, brand: rawBrand, search: rawSearch, page, limit } = req.query;
+    const { fandom: rawFandom, status: rawStatus, brand: rawBrand, search: rawSearch, size: rawSize, page, limit } = req.query;
     const fandom = textParam(rawFandom, { name: 'fandom', maxLength: MAX_REFERENCE_NAME_LENGTH });
     const status = enumParam(rawStatus, COSTUME_STATUSES, 'status');
     const brand = textParam(rawBrand, { name: 'brand', maxLength: MAX_REFERENCE_NAME_LENGTH });
+    // SIZE, EXACT — NOT A SUBSTRING. The dropdown offers whole stored values,
+    // so "L" must not also return "XL" and "2XL": a size filter that returns a
+    // garment two sizes away from the one that was asked for is worse than no
+    // filter, because the count in the pager would then describe rows nobody
+    // selected. So this is `size = ?`, not `size LIKE '%?%'` like the two NAME
+    // dimensions above, which genuinely are substring-matched.
+    //
+    // The value is NOT validated against COSTUME_SIZES: the column also holds
+    // the verbatim `sizeOther` escape hatch ("One Size", "82/66/94"), so the
+    // filter's domain is "any stored size", capped at the same length the write
+    // path allows for a custom one.
+    const size = textParam(rawSize, { name: 'size', maxLength: MAX_SIZE_OTHER_LENGTH });
     // FREE-TEXT SEARCH. Added because the dashboard filters the costume list
     // SERVER-SIDE: with paging on, filtering the returned rows in the browser
     // would only ever search the 25 rows of the current page, so a costume on
@@ -430,6 +537,7 @@ router.get('/', async (req, res) => {
     if (fandom) where += ` AND fandom LIKE ${esc(`%${fandom}%`)}`;
     if (status) where += ` AND status = ${esc(status)}`;
     if (brand) where += ` AND brand LIKE ${esc(`%${brand}%`)}`;
+    if (size) where += ` AND size = ${esc(size)}`;
     // One LIKE over three columns, not three separate parameters: the search box
     // is ONE field and "blue" should find a Blue Archive costume whether the
     // word landed in the fandom, the character or the brand. Each `%term%` is
@@ -572,7 +680,7 @@ router.get('/', async (req, res) => {
         fullsetCount: fullsetCount
       },
       filterOptions: await distinctCostumeValues(),
-      filters: { fandom: rawFandom, status: rawStatus, brand: rawBrand, search: search }
+      filters: { fandom: rawFandom, status: rawStatus, brand: rawBrand, search: search, size: rawSize }
     });
   } catch (error) {
     // A rejected filter is a client error. Without this, the enum/length 400s
@@ -607,8 +715,9 @@ router.get('/:id', async (req, res) => {
     const costume = parseSqlResult(result, COSTUME_COLUMNS)[0];
 
     // Calculate completion percentage
-    const completion = ((costume.isFullset ? 1 : 0) + (costume.doneCostest ? 1 : 0) + (costume.doneEvent ? 1 : 0) + (costume.donePhotoSession ? 1 : 0)) / 4 * 100;
-    costume.completionPercent = Math.round(completion);
+    // Was a hardcoded `/ 4` over four raw booleans. A fifth rung would have made
+    // this lie on every pre-existing row, so it now reads the ladder instead.
+    costume.completionPercent = milestoneCompletionPercent(costume);
 
     res.json(costume);
   } catch (error) {
@@ -681,6 +790,10 @@ router.post('/', async (req, res) => {
       sellPriceMutual: normalizedSellPriceMutual,
       status: 'IN_POSSESSION',
       isFullset: false,
+      // Not in the INSERT list above — it takes the column's DEFAULT 0, the
+      // same way `isFullset` is written as a literal 0 there. A new costume has
+      // not been declared costume-only, so Costume Ready starts unticked.
+      costumeOnly: false,
       createdAt: now
     });
   } catch (error) {
@@ -698,7 +811,8 @@ router.put('/:id', async (req, res) => {
     // UPDATE matches nothing — the same observable result as before.
     const id = idParam(req.params.id) || '';
     const { character, status, isFullset, doneCostest, doneEvent, donePhotoSession, notes, imageUrls,
-            brand, fandom, size, sizeOther, buyPrice, sellPrice, sellPriceMutual } = req.body;
+            brand, fandom, size, sizeOther, buyPrice, sellPrice, sellPriceMutual,
+            costumeOnly } = req.body;
 
     let updates = [];
 
@@ -760,6 +874,7 @@ router.put('/:id', async (req, res) => {
     if (doneCostest !== undefined) updates.push(`doneCostest = ${doneCostest ? 1 : 0}`);
     if (doneEvent !== undefined) updates.push(`doneEvent = ${doneEvent ? 1 : 0}`);
     if (donePhotoSession !== undefined) updates.push(`donePhotoSession = ${donePhotoSession ? 1 : 0}`);
+    if (costumeOnly !== undefined) updates.push(`costumeOnly = ${costumeOnly ? 1 : 0}`);
 
     // `imageUrls` is part of the Phase 5 upload flow: the image POST returns the
     // saved URL and the dashboard then PUTs the merged list back. Omitting it
@@ -1021,6 +1136,8 @@ module.exports.normalizers = {
   COSTUME_COLUMNS,
   COSTUME_STATUSES,
   COSTUME_SIZES,
+  MILESTONE_LADDER,
+  milestoneCompletionPercent,
   MAX_REFERENCE_NAME_LENGTH,
   MAX_CHARACTER_LENGTH,
   MAX_REFERENCE_URL_LENGTH,

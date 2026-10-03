@@ -444,6 +444,31 @@ async function initSchema() {
       // Column already exists, or the table is not there yet.
     });
 
+    // Column added to "Costume" after init_db.sql was written: the FIRST RUNG of
+    // the milestone ladder. The four existing booleans started at "Fullset",
+    // which reads as "the costume is complete" — but a costume that owns only
+    // the garment, with no wig or styling to finish the look, had no way to be
+    // recorded at all. Such a costume showed every milestone unticked and was
+    // indistinguishable from one that had not been started.
+    //
+    // IDEMPOTENT, AND A NO-OP ON A FRESH DATABASE
+    // Same pattern and same reasoning as colorHex above: the catch swallows the
+    // second run's "duplicate column name", so this needs no PRAGMA probe.
+    //
+    // IT REWRITES NOTHING
+    // ADD COLUMN appends NULL to every existing row and touches no other table.
+    // The existing costumes are not modified. NULL is read as FALSE by toBool()
+    // on the client and as falsy by the route's `? 1 : 0`, so an unmigrated
+    // costume simply has this rung unticked — which is the correct default,
+    // since none of them has been declared costume-only.
+    //
+    // It is appended LAST, matching the position it is declared at in
+    // init_db.sql, so the positional `SELECT *` in src/routes/costumes.js
+    // parses identically on a migrated and a freshly-initialised database.
+    await runSql('ALTER TABLE "Costume" ADD COLUMN costumeOnly INTEGER DEFAULT 0;').catch(() => {
+      // Column already exists, or the table is not there yet.
+    });
+
     // Surface (never repair) any pre-existing size that sits outside XS–3XL.
     await reportSizeEnumDrift();
   })();
