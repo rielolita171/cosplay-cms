@@ -697,13 +697,35 @@ router.put('/:id', async (req, res) => {
     // Length-capped; an id that cannot be a row id becomes '' below, so the
     // UPDATE matches nothing — the same observable result as before.
     const id = idParam(req.params.id) || '';
-    const { status, isFullset, doneCostest, doneEvent, donePhotoSession, notes, imageUrls,
+    const { character, status, isFullset, doneCostest, doneEvent, donePhotoSession, notes, imageUrls,
             brand, fandom, size, sizeOther, buyPrice, sellPrice, sellPriceMutual } = req.body;
 
     let updates = [];
 
     // Rejects anything outside the enum with 400 BEFORE a single statement runs.
     const normalizedStatus = normalizeStatus(status);
+
+    // `character` IS THE COSTUME'S NAME — the string every card heading, prop
+    // link and image alt-text renders. It used to be create-only (a PUT carrying
+    // it was silently ignored), which meant a typo in a character name could
+    // only ever be fixed by deleting and re-adding the row, losing its images,
+    // prices and milestones. It is validated here with the EXACT rule POST uses
+    // (textParam + MAX_CHARACTER_LENGTH + noSeparator), so the two write paths
+    // cannot drift and the server is never stricter than the form in front of
+    // the user: `|` and a line break would split the row on the pipe transport,
+    // and `character` is the first column a card shows.
+    const normalizedCharacter = textParam(character, {
+      name: 'character', maxLength: MAX_CHARACTER_LENGTH, noSeparator: true
+    });
+    // Presence is decided on the KEY (textUpdate), not on the trimmed value, so
+    // "caller never mentioned it" stays distinct from "user cleared the box".
+    // Unlike `notes`, a cleared name cannot be honoured: the column is NOT NULL
+    // and a nameless costume renders as the placeholder "Unnamed" everywhere, so
+    // a present-but-empty value is a caller error and stays a 400. This mirrors
+    // `name` in props.js and `category`.
+    if (textUpdate(req.body, 'character') && !normalizedCharacter) {
+      throw Object.assign(new Error('character cannot be empty'), { status: 400 });
+    }
 
     // brand / fandom / size are editable now, with the same contract as POST:
     // an unknown brand/fandom name is registered in the managed list rather than
@@ -719,6 +741,7 @@ router.put('/:id', async (req, res) => {
     const normalizedSellPriceMutual = normalizePrice(sellPriceMutual, 'sellPriceMutual');
     // Column names here are literals, so only the VALUES are caller-supplied and
     // every one of them goes through esc() rather than an ad-hoc quote-doubling.
+    if (normalizedCharacter) updates.push(`character = ${esc(normalizedCharacter)}`);
     if (refBrand) updates.push(`brand = ${esc(refBrand.value)}`);
     if (refFandom) updates.push(`fandom = ${esc(refFandom.value)}`);
     if (resolvedSize.persist) {

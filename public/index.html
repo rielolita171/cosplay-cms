@@ -2247,14 +2247,30 @@
   <!-- Modal: Edit Costume (opened from a card's Edit button via
        bindGridEvents -> data-action="edit"). Every field here maps to a key
        PUT /api/costumes/:id accepts: status, isFullset, doneCostest, doneEvent,
-       donePhotoSession, notes, buyPrice, brand, fandom, and size (or sizeOther
-       when the "Custom" option is chosen — never both). `character` is absent
-       on purpose: it is a POST/create-only column, so a typo here is ignored
-       rather than silently renaming a costume. -->
+       donePhotoSession, notes, buyPrice, brand, fandom, character, and size (or
+       sizeOther when the "Custom" option is chosen — never both).
+
+       `character` is the costume's NAME and is editable here: it used to be a
+       create-only column, so a typo in a character name could only be fixed by
+       deleting and re-adding the row (losing its images, prices and
+       milestones). It is submitted on every save — not only when changed — and
+       the server applies the same rule as POST (required, 120 chars, no `|` or
+       line break), so the two write paths cannot drift. Renaming is safe for
+       linked rows: "Prop" stores costumeId, and Prop.costumeName is derived by
+       a JOIN at read time, so a rename follows through on its own. -->
   <dialog id="modal-edit-costume">
     <h3 style="margin-bottom: 4px;">Edit Costume</h3>
     <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 16px;" id="edit-costume-subtitle"></p>
     <form onsubmit="handleEditCostume(event)" novalidate>
+      <div class="form-group">
+        <label for="edit-costume-character">Character Name *</label>
+        <!-- The costume's name. Required and capped at 120 by the server
+             (MAX_CHARACTER_LENGTH); `maxlength` mirrors that cap so the box can
+             never hold something the server would reject. -->
+        <input type="text" class="form-control" name="character" id="edit-costume-character"
+               maxlength="120" required placeholder="e.g. Raiden Shogun">
+        <div class="field-error" data-error-for="character"></div>
+      </div>
       <div class="form-group">
         <label for="edit-costume-status">Status</label>
         <select class="form-control" name="status" id="edit-costume-status">
@@ -8261,9 +8277,15 @@
       const form = dialog.querySelector('form');
       clearFormErrors(form);
 
-      // Subtitle via textContent, never innerHTML.
+      // Subtitle via textContent, never innerHTML. It shows the name as it is
+      // NOW; the editable copy lives in the box below, so the subtitle keeps
+      // identifying the row even after a rename is typed but not yet saved.
       document.getElementById('edit-costume-subtitle').textContent =
         (clean(costume.character) || 'Unnamed') + ' — ' + (clean(costume.fandom) || 'unknown fandom');
+
+      // The name itself. Prefilled rather than left blank: this box is the only
+      // place it can be corrected, and submitting the form always carries it.
+      form.querySelector('[name="character"]').value = clean(costume.character);
 
       // A status stored outside the enum falls back to the default so the
       // select can never submit a value the backend would reject with 400.
@@ -8312,6 +8334,11 @@
       }
 
       const valid = validateForm(form, [
+        // Required on edit for the same reason it is required on create: the
+        // column is NOT NULL, and a nameless costume renders as "Unnamed" on
+        // every card. Clearing this box is rejected here rather than sent and
+        // refused by the server, so the user sees it against the field.
+        { name: 'character', required: true, maxLength: 120 },
         {
           name: 'status',
           custom: value => (COSTUME_STATUS_OPTIONS.indexOf(value) === -1 ? 'Choose a valid status.' : '')
@@ -8337,6 +8364,11 @@
       }
 
       const payload = {
+        // Always sent, not only when it differs from the stored name. The
+        // server decides "leave the column alone" from the ABSENCE of the key,
+        // so an always-present key simply means "this is the name now" — which
+        // makes a rename and an untouched save behave identically.
+        character: form.querySelector('[name="character"]').value.trim(),
         status: form.querySelector('[name="status"]').value,
         isFullset: form.querySelector('[name="isFullset"]').checked,
         doneCostest: form.querySelector('[name="doneCostest"]').checked,

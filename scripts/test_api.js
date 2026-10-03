@@ -195,6 +195,14 @@ async function testCostumes() {
       `Status: ${updateRes.status}`
     );
   }
+
+  // NOTE: renaming a costume (`character`) is NOT asserted here. This file never
+  // sets DATABASE_PATH, so it writes to whatever database the server it talks to
+  // is using — the real data/db/cms.db by default — and leaves its rows behind.
+  // That behaviour is pre-existing and applies to every check in this file, but
+  // it is the wrong place to add new coverage. The rename contract lives in
+  // scripts/test_costume_rename.js, which runs against a throwaway database and
+  // is part of the default `npm test`.
 }
 
 // ============================================================================
