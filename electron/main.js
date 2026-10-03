@@ -250,6 +250,26 @@ function createWindow() {
     minHeight: 700,
     title: 'Cosplay CMS',
     backgroundColor: '#0f1115',
+    // THE WINDOW / TASKBAR ICON.
+    //
+    // A <link rel="icon"> in the page does NOT set this: Electron uses it for the
+    // tab-like page title area at most, while the window chrome, the taskbar
+    // button and the Alt-Tab entry all come from this option. Without it the
+    // desktop build runs with a generic Electron icon, which is the one place
+    // the branding is most visible.
+    //
+    // Resolved relative to THIS FILE rather than process.cwd(), because the
+    // packaged app runs with an unpredictable working directory and a relative
+    // path silently fails to resolve there — Electron does not error on a
+    // missing icon, it just falls back to the default.
+    //
+    // 512px PNG rather than the .ico: macOS reads a PNG window icon cleanly at every
+    // size it needs, whereas a multi-frame .ico is sampled differently by
+    // different platform layers and can come out blurry in the Alt-Tab
+    // switcher. The .ico still ships for the Windows/Linux shells, which prefer
+    // it. Both are generated from public/assets/favicon.svg — see the icon
+    // block in public/index.html.
+    icon: path.join(__dirname, '..', 'public', 'assets', 'favicon-512.png'),
     show: false,
     webPreferences: {
       // The renderer loads the app's own localhost server, which is same-origin

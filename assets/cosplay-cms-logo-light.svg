@@ -1,0 +1,47 @@
+<svg id="svg-logo-light" class="w-full max-w-[340px] h-auto drop-shadow-sm" viewBox="0 0 320 70" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <g id="logo-mark-light">
+                                <!-- Cute Cat Hoodie Silhouette Base -->
+                                <path d="M22 48C22 36.9543 30.9543 28 42 28C53.0457 28 62 36.9543 62 48V50C62 52.2091 60.2091 54 58 54H26C23.7909 54 22 52.2091 22 50V48Z" fill="url(#hoodie_grad_l)"></path>
+                                
+                                <!-- Cat Ears Outer -->
+                                <path d="M22 36L15 18C14.2 16 16.5 14.2 18.2 15.5L28 23" fill="#6366F1"></path>
+                                <path d="M62 36L69 18C69.8 16 67.5 14.2 65.8 15.5L56 23" fill="#6366F1"></path>
+                                
+                                <!-- Inner Ear Accents -->
+                                <path d="M20 31L16.2 20.2C15.8 19.1 17.1 18.2 18 18.9L24.8 24.3" fill="#EC4899"></path>
+                                <path d="M64 31L67.8 20.2C68.2 19.1 66.9 18.2 66 18.9L59.2 24.3" fill="#EC4899"></path>
+
+                                <!-- Hood Inner Curve / Face area -->
+                                <path d="M27 46C27 37.7157 33.7157 31 42 31C50.2843 31 57 37.7157 57 46V54H27V46Z" fill="#FFF0F5"></path>
+
+                                <!-- Cute Playful Mascot Face -->
+                                <circle cx="36" cy="42" r="2.5" fill="#1E1B4B"></circle>
+                                <circle cx="48" cy="42" r="2.5" fill="#1E1B4B"></circle>
+                                <!-- Rosy Cheeks -->
+                                <circle cx="33" cy="45" r="2" fill="#F472B6" opacity="0.6"></circle>
+                                <circle cx="51" cy="45" r="2" fill="#F472B6" opacity="0.6"></circle>
+                                <!-- W-shaped Smile -->
+                                <path d="M39 45C39.8 46.2 41 46.2 42 45C43 46.2 44.2 46.2 45 45" stroke="#1E1B4B" stroke-width="1.8" stroke-linecap="round"></path>
+
+                                <!-- Craft Sparkle Accent -->
+                                <path d="M42 12L44 17L49 19L44 21L42 26L40 21L35 19L40 17L42 12Z" fill="#F59E0B"></path>
+                                
+                                <!-- Sewing Stitch Loop -->
+                                <path d="M19 50C15 48 13 42 14 36" stroke="#06B6D4" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="2 3"></path>
+                                <circle cx="14" cy="35" r="2" fill="#06B6D4"></circle>
+                            </g>
+
+                            <!-- Typography for Light Theme -->
+                            <g id="logo-text-light">
+                                <text x="74" y="47" font-family="'Space Grotesk', 'Plus Jakarta Sans', sans-serif" font-weight="700" font-size="30" fill="#0F172A" letter-spacing="-0.5">Cosplay</text>
+                                <rect x="210" y="24" width="62" height="28" rx="8" fill="#6366F1"></rect>
+                                <text x="241" y="43" font-family="'Space Grotesk', 'Plus Jakarta Sans', sans-serif" font-weight="800" font-size="14" fill="#FFFFFF" text-anchor="middle" letter-spacing="1">CMS</text>
+                            </g>
+
+                            <defs>
+                                <linearGradient id="hoodie_grad_l" x1="22" y1="28" x2="62" y2="54" gradientUnits="userSpaceOnUse">
+                                    <stop offset="0%" stop-color="#818CF8"></stop>
+                                    <stop offset="100%" stop-color="#4F46E5"></stop>
+                                </linearGradient>
+                            </defs>
+                        </svg>
