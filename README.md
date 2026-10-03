@@ -2,7 +2,7 @@
 
 # 🧥 Cosplay CMS
 
-### Inventory for costumes, props & contact lenses
+### Every costume, prop and lens — all in one place
 
 [![Live site](https://img.shields.io/badge/Website-live-8b5cf6?style=flat-square&logo=github&logoColor=white)](https://rielolita171.github.io/cosplay-cms/)
 [![Pages](https://img.shields.io/badge/GitHub%20Pages-passing-2ea44f?style=flat-square&logo=github&logoColor=white)](https://rielolita171.github.io/cosplay-cms/)
@@ -18,14 +18,26 @@
 
 ---
 
-A private, single-user inventory system for cosplay props, costumes and contact
-lenses. Express and the `sqlite3` CLI on the back end, a single self-contained
-`public/index.html` on the front end. No build step, no bundler, no CDN.
+## 1. What is Cosplay CMS
 
-It runs three ways from the same server code: as a Node process, as a Docker
-container (**the primary target**), and as a packaged desktop app (Electron).
-The Windows installer is **released as [v1.0.0](https://github.com/rielolita171/cosplay-cms/releases/tag/v1.0.0)** —
-see [`ELECTRON.md`](ELECTRON.md).
+A self-hosted inventory system for a cosplay collection. It tracks the outfit,
+the props that go with it, the contact lenses you have open, and the makers who
+built the props — plus the things that actually go wrong: a costume lent to a
+friend and never returned, a vial of lenses a month past its date, a costume
+marked *to be sold* with no price attached.
+
+One Express server, one SQLite file, one self-contained HTML page. It runs three
+ways from **the same server code**: as a Node process, as a Docker container
+(**the primary target**), and as a packaged desktop app (Electron). The Windows
+installer is **released as
+[v1.0.0](https://github.com/rielolita171/cosplay-cms/releases/tag/v1.0.0)** — see
+[`ELECTRON.md`](ELECTRON.md). **v1.1.0 is being prepared** and has no installer
+yet, so v1.0.0 is still the artifact you can download; what v1.1.0 changes is
+written down under "Release notes" below.
+
+Seven tabs: Costumes, Props & Accessories, Contact Lenses, Maker Corner,
+Wishlist, Reference Lists and Settings. Cards or a sortable list view, filterable
+by brand, fandom and size, with a read-only detail preview from either.
 
 <p align="center">
   <em>Live screenshots of a running instance are on the project site, not pasted
@@ -39,28 +51,115 @@ see [`ELECTRON.md`](ELECTRON.md).
 > reverse proxy, not the application. See "Security model" below, and do not
 > publish this port to the internet.
 
+## 2. Why it came about
+
+Cosplay collections grow sideways. You finish one outfit, then the accessories
+that go with it, then the lenses for the convention, then a commission from
+someone who liked the last thing you built. None of that is a stock problem, and
+that is exactly why the general tools fit badly:
+
+- **A spreadsheet** cannot answer "which of my lenses expire this month?" or
+  "what is still out on loan?" without you building the formula yourself, and it
+  cannot hold a photo per record. It also stops being portable the moment anyone
+  else touches it.
+- **A generic inventory app** assumes a warehouse: a stock count, a reorder
+  threshold, a purchase order. A costume collection has none of those. It has
+  *condition*, *storage location*, *whether you currently own it*, and *whether
+  the thing you made for it is still in the box*.
+- **Photos are the actual memory.** Six months later, which outfit was the one
+  with the detachable sleeve? Only a photo answers that, and a photo lives
+  happily in a phone gallery where nothing can search it.
+- **Lenses expire quietly.** They are consumables with a hard date, they are
+  invisible in a cupboard, and wearing one past it is a real problem. Nothing in
+  a spreadsheet is going to notice on its own.
+
+So the honest answer was that nothing off the shelf did this job, and the
+alternative was keeping the truth in a notes app and finding out the week of the
+convention. This is the tool that replaced that.
+
+## 3. How it solves it
+
+- **One record per costume**, carrying fandom, character, brand, size, the
+  full-set flag, buy/sell/mutual prices, notes and a reference link. Status moves
+  a row between *In Possession*, *On Rent*, *To Be Sold* and *Wishlist* — and
+  the **Wishlist is a filtered view of the same rows**, not a second copy, so an
+  item moves between the two by changing one dropdown and nothing else.
+- **Props are first-class and link to their costume.** Category, condition,
+  storage location and notes, optionally attached to the costume it belongs to,
+  so the Astesia sword shows up on the Astesia card instead of being lost in a
+  drawer.
+- **Contact lenses are tracked per vial**, with unopened / active /
+  expiring-soon / expired / disposed states and a scheduled checker that pushes
+  expiry warnings to Telegram — so a vial is never worn a month past its date.
+- **Maker Corner** is a directory of the people who build your props, with real
+  `tel:` and WhatsApp links, because the moment you need it is the moment a prop
+  broke and you need someone to fix it.
+- **Brands and fandoms are managed tables**, not free text sprinkled through a
+  notes field. Near-string duplicate detection catches "1/3 Delusion" before it
+  becomes "1/3  delusion ".
+- **Photos on every record**, re-encoded by `sharp` and renamed to opaque UUIDs,
+  with a detail preview and a gallery lightbox. They are the searchable memory,
+  and you can finally answer the sleeve question.
+- **Five independent milestones per costume**, each worth **20%** — *Costume
+  Ready*, Fullset, *Costest Done*, *Event Done* and *Photoshoot Done*. No flag
+  implies another, so owning only the garment is finally a state you can record,
+  and completion is the plain count of ticked boxes over five. Each one carries
+  a plain-English explanation, shown under its checkbox and again in the preview,
+  so a flag is never presented bare.
+
 > **There is no in-process SQLite binding.** Every query is a short-lived
 > `spawn('sqlite3', [DB_FILE])` child process fed SQL on stdin, so the
 > `sqlite3` **CLI binary must exist in the runtime image**. `better-sqlite3` is
 > not used and is not a dependency.
 
----
+## 4. Why Cosplay CMS
 
-## Running it
+**Because it fits the actual problem, and because it will still run in five
+years.**
+
+- **No build step, no bundler, no CDN.** The frontend is one
+  `public/index.html` with an inline stylesheet and one inline script. Clone it,
+  run it, it works. Nothing to reinstall, nothing to rebuild when a transitive
+  dependency publishes a breaking major.
+- **No login to get through.** There is no auth surface to forget a password
+  for, and nothing between you and the dashboard but the network boundary you
+  already control.
+- **One file of data.** `data/db/cms.db` plus `data/uploads`. Back it up by
+  copying a directory. Move it with a built-in export/import button rather than
+  hand-transferring a SQLite file next to an uploads tree.
+- **Eight runtime dependencies**, and the ZIP writer is 350 lines of `zlib`
+  rather than another package.
+- **Validated and escaped on every write.** A malformed request is a `400`, never
+  a half-written row. `esc()` is the only way a value reaches a string position.
+- **It runs where you already are** — a NAS, a home server, a laptop, a Windows
+  desktop — from identical code, so the container and the app can never drift
+  into being different products.
+
+## 5. The rest of it
+
+### Running it
 
 ```bash
 npm install
 npm start          # node src/server.js, listens on PORT (default 4001)
 npm run dev        # node --watch src/server.js
-npm test           # makers, wishlist, lens-expiry and transfer suites
+npm test           # 12 suites, 558 assertions: desktop token, makers, wishlist,
+                    # lens expiry, transfer, costume rename, list-head contract,
+                    # milestone ladder, brand assets, reference selects,
+                    # view-control sync, combo search
 ```
 
-## Desktop app (Electron)
+### Desktop app (Electron)
 
 A second way to run the *same* server code, packaged as a desktop app. The
 Express server is not reimplemented: `electron/main.js` sets the environment and
 then `require`s `src/server`, so every route, test and database behaves exactly
 as it does in the container.
+
+The app serves on **4101** by default (`http://127.0.0.1:4101`), bound to
+loopback only. The web and container port is **4001**, and `PORT` overrides
+either — it is read the same way in both targets, so nothing here is fixed by
+build.
 
 ```bash
 npm run electron:dev          # run the app against your checkout
@@ -82,6 +181,11 @@ The Windows installer for the current release:
 
 - [`Cosplay-CMS-Setup-1.0.0.exe`](https://github.com/rielolita171/cosplay-cms/releases/download/v1.0.0/Cosplay-CMS-Setup-1.0.0.exe) — 84 MB, unsigned (expect a SmartScreen warning on first run)
 
+The **1.1.0 desktop build is in preparation** and has no download yet. What it
+changes — including a fix that retroactively secures the two already-published
+v1.0.0 installers — is in "Release notes" below; there is deliberately no
+`1.1.0` download link here rather than a dead one.
+
 `latest.yml` is published alongside it for a future `electron-updater` feed.
 No auto-updater is wired into the app yet, so nothing will update itself.
 
@@ -101,8 +205,11 @@ No auto-updater is wired into the app yet, so nothing will update itself.
 > completely unchanged** — the token is desktop-only. Sections 5 and 6 of
 > [`ELECTRON.md`](ELECTRON.md) cover both, including the `CMS_ALLOW_ANY_ORIGIN=1`
 > escape hatch (off by default, desktop-only).
+>
+> Both layers are only genuinely live **as of v1.1.0**: the token guard never
+> activated in the two published v1.0.0 installers. See "Release notes" below.
 
-## Moving a collection
+### Moving a collection
 
 **Settings → Move this collection** exports everything into one `.zip` — every
 costume, prop, lens, maker, brand, fandom and image — and imports it on the other
@@ -131,6 +238,8 @@ reconciled per direction:
 Nothing is ever removed from the target's list, so your LAN or domain origins
 survive a migration.
 
+
+### Configuration
 
 Configuration is read from `.env` at the repository root. The names that
 matter are `PORT`, `NODE_ENV`, `DATABASE_PATH`, `CMS_DATA_DIR`,
@@ -174,6 +283,94 @@ simply ignored; you can delete it.
 > key already sitting inert in someone's `.env` must not be given a meaning.
 
 ---
+
+## Release notes
+
+### What's in v1.1.0
+
+**Not released yet.** No v1.1.0 installer has been built or published, so the
+downloadable artifact is still v1.0.0. This is the list of what the release
+contains.
+
+**Desktop & security** — read this one first.
+
+- **The token guard was never actually active in the packaged app.**
+  `require` caching latched the module before the env var was set, so **both
+  published v1.0.0 installers shipped with the guard off.** This release turns it
+  on, which retroactively secures the desktop app you may already have
+  installed.
+- **The desktop app now requires a per-launch token to read data.** 256 bits,
+  minted at launch and handed to the renderer only through a preload bridge.
+  `/api` and `/uploads` answer `403 DESKTOP_TOKEN_REQUIRED` without it.
+  Previously anyone could open `http://127.0.0.1:4101` in a browser, because a
+  top-level navigation sends no `Origin` and so CORS never applied. `GET /` and
+  `/health` stay open on purpose. Inert outside the desktop build.
+- **The desktop build now enforces its CORS allowlist** instead of accepting
+  every origin, including the opaque `null` that `file://`, `data:` and a
+  sandboxed iframe all send, on an API with no auth.
+- **The CORS allowlist editor is hidden in the desktop build only** — there is no
+  cross-origin caller to allow in a single-window app. Docker and `npm start`
+  keep the editor. Importing into a desktop build now discards an incoming
+  allowlist, keyed on which build the target is, and the reason string became
+  `desktop-allowlist-reset`.
+- **A new Settings panel, "How this install is protected"**, where every badge is
+  read from a value the server just sent (`isDesktopTarget`, `tokenGuardActive`,
+  `corsDisabled`) rather than prose that went stale.
+
+**Milestones**
+
+- **Five independent checkboxes, each worth 20%** — *Costume Ready*, Fullset,
+  *Costest Done*, *Event Done*, *Photoshoot Done*. Completion is the plain count
+  of ticked flags over five, and no flag implies another. Completion used to be a
+  hardcoded `/4` over four booleans starting at Fullset, so owning only the
+  garment had no way to be recorded at all.
+- **Each milestone carries a plain-English explanation**, under its checkbox and
+  again in the preview.
+- **Rows created before the new column now read 80% and are deliberately not
+  backfilled.** Their real state is unknown to the code, and guessing it would be
+  worse than an honest number.
+
+**Costumes**
+
+- **Costume names are editable.** The Edit Costume modal has a required
+  `character` field prefilled from the stored row, and `PUT /api/costumes/:id`
+  validates it exactly like `POST`. A typo used to mean delete-and-re-add, which
+  threw away the images, prices and milestones along with the row.
+- **A costume detail/preview modal** — click a costume name for a read-only
+  preview: large cover photo, thumbnail strip with a position counter, property
+  table, previous/next navigation, and the edit and delete actions. Reachable
+  from card view and from list view.
+
+**Finding things**
+
+- **A Size filter**, exact match, ordered XS→3XL rather than alphabetically.
+- **Brand and Fandom are searchable comboboxes** — substring filtering, an
+  explicit no-results message, full keyboard support (arrows, Enter, Escape, Tab,
+  Home, End, wrap-around), truthful `aria-expanded` / `aria-activedescendant`,
+  and selection bound on `pointerdown` so a click cannot be lost to a re-render.
+  The native `<select>` was replaced because Chrome on Windows hands its popup
+  to the OS and ignores `option` padding.
+- **"Reference Lists" is a real button** beside the field, instead of an
+  `<option>` appended below all 24 fandoms.
+- **The View (cards/list) control stays in sync when you switch tabs.** It used
+  to say "List view" while the grid was drawn as cards.
+- **The costume list header renders as a horizontal row again** — the element
+  carried `costume-row-head` while the CSS styled `costume-row-list-head`, a
+  class nothing emits, so it matched no rule and stacked vertically.
+
+**Branding**
+
+- **Real branding, from one hand-edited `assets/favicon.svg`.**
+  `scripts/build_icons.js` derives the PNG ladder (16–512) and a multi-frame
+  `favicon.ico` and copies them into `public/assets/`. The site gets
+  `mark.svg`, `logo-dark.svg`, `logo-light.svg` and a 1200×630
+  `og-image.png`. The Electron window, taskbar and Alt-Tab entry now show the
+  icon instead of the generic Electron one.
+
+**Verification.** `npm test` — 12 suites, 558 assertions, 0 failures: desktop
+token (11), makers (85), wishlist (59), lens expiry (44), transfer (62), costume
+rename (26), list-head contract (14), milestone ladder (67), brand assets (59),
+reference selects (41), view-control sync (22), combo search (68).
 
 ## Security model
 
@@ -229,8 +426,11 @@ Being unauthenticated is not the same as undefended. What remains:
   regression in per-image access control**, accepted as part of removing auth —
   but it is the one to be aware of, because an image URL is now a bearer
   reference with no expiry. (The desktop build is the one case where the blast
-  radius is smaller — it binds `127.0.0.1`, and it accepts only its own origin,
-  so no other page in any browser on that machine can reach it.)
+  radius is smaller — it binds `127.0.0.1`, enforces its own origin allowlist,
+  and since **v1.1.0** requires a per-launch token on `/api` and `/uploads`, so
+  a browser pointed at it gets an empty shell and `403` on every request that
+  returns data. Note that the two published v1.0.0 installers shipped with that
+  guard off; see "Release notes".)
 - **Every record is readable and writable by any client on the network.**
 
 ### Where the boundary is
@@ -259,7 +459,116 @@ migrated once at boot ([`src/services/db.js:197-213`](src/services/db.js:197)).
 See "What happens to your Telegram chat id on upgrade" in
 [`DOCKER.md`](DOCKER.md) for the verification and repair SQL.
 
+## Publishing this site
 
+The project site is `docs/`, published by
+[`.github/workflows/pages.yml`](.github/workflows/pages.yml). Its operational
+instructions were repo-internal and have been removed from the published page,
+so this section is now their only home.
+
+**One-time setup**, in the repository settings: **Settings → Pages → Build and
+deployment → Source: "GitHub Actions"**. Nothing can do this for you — the
+workflow grants itself `pages: write` and `id-token: write` and cannot enable the
+setting itself.
+
+**Every deploy** is a push to `main` (or `workflow_dispatch` from the Actions
+tab). The workflow checks out, configures Pages, verifies the assets, and hands
+`docs/` to `actions/upload-pages-artifact` with `path: docs`. **There is no build
+step and no dependency install** — `docs/` is already the artifact, so nothing in
+it is compiled, bundled or regenerated. The live site is
+<https://rielolita171.github.io/cosplay-cms/>.
+
+**Concurrency** is one deploy at a time, and a newer push cancels an in-flight
+one:
+
+```yaml
+concurrency:
+  group: pages
+  cancel-in-progress: true
+```
+
+### The deploy gate
+
+The only thing standing between a broken commit and a broken public page is an
+assertion pass that runs under `set -euo pipefail` and **fails the deploy** if
+any of these are missing:
+
+- `docs/assets/screenshots/dashboard.png`
+- `docs/assets/screenshots/costumes.png`
+- `docs/assets/screenshots/props.png`
+- `docs/assets/screenshots/reference-lists.png`
+- `docs/assets/mark.svg`
+- `docs/assets/logo-dark.svg`
+- `docs/assets/logo-light.svg`
+- `docs/assets/favicon.svg`
+- `docs/assets/og-image.png`
+
+It prints one line per missing file (`Missing screenshot: …` /
+`Missing brand asset: …`) and then exits non-zero with:
+
+```
+::error::Referenced assets are missing. Run scripts/capture-screenshots.js against a live instance, or update docs/index.html to match the files present.
+```
+
+> **The gate is an existence check and nothing more — every test is `if [ ! -f ]`.**
+> A stale-but-present screenshot deploys silently and nobody finds out until a
+> reader does, so re-shoot them after a UI change rather than trusting the fact
+> that the deploy went green.
+
+### Fixing a failed deploy
+
+If the gate fired on a screenshot, re-capture it from a live instance:
+
+```bash
+node scripts/capture-screenshots.js            # all four
+node scripts/capture-screenshots.js --only costumes.png,props.png
+```
+
+`scripts/capture-screenshots.js` starts `src/server.js` itself, drives a real
+browser over the DevTools Protocol, and writes into `docs/assets/screenshots/`
+by default. Three things about it are worth knowing before you run it:
+
+- **`sqlite3` must be on `PATH`.** The app has no in-process SQLite driver —
+  `src/services/db.js` spawns the `sqlite3` CLI once per query — so without it
+  every data route 500s, the grids render empty, and there is nothing worth
+  capturing. The script refuses to start and says so rather than writing four
+  tidy screenshots of nothing.
+- **No new dependency.** It finds the already-cached Chrome-for-Testing build
+  (then a system Brave/Chromium) and speaks CDP using Node built-ins, rather than
+  pulling Puppeteer or Playwright into `npm install` for anyone who clones the
+  repo to work on the app itself.
+- **It will not kill a server it did not start.** If something is already
+  serving this app on the port it errors and leaves it alone; pass
+  `--use-running` to adopt that server (it is then never stopped) or `--port` to
+  shoot somewhere else. Other flags: `--out <dir>`, `--chrome <path>`,
+  `--keep-server`, `--help`.
+
+It also checks its own output: every capture must decode as a 2880×1800 PNG — the
+2x of the 1440×900 viewport that `docs/index.html` declares in its `width` /
+`height` attributes, so the reserved box stays the right size — and be at least
+120 KB. A capture failing either test aborts without touching the existing file.
+
+If the gate fired on a brand asset instead, those come from
+`node scripts/build_icons.js`, which derives them from the one hand-edited
+`assets/favicon.svg`.
+
+**Both instructions used to be unrunnable.** `docs/index.html` and `pages.yml`
+both pointed readers and maintainers at `scripts/capture-screenshots.js`, and
+the file did not exist — so the published screenshots froze at whatever the UI
+looked like when they were first taken, while the alt text kept describing
+features that had changed underneath it. The script exists now, which is what
+makes this section actionable.
+
+### Updating the site
+
+The site is [`docs/index.html`](docs/index.html) plus `docs/assets/*`. Edit,
+commit, push — the deploy is the next thing that happens.
+
+**Adding a new referenced asset means adding it to the workflow's assertion
+list**, or the deploy will not catch its absence and the page will ship with a
+silent blank where a missing image should be. Only `docs/` is published — the
+root `assets/` directory is not, which is why the brand SVGs have copies in
+`docs/assets/`.
 
 ## Known issues and deferred fixes
 
@@ -268,13 +577,16 @@ Severities are the honest ones, not the flattering ones: `[low]` means a comment
 or a cosmetic value is wrong, and `[open]` means a known gap with no code behind
 it at all.
 
-> **Test coverage.** `npm test` runs four suites: makers (85), wishlist (59),
-> lens expiry (44) and transfer (61) — 249 assertions. The transfer suite covers
-> the ZIP container, export, the inspect pre-flight, import in both modes, the
-> ZIP-slip guard, the HTTP confirmation gate, and the CORS reconciliation in both
-> migration directions. Each of its scenarios runs in its own process, because
-> `paths.js` freezes `DB_FILE` at module load and one process could not test a
-> desktop import and a server import without the first value staying frozen.
+> **Test coverage.** `npm test` runs **twelve suites, 558 assertions**: desktop
+> token (11), makers (85), wishlist (59), lens expiry (44), transfer (62), costume
+> rename (26), list-head contract (14), milestone ladder (67), brand assets (59),
+> reference selects (41), view-control sync (22), combo search (68). The transfer
+> suite covers the ZIP container, export, the inspect pre-flight, import in both
+> modes, the ZIP-slip guard, the HTTP confirmation gate, and the CORS
+> reconciliation in both migration directions. Each of its scenarios runs in its
+> own process, because `paths.js` freezes `DB_FILE` at module load and one
+> process could not test a desktop import and a server import without the first
+> value staying frozen.
 >
 > **Not covered — and this is a real gap, not a formality.** There is no browser
 > in CI and no headless one on this host, so the three UI fixes are verified only
@@ -354,8 +666,15 @@ it at all.
   points at the x64 SQLite build, so Apple Silicon would need Rosetta 2. Linux has
   an AppImage target configured but no AppImage has been produced.
 - **Operational hazards while it holds.** Installers are **unsigned**, so
-  SmartScreen warns on first run, and there is **no auto-updater**. Icons are
-  unset, so builds use the default Electron icon.
+  SmartScreen warns on first run, and there is **no auto-updater**. **Resolved:**
+  the icons were unset and builds used the default Electron icon; v1.1.0 derives
+  a real icon set from `assets/favicon.svg` via `scripts/build_icons.js` (see
+  "Release notes"). Still true of the downloadable v1.0.0 installer.
+- **The published v1.0.0 installers shipped with the desktop token guard
+  inactive** (`require` caching latched the module before the env var was set).
+  Fixed in v1.1.0 — see "Release notes". Nothing about the packaging is wrong
+  here; this is a code-level defect, and it is the most important line in the
+  v1.1.0 release notes.
 - **A desktop install does not see the Docker database.** Everything writable
   lives under Electron's `userData`, which is a *different* database and upload
   store from the container's Docker volume. They share nothing in either

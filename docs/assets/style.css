@@ -90,13 +90,24 @@ code {
 }
 
 .brand { display: flex; align-items: center; gap: 10px; font-size: 1.05rem; }
+/* An <img> of the mascot, not an emoji in a coloured tile.
+
+   The purple-to-pink gradient tile existed to frame a 👘 glyph. With the real
+   SVG mark there is nothing left to frame — the mark carries its own gradient
+   hood — so a tile behind it would sit as a visible muddy box around artwork
+   that is already finished. `display:block` matters here too: an inline <img>
+   picks up a baseline gap inside the flex row, which nudges the wordmark out
+   of optical alignment with it. */
 .brand-mark {
-  width: 36px; height: 36px; display: grid; place-items: center;
-  font-size: 1.15rem; border-radius: 10px;
-  background: linear-gradient(135deg, #c084fc, #f472b6);
+  width: 34px; height: 34px;
+  display: block; flex: 0 0 auto;
+  filter: drop-shadow(0 2px 6px rgba(99, 102, 241, 0.35));
 }
 .brand-text { font-weight: 500; letter-spacing: -0.01em; }
 .brand-text b { font-weight: 800; }
+/* The wordmark reads as a logo rather than another nav item, so it brightens on
+   hover along with the mark's shadow. */
+.brand:hover .brand-text { color: var(--text); }
 
 .nav-links { display: flex; align-items: center; gap: 26px; font-size: 0.92rem; }
 .nav-links a { color: var(--text-muted); transition: color 0.2s ease; }
@@ -330,6 +341,24 @@ code {
   color: var(--warning); font-size: 0.95rem;
 }
 .bugs b { color: var(--text); }
+
+/* The v1.1.0 change list. Same shape as .bugs, but the marker is a real ✅ in
+   the markup rather than a ::marker glyph, because ::marker takes a CSS string
+   and a list marker cannot carry a white check in a green box. The span is
+   absolutely positioned off the text column so it lines up with the first line
+   of a wrapped item, and it is aria-hidden so a screen reader announces each
+   sentence on its own. */
+.release-list { list-style: none; padding: 0; margin: 0; }
+.release-list li {
+  position: relative; padding: 0 0 0 32px; margin-bottom: 14px;
+  color: var(--text-muted); font-size: 0.94rem;
+}
+.release-list .tick-ico {
+  position: absolute; left: 0; top: 0;
+  font-size: 0.95rem; line-height: 1.65;
+}
+.release-list b { color: var(--text); }
+.release-list em { color: var(--text); font-style: normal; font-weight: 600; }
 
 /* ---------------------------- STACK ---------------------------- */
 .stack-grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 52px; align-items: start; }

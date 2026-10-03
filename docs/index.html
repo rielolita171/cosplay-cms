@@ -4,10 +4,27 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cosplay CMS — Inventory for costumes, props &amp; lenses</title>
-<meta name="description" content="A self-hosted, no-build inventory system for cosplay costumes, props, contact lenses and makers. Express + SQLite, single-file frontend, deployable with Docker.">
-<meta property="og:title" content="Cosplay CMS — Inventory for costumes, props &amp; lenses">
-<meta property="og:description" content="Self-hosted cosplay inventory management. Express + SQLite, no build step, no CDN.">
+<meta name="description" content="Cosplay CMS is a self-hosted inventory system for cosplay collections: costumes, props, contact lenses and makers, with loan tracking, expiry alerts and photo galleries. Express + SQLite, no build step, runs on Docker or as a desktop app.">
+<meta property="og:title" content="Cosplay CMS — Every costume, prop and lens in one place">
+<meta property="og:description" content="A self-hosted inventory for a real cosplay collection: costumes, props, lenses, makers, loans and expiry alerts. No build step, no CDN.">
 <meta property="og:type" content="website">
+<!-- THE SHARE CARD. Without og:image a link pasted into a chat unfurls as a
+     bare URL with a title and nothing else; with it, the link unfurls as the
+     logo. og-image.png is generated from assets/cosplay-cms-full-logo-dark.png
+     on the site's own background, because that is the variant whose wordmark is
+     white — the light one would render invisible on the dark card.
+     It is an ABSOLUTE url: relative paths are not resolved by most scrapers,
+     so a relative og:image is silently dropped by the very clients it exists
+     for. twitter:card is declared alongside it because Twitter/X reads that
+     property, not the Open Graph one. -->
+<meta property="og:image" content="https://rielolita171.github.io/cosplay-cms/assets/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Cosplay CMS — a self-hosted inventory for cosplay costumes, props and contact lenses">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Cosplay CMS — Every costume, prop and lens in one place">
+<meta name="twitter:description" content="A self-hosted inventory for a real cosplay collection: costumes, props, lenses, makers, loans and expiry alerts.">
+<meta name="twitter:image" content="https://rielolita171.github.io/cosplay-cms/assets/og-image.png">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/style.css">
 <!-- Tells the UA this page is dark, so form controls, scrollbars and the
@@ -17,7 +34,7 @@
 </head>
 <body>
 
-<a class="skip-link" href="#features">Skip to content</a>
+<a class="skip-link" href="#what">Skip to content</a>
 
 <!-- ============================ HERO ============================ -->
 <header class="hero" id="top">
@@ -26,11 +43,24 @@
 
   <nav class="nav container">
     <a class="brand" href="#top">
-      <span class="brand-mark" aria-hidden="true">👘</span>
+      <!-- THE REAL LOGO, not the 👘 emoji this used to be. `mark.svg` is the
+           mascot alone (hood, ears, stitch, sparkle) with NO wordmark in it,
+           and that is deliberate rather than a compromise: an SVG loaded
+           through <img> is a separate document that cannot fetch a webfont, so
+           the <text> wordmark inside it would silently render in whatever
+           fallback the machine had. The wordmark is therefore set in HTML
+           beside the mark, where it uses the page's own font stack and stays
+           crisp and selectable. -->
+      <img class="brand-mark" src="assets/mark.svg" width="34" height="34" alt="" aria-hidden="true">
       <span class="brand-text">Cosplay<b>CMS</b></span>
     </a>
+    <!-- The three steps of the narrative come first in the nav, because they are
+         the spine of the page: what it is, why it exists, how it works. -->
     <div class="nav-links">
-      <a href="#features">Features</a>
+      <a href="#what">What</a>
+      <a href="#why">Why</a>
+      <a href="#how">How</a>
+      <a href="#release">Release</a>
       <a href="#gallery">Screenshots</a>
       <a href="#desktop">Desktop</a>
       <a href="#stack">Stack</a>
@@ -43,22 +73,26 @@
     <span class="pill">Self-hosted · No build step · No CDN</span>
     <h1>Every costume, prop and lens<br><span class="grad">in one place.</span></h1>
     <p class="lede">
-      Cosplay CMS is a private inventory system for the things that actually
-      accumulate: costume entries, the weapons that go with them, the contact
-      lenses you have open, and the makers who built your props. One Express
-      server, one SQLite file, one self-contained HTML page.
+      You have the outfit, the three props that go with it, the lenses you have
+      open, the maker who built the sword — and none of it is anywhere you can
+      ask a question. Cosplay CMS puts all of it in one place and answers the
+      questions: what's on loan, what's expiring, what's for sale, what did
+      that cost.
     </p>
 
     <p class="hero-badge">
       <span class="badge-dot" aria-hidden="true"></span>
-      <b>Desktop is here — released as v1.0.0.</b>
-      The same server, packaged as a Windows installer.
-      <a href="https://github.com/rielolita171/cosplay-cms/releases/download/v1.0.0/Cosplay-CMS-Setup-1.0.0.exe">Download the installer ↓</a>
+      <b>v1.0.0 is the download; v1.1.0 is being prepared.</b>
+      v1.0.0 is the published Windows installer, and it is the only release
+      you can download today —
+      <a href="https://github.com/rielolita171/cosplay-cms/releases/download/v1.0.0/Cosplay-CMS-Setup-1.0.0.exe">Download the v1.0.0 installer ↓</a>
+      — v1.1.0 has no tag and no installer yet, but its
+      <a href="#release">change list is on this page</a>.
     </p>
 
     <div class="cta-row">
       <a class="btn btn-primary" href="#quickstart">Get started</a>
-      <a class="btn btn-ghost" href="#desktop">Desktop app ↓</a>
+      <a class="btn btn-ghost" href="#what">What it is ↓</a>
     </div>
 
     <ul class="hero-stats">
@@ -91,10 +125,162 @@
   </div>
 </section>
 
-<!-- ============================ FEATURES ============================ -->
-<section class="section" id="features">
+<!-- ============================ STEP 1 — WHAT IT IS ============================ -->
+<!-- THE SPINE OF THE PAGE IS THREE STEPS, and this is step 1 of 3:
+     what the thing is → where the idea came from → how it answers it.
+     Each step is one section with an eyebrow that says which step it is, so the
+     progression is visible in the nav and in the scrollbar, not just implied by
+     the order. This section deliberately says almost nothing about *why*; that
+     is steps 2 and 3. -->
+<section class="section" id="what">
   <div class="container">
-    <p class="eyebrow">What it does</p>
+    <p class="eyebrow">Step 1 of 3 — What it is</p>
+    <h2>A self-hosted inventory for a cosplay collection</h2>
+    <p class="section-lede">
+      Cosplay CMS is a small content system that keeps track of a cosplay
+      wardrobe. One record per costume, with the props that go with it, the
+      contact lenses opened for it, the photos of it, the milestones it has
+      passed and the maker who built the hard part. It is one Express server
+      over one SQLite file, served from one HTML file — you can read the whole
+      codebase in an afternoon.
+    </p>
+
+    <!-- The same three facts the hero advertises, stated concretely rather
+         than as adjectives. "No build step" only means something next to "no
+         bundler, and the stylesheet is inline in the page you just cloned". -->
+    <div class="split">
+      <div class="panel">
+        <div class="panel-row"><span>Runs as</span><b>Node server, Docker, or Electron desktop app</b></div>
+        <div class="panel-row"><span>Web &amp; container port</span><b><code>4001</code></b></div>
+        <div class="panel-row"><span>Desktop port</span><b><code>127.0.0.1:4101</code></b></div>
+        <div class="panel-row"><span>Storage</span><b>One SQLite file plus an <code>uploads/</code> folder</b></div>
+        <div class="panel-row"><span>Login</span><b>None</b></div>
+        <div class="panel-row"><span>Build step</span><b>None — clone and run</b></div>
+        <div class="panel-row"><span>Third-party requests</span><b>None — no CDN, no webfont</b></div>
+      </div>
+
+      <div>
+        <h3 class="split-h">Three ways to run it, one codebase</h3>
+        <ul class="ticks">
+          <li><b>Node on <code>4001.</code></b> <code>npm install &amp;&amp; npm start</code>, or
+            <code>docker compose up -d</code> — the same server, a different way of owning the
+            process and the data directory.</li>
+          <li><b>Docker.</b> The compose file binds the port to loopback, so the container is
+            invisible to your LAN and you tunnel in.</li>
+          <li><b>Electron desktop on <code>127.0.0.1:4101.</code></b> The same Express app
+            required from a main process, packaged as a Windows installer — no second backend
+            to maintain, and no port for anything else to reach.</li>
+        </ul>
+        <h3 class="split-h" style="margin-top: 28px;">Seven tabs</h3>
+        <ul class="ticks">
+          <li>Dashboard, Costumes, Props &amp; Accessories, Contact lenses, Wishlist,
+            Maker Corner, Reference Lists</li>
+          <li>Wishlist is a filtered view of the costume rows, not a separate table, so an
+            item is never in two places at once</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>No login, no build step and no CDN are three decisions, not three
+      omissions.</b> It is a single-user box you run yourself, so the boundary is
+      your network rather than a session cookie; the frontend is one
+      <code>public/index.html</code> with an inline stylesheet and one inline
+      script, so there is nothing to compile; and nothing is fetched from
+      anywhere, so the app still works on a machine with no internet. What that
+      costs you — and the one exception, the desktop build's per-launch token —
+      is stated in <a href="#desktop">the desktop section</a> and
+      <a href="#how">step 3</a>.
+    </div>
+  </div>
+</section>
+
+<!-- ============================ STEP 2 — WHY IT WAS NEEDED ============================ -->
+<!-- STEP 2 OF 3. This used to be the whole opening section ("Why it exists"). It
+     is now the middle of the spine: first the reader learns what the thing is,
+     then why it was built. The four arguments and their voice are unchanged —
+     they are the argument for the thing, not decoration — and the origin below
+     them is new: who wanted this and what specifically was wrong. No company,
+     no team, no customer story. -->
+
+<section class="section section-alt" id="why">
+  <div class="container">
+    <p class="eyebrow">Step 2 of 3 — Why it was needed</p>
+    <h2>The tools all fit a warehouse</h2>
+    <p class="section-lede">
+      Cosplay collections grow sideways — one outfit, then the accessories that
+      go with it, then the lenses for the convention, then a commission. None of
+      that is a stock problem, and that is exactly why the obvious answers all
+      fit badly.
+    </p>
+
+    <div class="note">
+      <b>Where the idea came from.</b> One personal cosplay collection that ran
+      out of spreadsheet. The specific failures, not the vague ones: an item
+      lent to a friend was never written down, so it was still marked as owned
+      for the whole convention weekend; money already spent on a build was not
+      recorded anywhere, so "what did this cost me" could only be guessed at from
+      receipts; lenses sat in a drawer until one was worn past its date without
+      anyone noticing; and photos of a finished piece lived in three different
+      phone galleries, searchable only by date. None of those are big enough to
+      buy software for. All four together are the whole specification.
+    </div>
+
+    <div class="grid">
+      <article class="card">
+        <div class="card-ico">📊</div>
+        <h3>A spreadsheet can't</h3>
+        <p>Ask it "which of my lenses expire this month?" or "what's still out
+           on loan?" and you are building a formula, not using a tool. It cannot
+           hold a photo per record, and it stops being portable the moment
+           anyone else touches it.</p>
+      </article>
+
+      <article class="card">
+        <div class="card-ico">📦</div>
+        <h3>An inventory app assumes a warehouse</h3>
+        <p>Stock counts, reorder thresholds, purchase orders. A costume
+           collection has none of those. It has <em>condition</em>,
+           <em>storage location</em>, <em>whether you still own it</em> and
+           <em>whether the thing you made for it is in the box</em>.</p>
+      </article>
+
+      <article class="card">
+        <div class="card-ico">📷</div>
+        <h3>Photos are the real memory</h3>
+        <p>Six months on, which outfit had the detachable sleeve? Only a photo
+           answers that — and photos live in a phone gallery where nothing can
+           search them, sort them or tell you which one belongs to which
+           character.</p>
+      </article>
+
+      <article class="card">
+        <div class="card-ico">⏳</div>
+        <h3>Lenses expire quietly</h3>
+        <p>Consumables with a hard date, invisible in a cupboard, and wearing
+           one past it is a real problem. A spreadsheet is never going to notice
+           on its own — this one does, and tells you.</p>
+      </article>
+    </div>
+
+    <div class="note">
+      <b>So the answer was to build the thing.</b> One record per costume, props
+      linked to it, lenses tracked per vial with expiry alerts, photos on
+      everything, and a maker directory for the day a prop breaks.
+    </div>
+  </div>
+</section>
+
+<!-- ============================ STEP 3 — HOW WE SOLVE IT ============================ -->
+<!-- STEP 3 OF 3. The seven cards are the old "What it does" section, kept
+     intact; what is new around them is the operational reality (one file, no
+     auth by design, one-file transfer, per-launch token) and the mapping table,
+     which is the point of the section: each answer is tied back to a specific
+     pain from step 2 so the reader can check the match instead of taking it on
+     trust. -->
+<section class="section" id="how">
+  <div class="container">
+    <p class="eyebrow">Step 3 of 3 — How we solve it</p>
     <h2>Built for a real wardrobe, not a demo</h2>
     <p class="section-lede">
       Every feature exists because a cosplayer with a growing collection
@@ -154,8 +340,10 @@
            <code>sharp</code> and renamed to opaque UUIDs, with a progress bar
            and percentage while uploading. A photo you pick shows up in the
            dialog straight away, and if you change your mind the file is
-           deleted rather than left behind. Milestone checkboxes for costume
-           test, event day and photo session.</p>
+           deleted rather than left behind. Five independent milestone
+           checkboxes — <em>Costume Ready</em>, <em>Fullset</em>,
+           <em>Costest Done</em>, <em>Event Done</em> and
+           <em>Photoshoot Done</em> — each worth 20%.</p>
       </article>
 
       <article class="card">
@@ -169,11 +357,165 @@
            database first.</p>
       </article>
     </div>
+
+    <!-- THE MAPPING. Two columns of facts, not prose: the left side is what was
+         wrong in step 2, the right side is the specific thing in this app that
+         fixes it. A reader who disagrees with the mapping can point at the row
+         they disagree with, which is the point. -->
+    <h3 class="split-h" style="margin: 44px 0 18px;">Each answer, matched to the pain it answers</h3>
+    <div class="split" style="margin-bottom: 34px;">
+      <div class="panel">
+        <div class="panel-row"><span>Which lenses expire this month?</span><b>Per-vial expiry states + a scheduled Telegram warning</b></div>
+        <div class="panel-row"><span>Which outfit had the detachable sleeve?</span><b>A photo gallery on the record, tagged by character</b></div>
+        <div class="panel-row"><span>What's still out on loan?</span><b>Loan rows per item, surfaced on the dashboard</b></div>
+        <div class="panel-row"><span>What did that cost?</span><b>Buy and sell price columns on the same row</b></div>
+        <div class="panel-row"><span>Which prop belongs to this costume?</span><b>Props linked to a costume, shown on its card</b></div>
+        <div class="panel-row"><span>Who built the sword, and how do I reach them?</span><b>Maker corner with real <code>tel:</code> and <code>mailto:</code> links</b></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-row"><span>Warehouse vocabulary</span><b>Condition, storage location, ownership</b></div>
+        <div class="panel-row"><span>Where the data lives</span><b>One SQLite file you can copy</b></div>
+        <div class="panel-row"><span>Authentication</span><b>None, by design</b></div>
+        <div class="panel-row"><span>Moving machines</span><b>One <code>.zip</code>, both directions</b></div>
+        <div class="panel-row"><span>Who else can read it</span><b>Desktop: a per-launch token</b></div>
+        <div class="panel-row"><span>Everything else</span><b>Docker and <code>npm start</code>: your network</b></div>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>The operational reality, stated plainly.</b> The whole collection is
+      one SQLite file in a <code>data/</code> directory next to an
+      <code>uploads/</code> folder; back it up by copying that directory, or
+      move it by exporting the single <code>.zip</code>. There is no login, and
+      that is a decision rather than an omission: it is a single-user box you
+      run yourself, so the boundary is the network — trusted LAN, a tunnel, or
+      an authenticating reverse proxy — and the port should not be published to
+      the internet. The one exception is the desktop build, which mints a
+      256-bit token every launch and hands it to its own window and to nothing
+      else; <code>GET /</code> and <code>/health</code> stay open there by
+      design. Full detail on <a href="#desktop">the desktop section</a>.
+    </div>
+
+    <div class="note warn">
+      <b>Milestone percentages are not backfilled, on purpose.</b> Completion is
+      the plain count of ticked flags over five, and no flag implies any other
+      one. Rows that predate the fifth checkbox therefore read
+      <b>80%</b> rather than being rewritten to a number that was never
+      recorded — a wrong-but-tidy percentage is harder to notice than an
+      obviously stale one.
+    </div>
+  </div>
+</section>
+
+<!-- ============================ V1.1.0 RELEASE ============================ -->
+<!-- THE V1.1.0 SECTION, AND THE ONE PLACE THE LIST LIVES.
+
+     Every other section that has to mention a version links here instead of
+     repeating the list. Three rules the copy is built around:
+       1. It is IN PREPARATION. There is no v1.1.0 tag and no v1.1.0 installer,
+          so this section deliberately contains no download link and no tag
+          link — a dead link is worse than no link.
+       2. It is written for a COSPLAYER, not for whoever maintains the repo:
+          every item is an outcome you can see in the app, not a change to
+          the code. No
+          function names, no file paths, no status codes — a visitor cannot
+          act on any of those, and they date faster than the list itself.
+       3. It does not claim as new anything that shipped before v1.0.0:
+          contact-lens expiry alerts, Wishlist, Maker Corner, transfer
+          import/export and Electron packaging all predate the first release
+          and are listed in step 3 instead. -->
+<section class="section section-alt" id="release">
+  <div class="container">
+    <p class="eyebrow">Release</p>
+    <h2>v1.1.0 — in preparation, here's what's new</h2>
+    <p class="section-lede">
+      v1.1.0 is still being prepared: there is no tag, no installer and nothing
+      new to download yet, and this page deliberately offers no link to one. The
+      <a href="https://github.com/rielolita171/cosplay-cms/releases/download/v1.0.0/Cosplay-CMS-Setup-1.0.0.exe">v1.0.0
+      Windows installer</a> remains the current download until 1.1.0 ships.
+      Meanwhile, here is everything 1.1.0 will add — written as what you will
+      see, not as what changed underneath.
+    </p>
+
+    <div class="release-bar" role="status">
+      <span class="badge-dot" aria-hidden="true"></span>
+      <div>
+        <b>Start here: only the app itself can read your collection.</b>
+        Your desktop app now asks for a secret code before it shows anything, so
+        nobody else on your computer can read your collection. The two v1.0.0
+        installers that were already published do not have this — 1.1.0 is the
+        release that adds it.
+      </div>
+    </div>
+
+    <h3 class="split-h" style="margin: 34px 0 18px;">Getting things in faster</h3>
+    <ul class="release-list">
+        <li><span class="tick-ico" aria-hidden="true">✅</span><b>Brand and Fandom are now searchable boxes.</b> Type a few letters
+        instead of scrolling through every fandom, and a click can no
+        longer be lost.</li>
+        <li><span class="tick-ico" aria-hidden="true">✅</span><b>A Size filter</b> — XS through 3XL — sits beside the other
+        filters.</li>
+        <li><span class="tick-ico" aria-hidden="true">✅</span><b>“Reference Lists” is a proper button</b> beside the field,
+        instead of an entry hiding at the bottom of the fandom list.</li>
+        <li><span class="tick-ico" aria-hidden="true">✅</span><b>The card/list toggle tells the truth</b> when you switch tabs,
+        instead of naming the view you are not looking at.</li>
+    </ul>
+
+    <h3 class="split-h" style="margin: 34px 0 18px;">Your collection</h3>
+    <ul class="release-list">
+        <li><span class="tick-ico" aria-hidden="true">✅</span><b>Five milestone checkboxes on every costume</b> —
+        <em>Costume Ready</em>, <em>Fullset</em>, <em>Costest Done</em>,
+        <em>Event Done</em> and <em>Photoshoot Done</em>. Each one you tick
+        adds 20%, and none of them depends on the others, so owning only
+        the garment can now be recorded.</li>
+        <li><span class="tick-ico" aria-hidden="true">✅</span><b>Each milestone explains itself in plain words</b> under its
+        checkbox, so you are never guessing what a box means.</li>
+        <li><span class="tick-ico" aria-hidden="true">✅</span><b>Click any costume name for a big preview:</b> the cover photo, a
+        photo strip with a position counter, every detail in one table,
+        previous and next, and edit or delete from right there.</li>
+        <li><span class="tick-ico" aria-hidden="true">✅</span><b>You can fix a costume's name any time.</b> No more deleting the
+        whole entry — and its photos and prices with it — to correct a
+        typo.</li>
+    </ul>
+
+    <h3 class="split-h" style="margin: 34px 0 18px;">Look and feel</h3>
+    <ul class="release-list">
+        <li><span class="tick-ico" aria-hidden="true">✅</span><b>A real Cosplay CMS icon</b> in the app window, on the taskbar and
+        in the browser tab, instead of a generic default.</li>
+        <li><span class="tick-ico" aria-hidden="true">✅</span><b>The costume list header sits in one clean row again</b> instead of
+        stacking.</li>
+    </ul>
+
+    <h3 class="split-h" style="margin: 34px 0 18px;">Settings</h3>
+    <ul class="release-list">
+        <li><span class="tick-ico" aria-hidden="true">✅</span><b>A new “How this install is protected” panel</b> in Settings,
+        which reports the actual state of your install rather than
+        claiming it is protected.</li>
+    </ul>
+
+    <div class="note warn">
+      <b>One thing to know.</b> Costumes you recorded before this release will
+      show <b>80%</b> instead of 100% until you tick the new <em>Costume
+      Ready</em> box — nothing was lost, that box simply was never recorded for
+      them. And the desktop app no longer shows the allowlist editor (the list of
+      websites allowed to connect to it), because the app itself is now the lock;
+      that editor stays in the Docker and <code>npm start</code> setups, where
+      you still need it.
+    </div>
+
+    <div class="note">
+      <b>Not new in 1.1.0, just new to this list.</b> Contact-lens expiry
+      alerts, the Wishlist view, Maker Corner, moving the collection in one
+      file and the Windows app itself all shipped before v1.0.0. They are
+      described in <a href="#how">step 3</a> because they are part of what the
+      app is, not because they arrive here.
+    </div>
   </div>
 </section>
 
 <!-- ============================ SCREENSHOT GALLERY ============================ -->
-<section class="section section-alt" id="gallery">
+<section class="section" id="gallery">
   <div class="container">
     <p class="eyebrow">Screenshots</p>
     <h2>The app, tab by tab</h2>
@@ -185,15 +527,15 @@
 
     <div class="shots">
       <figure class="shot-card">
-        <img src="assets/screenshots/costumes.png" width="2880" height="1800" loading="lazy" decoding="async" alt="The Costumes tab: a responsive card grid of costume entries with thumbnails, fandom, character, brand, size, status badges and prices."]*">
+        <img src="assets/screenshots/costumes.png" width="2880" height="1800" loading="lazy" decoding="async" alt="The Costumes tab: a responsive card grid of costume entries with thumbnails, fandom, character, brand, size, status badges and prices.">
         <figcaption><b>Costumes</b> — card grid with status badges, prices and photo strips.</figcaption>
       </figure>
       <figure class="shot-card">
-        <img src="assets/screenshots/props.png" width="2880" height="1800" loading="lazy" decoding="async" alt="The Props &amp; Accessories tab listing weapons such as the Aquila Favonia, Clow Wand and Hysilens Dual Sword, with category and condition."]*">
+        <img src="assets/screenshots/props.png" width="2880" height="1800" loading="lazy" decoding="async" alt="The Props &amp; Accessories tab listing weapons such as the Aquila Favonia, Clow Wand and Hysilens Dual Sword, with category and condition.">
         <figcaption><b>Props &amp; Accessories</b> — weapons and accessories, linked back to their costume.</figcaption>
       </figure>
       <figure class="shot-card">
-        <img src="assets/screenshots/reference-lists.png" width="2880" height="1800" loading="lazy" decoding="async" alt="The Reference Lists tab with side-by-side Brands &amp; Makers and Fandoms panels, each with its own create form and search box."]*">
+        <img src="assets/screenshots/reference-lists.png" width="2880" height="1800" loading="lazy" decoding="async" alt="The Reference Lists tab with side-by-side Brands &amp; Makers and Fandoms panels, each with its own create form and search box.">
         <figcaption><b>Reference Lists</b> — brands and fandoms, each with an independent search.</figcaption>
       </figure>
     </div>
@@ -215,16 +557,21 @@
 
     <!-- The status strip is the single most important thing on this section, so
          it comes before the feature detail. `role="status"` is polite rather
-         than assertive: it must not interrupt a screen reader mid-sentence. -->
+         than assertive: it must not interrupt a screen reader mid-sentence.
+         It states the version facts and nothing else — the change list lives in
+         #release, and restating it here would give it two places to go stale. -->
     <div class="release-bar" role="status">
       <span class="badge-dot" aria-hidden="true"></span>
       <div>
-        <b>Released as v1.0.0 — read the caveats first.</b>
+        <b>v1.0.0 is the released version, and it is the only download.</b>
         The Windows installer is published at
-        <a href="https://github.com/rielolita171/cosplay-cms/releases/tag/v1.0.0">v1.0.0</a>,
-        but it is unsigned, macOS is not built at all, and there is
-        <b>no auto-updater</b> — nothing will update itself. Back up your data
-        directory before you trust it with the real one.
+        <a href="https://github.com/rielolita171/cosplay-cms/releases/tag/v1.0.0">v1.0.0</a>.
+        It is unsigned, macOS is not built at all, and there is
+        <b>no auto-updater</b> — nothing will update itself.
+        <b>v1.1.0 is being prepared</b> and has no tag and no installer yet; its
+        change list, including a security fix that applies retroactively to both
+        v1.0.0 installers, is in <a href="#release">the release section</a>.
+        Back up your data directory before you trust it with the real one.
       </div>
     </div>
 
@@ -289,7 +636,12 @@
       <div class="panel">
         <div class="panel-row"><span>Packaging</span><b>Electron 31 + electron-builder</b></div>
         <div class="panel-row"><span>Where data lives</span><b><code>userData</code> (outside the install)</b></div>
-        <div class="panel-row"><span>Server port</span><b>127.0.0.1 only</b></div>
+        <!-- Both ports, because they are genuinely different numbers and a
+             reader who has been on the web build will otherwise type 4001 into
+             a browser and find nothing listening. 4101 is the desktop build's
+             own loopback port; 4001 is the web and container default. -->
+        <div class="panel-row"><span>Desktop server port</span><b><code>127.0.0.1:4101</code></b></div>
+        <div class="panel-row"><span>Web &amp; Docker port</span><b><code>4001</code></b></div>
         <div class="panel-row"><span>Database driver</span><b>Bundled <code>sqlite3</code> 3.45.1</b></div>
         <div class="panel-row"><span>Signing</span><b>None</b></div>
       </div>
@@ -311,14 +663,22 @@
             your Docker volume or checkout. Move data with the export/import
             button, not by copying files.
           </li>
+          <li>
+            <b>The published v1.0.0 installers shipped with the token guard
+            off.</b> The guard module was latched by <code>require</code> caching
+            before the environment variable was set, so both installers ran
+            without it. It is fixed in <a href="#release">v1.1.0</a>, which is
+            still being prepared — so on v1.0.0 the CORS allowlist is the only
+            layer actually in force, and the boundary is your network.
+          </li>
         </ul>
       </div>
     </div>
 
     <div class="note">
       <b>Moving between the two is one button.</b> Settings → Move this
-      collection exports everything to a <code>.zip</code> and imports it on the
-      other machine, in either direction. The origin allowlist is the one thing
+      collection exports everything to a <code>.zip</code> and imports it on
+      the other machine, in either direction. The origin allowlist is the one thing
       that does <i>not</i> travel, because it describes the machine rather than
       the data: it is discarded when the destination is the desktop app, and the
       destination server keeps its own rules (with loopback added for itself) when
@@ -336,8 +696,10 @@
         URL.</b> CORS governs requests made <i>by</i> a page, not the address bar,
         and a top-level navigation carries no <code>Origin</code> header at all. So
         a page alone would not have been enough — anyone on that machine could
-        point a browser straight at the port. With both layers, a browser gets an
-        empty window and nothing else.
+        point a browser straight at <code>http://127.0.0.1:4101</code>. With both
+        layers, a browser gets an empty window and nothing else. Both layers ship
+        in <a href="#release">v1.1.0</a>; on the published v1.0.0 installer the
+        token layer is not running — see the caveat above.
       </p>
     </div>
 
@@ -347,7 +709,7 @@
       <i>not</i> stop whoever owns the computer — the database file is readable on
       disk, and no application-level lock can change that.
       <p style="margin: 10px 0 0;">
-        A Docker or <code>npm start</code> deployment gets <b>none</b> of this. It
+        A Docker or <code>npm start</code> install gets <b>none</b> of this. It
         has no login either, so the boundary there is your network: keep it on a
         trusted LAN or VPN, bind it to <code>127.0.0.1</code> behind a tunnel, or
         put an authenticating reverse proxy in front. Do not publish the port to
@@ -391,7 +753,6 @@
       <div class="panel-row"><span>Alerts</span><b>Telegram + n8n</b></div>
       <div class="panel-row"><span>Auth</span><b>None, by design</b></div>
       <div class="panel-row"><span>Runtime deps</span><b>8 — the zip writer is 350 lines of <code>zlib</code></b></div>
-      <div class="panel-row"><span>Tests</span><b>249 assertions, 4 suites, no runner</b></div>
     </div>
   </div>
 </section>
@@ -441,10 +802,12 @@ git clone https://github.com/rielolita171/cosplay-cms.git
 cd cosplay-cms
 npm install
 npm run electron:dev
+<span class="c-c">#   -&gt; serves on 127.0.0.1:4101</span>
 
 <span class="c-p"># or build a Windows installer</span>
 npm run electron:dist:win
-<span class="c-c">#   -&gt; dist/Cosplay CMS Setup 1.0.0.exe</span>
+<span class="c-c">#   -&gt; dist/Cosplay CMS Setup 1.1.0.exe</span>
+<span class="c-c">#      (the file name follows package.json)</span>
 
 <span class="c-p"># if ELECTRON_RUN_AS_NODE is set in your</span>
 <span class="c-p"># shell, unset it first</span>
@@ -487,7 +850,7 @@ unset ELECTRON_RUN_AS_NODE</code></pre>
 
 <footer class="footer">
   <div class="container footer-inner">
-    <span>Cosplay CMS — built for one cosplayer, shared freely.</span>
+    <span>Cosplay CMS — built from one collection, shared for many.</span>
     <span><a href="https://github.com/rielolita171/cosplay-cms" target="_blank" rel="noopener">rielolita171/cosplay-cms</a></span>
   </div>
 </footer>
